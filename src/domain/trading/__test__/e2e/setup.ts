@@ -59,6 +59,30 @@ function isTcpReachable(host: string, port: number, timeoutMs = 2000): Promise<b
 
 // ==================== Lazy singleton ====================
 
+/**
+ * Per-broker init budget. Prevents one stuck testnet from blocking the
+ * whole serial setup (Hyperliquid testnet outages have burned ~5min on
+ * the CCXT retry/backoff ladder in the past). Tests with longer-than-30s
+ * legitimate init should expose their own setup hook rather than raising
+ * this ceiling.
+ */
+const BROKER_INIT_TIMEOUT_MS = 30_000
+
+function initWithTimeout(broker: IBroker, ms: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error(`broker.init timed out after ${ms}ms`))
+    }, ms)
+    broker.init().then(
+      () => { if (!settled) { settled = true; clearTimeout(timer); resolve() } },
+      (err) => { if (!settled) { settled = true; clearTimeout(timer); reject(err) } },
+    )
+  })
+}
+
 let cached: Promise<TestAccount[]> | null = null
 
 /**
@@ -97,7 +121,7 @@ async function initAll(): Promise<TestAccount[]> {
     const broker = createBroker(acct)
 
     try {
-      await broker.init()
+      await initWithTimeout(broker, BROKER_INIT_TIMEOUT_MS)
     } catch (err) {
       console.warn(`e2e setup: ${acct.id} init failed, skipping:`, err)
       continue
