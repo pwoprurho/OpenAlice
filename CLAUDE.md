@@ -23,6 +23,10 @@ pnpm test           # Unit tests
 
 `pnpm build` uses tsup which is lenient — `tsc --noEmit` catches strict type errors that tsup ignores.
 
+### Cross-platform note
+
+Workspace bootstrap scripts (`src/workspaces/templates/*/bootstrap.sh`) are bash-based. On Windows they require `bash` from Git for Windows (default install) or WSL2. `workspace-creator.ts` already platform-branches the spawn so the same script paths work on win32 — when adding a new template, write bash as usual, but **don't** add POSIX-only commands without checking they ship with Git for Windows's bundled MSYS env (sed/cp/mkdir/basename/printf/source/[[ ]] all work; obscure tools like `jq` do not). See README's *Windows* section for the user-facing story.
+
 ## Subsystem guides
 
 Some parts of this codebase are structured in ways that aren't obvious from
@@ -295,10 +299,60 @@ need real fix-ups (that's the cost of an invasive refactor — and
 the reason you isolated it in the first place).
 
 **Decision rule for the next session that starts work:** if `master`
-is currently ahead of `dev` (because a refactor branch just landed
-there), do `git checkout dev && git merge origin/master` *before*
-starting any new feature work. Otherwise your new commits will land
-on a stale baseline.
+is currently ahead of `dev`, do `git checkout dev && git merge origin/master`
+*before* starting any new feature work. Otherwise your new commits
+will land on a stale baseline.
+
+Common reasons `master` would be ahead of `dev`:
+- An invasive refactor branch just landed (above flow).
+- A Claude Code cloud session opened a `claude/<short-desc>-XXXXX`
+  branch and merged it straight to master without going through `dev`
+  — typically for a time-sensitive fix the cloud agent shipped while
+  the human wasn't around (see next subsection).
+
+When the side-channel was content-bearing (not just a refactor) **dev
+is genuinely behind master in code**, not just in merge-commit objects.
+Skipping the sync lands new dev commits on stale code.
+
+One quirk to recognize: a single `git merge origin/master` into dev
+often surfaces a Discord/webhook notification like *"N new commits on
+dev"* where N is much larger than what the side branch actually added.
+Most of those N are **historical PR-merge commits** that have been
+accumulating on master for weeks (each dev → master PR creates a
+merge commit that exists only on master). The sync drags them onto
+dev in one go. The webhook reports commit-object count, not
+content-delta. Expected, not a sign anything's broken.
+
+### Emergency hotfix via cloud `claude/*` side branch
+
+A Claude Code cloud session can open a branch named
+`claude/<short-desc>-XXXXX`, PR straight to master, and merge it
+without touching `dev`. This is the right move for **genuine
+emergencies** the user isn't around to handle on dev (a runtime
+error blocking users, a CORS misconfiguration, a hotfix that can't
+wait for the next dev → master cycle). The cloud session uses it
+because:
+
+- Cloud sessions don't see in-flight local dev state and shouldn't
+  destabilize it
+- The fix is small and reviewable in isolation
+- Waiting for the user to bounce dev for a hotfix is silly when the
+  cloud agent already has a working tree
+
+**What this means for the next local session:**
+
+1. `git fetch origin && git log --oneline origin/dev..origin/master`
+   shows commits master has that dev doesn't — if there's anything
+   from a `claude/*` branch, dev needs the sync.
+2. `git checkout dev && git merge origin/master && git push origin dev`
+   (clean FF in typical case).
+3. Resume normal work on dev.
+
+**What this means for the cloud session deciding whether to side-branch:**
+default to opening a dev → master PR like everyone else. Only branch
+straight to master for fixes that meet *both*: (a) production-impacting
+or user-blocking, and (b) sub-100-line scope reviewable end-to-end in
+one sitting. Anything bigger or speculative goes through dev.
 
 **Parallel work happens in the cloud, not in local worktrees.** For a
 project this size, spinning up multiple local worktrees costs more

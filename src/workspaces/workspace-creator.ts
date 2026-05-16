@@ -170,14 +170,36 @@ interface RunResult {
   readonly exitCode: number | null;
 }
 
-function runScript(
+const WINDOWS_BASH_HINT =
+  'hint: bash not found on PATH. Install Git for Windows (accept the default ' +
+  '"Use Git from the Windows Command Prompt" option) from https://gitforwindows.org/, ' +
+  'or run OpenAlice from inside WSL2.';
+
+/**
+ * Run a bootstrap script.
+ *
+ * On macOS / Linux the script is invoked directly — the kernel reads the
+ * `#!/usr/bin/env bash` shebang and launches bash. On Windows the kernel
+ * doesn't read shebangs and there's no native bash, so we invoke bash
+ * explicitly with the script as its first argument. This requires `bash`
+ * to be on PATH, which Git for Windows provides under its default install
+ * options (WSL also works if OpenAlice itself is run from inside WSL).
+ *
+ * Exported for unit testing — the platform branch needs coverage that
+ * doesn't depend on which OS the tests happen to run on.
+ */
+export function runScript(
   script: string,
   args: readonly string[],
   extraEnv: { [key: string]: string },
   timeoutMs: number,
 ): Promise<RunResult> {
+  const isWindows = process.platform === 'win32';
+  const cmd = isWindows ? 'bash' : script;
+  const cmdArgs = isWindows ? [script, ...args] : args;
+
   return new Promise((resolve) => {
-    const child = spawn(script, args, {
+    const child = spawn(cmd, cmdArgs, {
       env: { ...process.env, ...extraEnv },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -200,10 +222,15 @@ function runScript(
 
     child.on('error', (err) => {
       clearTimeout(timer);
+      const errMsg = (err as Error).message;
+      // ENOENT on Windows when we tried `bash` means Git Bash / WSL bash
+      // isn't on PATH — surface the install hint right next to the failure.
+      const hinted =
+        isWindows && /ENOENT/i.test(errMsg) ? `${errMsg}\n${WINDOWS_BASH_HINT}` : errMsg;
       resolve({
         ok: false,
         stdout: Buffer.concat(stdoutChunks).toString('utf8'),
-        stderr: `${(err as Error).message}\n${Buffer.concat(stderrChunks).toString('utf8')}`,
+        stderr: `${hinted}\n${Buffer.concat(stderrChunks).toString('utf8')}`,
         exitCode: null,
       });
     });
