@@ -56,6 +56,9 @@ importers:
       '@traderalice/opentypebb':
         specifier: workspace:*
         version: link:packages/opentypebb
+      '@traderalice/uta-protocol':
+        specifier: workspace:*
+        version: link:packages/uta-protocol
       ai:
         specifier: ^6.0.86
         version: 6.0.86(zod@4.3.6)
@@ -210,8 +213,8 @@ importers:
   packages/uta-protocol:
     dependencies:
       zod:
-        specifier: ^3.24.2
-        version: 3.25.76
+        specifier: ^4.3.6
+        version: 4.3.6
     devDependencies:
       '@types/node':
         specifier: ^22.13.4

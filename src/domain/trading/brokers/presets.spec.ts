@@ -26,9 +26,9 @@ import {
   LONGBRIDGE_PRESET,
   CCXT_CUSTOM_PRESET,
   SIMULATOR_PRESET,
-} from './preset-catalog.js'
+  BUILTIN_BROKER_PRESETS,
+} from '@traderalice/uta-protocol'
 import { BROKER_ENGINE_REGISTRY } from './registry.js'
-import { BUILTIN_BROKER_PRESETS } from './presets.js'
 
 // ==================== Sample data per preset ====================
 

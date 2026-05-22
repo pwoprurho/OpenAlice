@@ -17,7 +17,7 @@ import { IbkrBroker } from './ibkr/IbkrBroker.js'
 import { LeverupBroker } from './others/leverup/index.js'
 import { LongbridgeBroker } from './longbridge/index.js'
 import { MockBroker } from './mock/MockBroker.js'
-import type { BrokerEngine } from './preset-catalog.js'
+import type { BrokerEngine } from '@traderalice/uta-protocol'
 
 /** Minimal engine entry: just enough to validate + instantiate. */
 export interface BrokerEngineEntry {

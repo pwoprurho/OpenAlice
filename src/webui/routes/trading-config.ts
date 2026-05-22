@@ -5,8 +5,12 @@ import {
   utaConfigSchema, wipeUTATradingData,
 } from '../../core/config.js'
 import { createBroker } from '../../domain/trading/brokers/factory.js'
-import { BUILTIN_BROKER_PRESETS } from '../../domain/trading/brokers/presets.js'
-import { deriveUtaId, getBrokerPreset, mintInstanceId } from '../../domain/trading/brokers/preset-catalog.js'
+import {
+  BUILTIN_BROKER_PRESETS,
+  deriveUtaId,
+  getBrokerPreset,
+  mintInstanceId,
+} from '@traderalice/uta-protocol'
 import { triggerUTARestart } from '../../services/uta-supervisor/restart-trigger.js'
 
 /** Fire-and-forget UTA restart after a config mutation. Logs but doesn't

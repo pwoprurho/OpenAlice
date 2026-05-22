@@ -21,7 +21,7 @@ vi.mock('../../core/config.js', async () => {
 
 import { createTradingConfigRoutes } from './trading-config.js'
 import type { EngineContext } from '../../core/types.js'
-import { deriveUtaId, OKX_PRESET, SIMULATOR_PRESET } from '../../domain/trading/brokers/preset-catalog.js'
+import { deriveUtaId, OKX_PRESET, SIMULATOR_PRESET } from '@traderalice/uta-protocol'
 
 // ==================== Test fixtures ====================
 

@@ -11,7 +11,7 @@ import type { AccountCapabilities, BrokerHealth, BrokerHealthInfo } from './brok
 import { CcxtBroker } from './brokers/ccxt/CcxtBroker.js'
 import { createCcxtProviderTools } from './brokers/ccxt/ccxt-tools.js'
 import { createBroker } from './brokers/factory.js'
-import { getBrokerPreset } from './brokers/preset-catalog.js'
+import { getBrokerPreset } from '@traderalice/uta-protocol'
 import { UnifiedTradingAccount } from './UnifiedTradingAccount.js'
 import { loadGitState, createGitPersister } from './git-persistence.js'
 import { readUTAsConfig, type UTAConfig } from '../../core/config.js'

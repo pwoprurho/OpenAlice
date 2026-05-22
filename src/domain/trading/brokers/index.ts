@@ -15,11 +15,22 @@ export type {
 // Factory
 export { createBroker } from './factory.js'
 
-// Presets (the user-facing surface — many presets, few engines)
-export { BROKER_PRESET_CATALOG, getBrokerPreset, isPaperPreset } from './preset-catalog.js'
-export type { BrokerPresetDef, BrokerEngine, ModeOption, SubtitleSegment } from './preset-catalog.js'
-export { BUILTIN_BROKER_PRESETS } from './presets.js'
-export type { SerializedBrokerPreset } from './presets.js'
+// Presets (the user-facing surface — many presets, few engines) — re-export
+// from the shared `@traderalice/uta-protocol` package so existing consumers
+// importing `from '@/domain/trading/brokers/index.js'` keep working.
+export {
+  BROKER_PRESET_CATALOG,
+  getBrokerPreset,
+  isPaperPreset,
+  BUILTIN_BROKER_PRESETS,
+} from '@traderalice/uta-protocol'
+export type {
+  BrokerPresetDef,
+  BrokerEngine,
+  ModeOption,
+  SubtitleSegment,
+  SerializedBrokerPreset,
+} from '@traderalice/uta-protocol'
 
 // Alpaca
 export { AlpacaBroker } from './alpaca/index.js'

@@ -12,7 +12,7 @@ import net from 'node:net'
 import { readUTAsConfig, type UTAConfig } from '@/core/config.js'
 import type { IBroker } from '../../brokers/types.js'
 import { createBroker } from '../../brokers/factory.js'
-import { getBrokerPreset, isPaperPreset, type BrokerEngine } from '../../brokers/preset-catalog.js'
+import { getBrokerPreset, isPaperPreset, type BrokerEngine } from '@traderalice/uta-protocol'
 import { CCXT_CREDENTIAL_FIELDS } from '../../brokers/ccxt/ccxt-types.js'
 
 export interface TestAccount {
