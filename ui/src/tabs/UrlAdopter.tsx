@@ -31,8 +31,13 @@ export function UrlAdopter() {
         <Route path="/" element={<Navigate to="/inbox" replace />} />
 
         {/* Activities */}
-        <Route path="/chat" element={<AdoptStatic spec={{ kind: 'chat', params: { channelId: 'default' } }} />} />
-        <Route path="/chat/:channelId" element={<AdoptChat />} />
+        {/* Traditional Chat is now in the ActivityBar's Legacy section —
+            redirect the bare /chat and /chat/:channelId URLs to /inbox so
+            UrlSync's writes from a previously-focused chat tab don't drag
+            users back into the legacy view on every reload. Traditional
+            Chat itself stays reachable via ActivityBar → Legacy. */}
+        <Route path="/chat" element={<Navigate to="/inbox" replace />} />
+        <Route path="/chat/:channelId" element={<Navigate to="/inbox" replace />} />
         <Route path="/portfolio" element={<AdoptStatic spec={{ kind: 'portfolio', params: {} }} />} />
         <Route path="/automation" element={<Navigate to="/automation/flow" replace />} />
         <Route path="/automation/:section" element={<AdoptAutomation />} />
@@ -97,12 +102,6 @@ export function UrlAdopter() {
  */
 function AdoptStatic({ spec }: { spec: ViewSpec }) {
   useAdopt(spec)
-  return null
-}
-
-function AdoptChat() {
-  const { channelId = 'default' } = useParams<{ channelId?: string }>()
-  useAdopt({ kind: 'chat', params: { channelId } })
   return null
 }
 

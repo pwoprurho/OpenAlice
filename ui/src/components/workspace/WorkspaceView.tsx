@@ -7,6 +7,8 @@ import { FilesPanel } from './FilesPanel';
 import { GitPanel } from './GitPanel';
 import { ResumeCta, prefixOf, relativeTime } from './ResumeCta';
 import { TerminalView, type KeyMap } from './Terminal';
+import { useIsDesktop } from '../../live/use-is-desktop';
+import { useWorkspaceSidePanels } from '../../live/workspace-side-panels';
 
 export interface WorkspaceViewProps {
   readonly wsId: string;
@@ -74,8 +76,19 @@ export function WorkspaceView(props: WorkspaceViewProps): ReactElement {
     props.activeRecord.state === 'paused';
   const showEmptyCta = props.sessionId === null;
 
+  // Side panel visibility. User-level prefs control which of git/files
+  // render; mobile gets a separate kill-switch so the 360px right column
+  // doesn't eat half a phone screen.
+  const isDesktop = useIsDesktop();
+  const sidePrefs = useWorkspaceSidePanels();
+  const mobileSuppresses = !isDesktop && sidePrefs.autoHideMobile;
+  const showGit = sidePrefs.git && !mobileSuppresses;
+  const showFiles = sidePrefs.files && !mobileSuppresses;
+  const showAside = showGit || showFiles;
+  const viewClass = `workspace-view${showAside ? '' : ' has-no-side'}`;
+
   return (
-    <div className="workspace-view">
+    <div className={viewClass}>
       <div className="workspace-terminal">
         {showEmptyCta && (
           <EmptyState
@@ -110,10 +123,12 @@ export function WorkspaceView(props: WorkspaceViewProps): ReactElement {
             );
           })}
       </div>
-      <aside className="workspace-side">
-        <GitPanel wsId={props.wsId} />
-        <FilesPanel wsId={props.wsId} />
-      </aside>
+      {showAside && (
+        <aside className="workspace-side">
+          {showGit && <GitPanel wsId={props.wsId} />}
+          {showFiles && <FilesPanel wsId={props.wsId} />}
+        </aside>
+      )}
     </div>
   );
 }
