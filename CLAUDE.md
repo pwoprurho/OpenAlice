@@ -11,7 +11,8 @@ process (UTA). All persisted state lives as files — no database.
 ## Quick Start
 
 ```bash
-pnpm install
+pnpm install                                       # Local dev (full, ~1.7G)
+pnpm install --filter='!@traderalice/desktop'      # Cloud / agent sessions (~748M, skips Electron shell)
 pnpm dev          # Dev: Guardian spawns UTA (47333) + Alice (47331) + Vite (5173)
 pnpm build        # Production: turbo (packages + UI + services/uta) + tsup (Alice)
 pnpm test         # Vitest across the monorepo (src/, packages/, services/, ui/)
