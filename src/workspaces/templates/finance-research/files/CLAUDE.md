@@ -32,7 +32,7 @@ Don't cross the streams: don't quote yfinance to make a UTA order routing call. 
 
 ## MCP wiring
 
-`.mcp.json` points at OpenAlice's MCP server (`http://127.0.0.1:3001/mcp` by default, or `$OPENALICE_MCP_URL`). The full OpenAlice tool surface — trading, market data, news, brain, indicators — is available alongside the bundled skills.
+`.mcp.json` points at OpenAlice's MCP server (`http://127.0.0.1:47332/mcp` by default, or `$OPENALICE_MCP_URL`). The full OpenAlice tool surface — trading, market data, news, indicators — is available alongside the bundled skills.
 
 To verify on first attach:
 

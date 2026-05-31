@@ -2,11 +2,11 @@
   "mcpServers": {
     "openalice": {
       "type": "streamable-http",
-      "url": "${OPENALICE_MCP_URL:-http://127.0.0.1:3001/mcp}"
+      "url": "${OPENALICE_MCP_URL:-http://127.0.0.1:47332/mcp}"
     },
     "openalice-workspace": {
       "type": "streamable-http",
-      "url": "${OPENALICE_MCP_URL:-http://127.0.0.1:3001/mcp}/__WS_ID__"
+      "url": "${OPENALICE_MCP_URL:-http://127.0.0.1:47332/mcp}/__WS_ID__"
     }
   }
 }

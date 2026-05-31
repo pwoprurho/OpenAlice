@@ -1,6 +1,6 @@
 {
   "displayName": "Chat",
   "groupOrder": 10,
-  "description": "Chat workspace wired to OpenAlice's MCP server — full trading/market/brain tool surface available to the agent.",
+  "description": "Chat workspace wired to OpenAlice's MCP server — full trading/market tool surface available to the agent.",
   "defaultAgents": ["claude", "codex"]
 }

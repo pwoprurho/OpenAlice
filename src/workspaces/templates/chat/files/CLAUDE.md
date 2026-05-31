@@ -1,9 +1,9 @@
 # Chat workspace
 
 This workspace is wired to OpenAlice via MCP. `.mcp.json` points at
-OpenAlice's MCP server (`http://127.0.0.1:3001/mcp` by default, or
+OpenAlice's MCP server (`http://127.0.0.1:47332/mcp` by default, or
 `$OPENALICE_MCP_URL`). The full OpenAlice tool surface — trading, market
-data, news, brain, indicators — is available from inside here.
+data, news, indicators — is available from inside here.
 
 To verify the wiring on first attach:
 
