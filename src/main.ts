@@ -357,7 +357,7 @@ async function main() {
   // ==================== Engine Context ====================
 
   const ctx: EngineContext = {
-    config, inboxStore, router, eventLog, toolCallLog, heartbeat, cronEngine, toolCenter,
+    config, inboxStore, entityStore, router, eventLog, toolCallLog, heartbeat, cronEngine, toolCenter,
     listenerRegistry,
     fire: createEventBus(eventLog),
     bbEngine: getSDKExecutor(),

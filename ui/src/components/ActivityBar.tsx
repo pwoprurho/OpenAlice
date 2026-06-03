@@ -1,4 +1,4 @@
-import { type LucideIcon, MessageSquare, Inbox, LineChart, GitBranch, BarChart3, Newspaper, Zap, Settings, Code2, TerminalSquare, ChevronDown, Info } from 'lucide-react'
+import { type LucideIcon, MessageSquare, Inbox, Telescope, LineChart, GitBranch, BarChart3, Newspaper, Zap, Settings, Code2, TerminalSquare, ChevronDown, Info } from 'lucide-react'
 import { useState } from 'react'
 import { type Page } from '../App'
 import { useWorkspace } from '../tabs/store'
@@ -14,6 +14,7 @@ function activitySectionFor(page: Page): ActivitySection {
   switch (page) {
     case 'chat':                 return 'chat'
     case 'inbox':                return 'inbox'
+    case 'tracked':              return 'tracked'
     case 'workspaces':           return 'workspaces'
     case 'trading-as-git':       return 'trading-as-git'
     case 'settings':             return 'settings'
@@ -91,6 +92,7 @@ const NAV_SECTIONS: NavSection[] = [
     sectionLabel: '',
     items: [
       { page: 'inbox',      label: 'Inbox',      icon: Inbox, defaultTab: { kind: 'inbox', params: {} } },
+      { page: 'tracked',    label: 'Tracked',    icon: Telescope, defaultTab: { kind: 'tracked', params: {} } },
       { page: 'chat',       label: 'Chat',       icon: MessageSquare },
       { page: 'workspaces', label: 'Workspaces', icon: TerminalSquare },
       { page: 'market',     label: 'Market',     icon: BarChart3 },

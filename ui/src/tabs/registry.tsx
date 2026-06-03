@@ -16,6 +16,7 @@ import { NewsCollectorPage } from '../pages/NewsCollectorPage'
 import { UTADetailPage } from '../pages/UTADetailPage'
 import { DevPage } from '../pages/DevPage'
 import { InboxPage } from '../pages/InboxPage'
+import { TrackedPage } from '../pages/TrackedPage'
 import { WorkspaceListPage } from '../pages/WorkspaceListPage'
 import { WorkspacePage } from '../pages/WorkspacePage'
 import { TemplateCatalogPage } from '../pages/TemplateCatalogPage'
@@ -160,6 +161,13 @@ const inboxModule: ViewModule<'inbox'> = {
   Component: InboxPage,
 }
 
+const trackedModule: ViewModule<'tracked'> = {
+  kind: 'tracked',
+  title: () => 'Tracked',
+  toUrl: () => '/tracked',
+  Component: () => <TrackedPage />,
+}
+
 const workspaceListModule: ViewModule<'workspace-list'> = {
   kind: 'workspace-list',
   title: () => 'Workspaces',
@@ -212,6 +220,7 @@ export const VIEWS = {
   'uta-detail': utaDetailModule,
   dev: devModule,
   inbox: inboxModule,
+  tracked: trackedModule,
   'workspace-list': workspaceListModule,
   workspace: workspaceModule,
   'template-catalog': templateCatalogModule,

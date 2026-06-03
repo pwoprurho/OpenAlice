@@ -12,6 +12,7 @@ import type { ToolCenter } from './tool-center.js'
 import type { ListenerRegistry } from './listener-registry.js'
 import type { EventBus } from './event-bus.js'
 import type { IInboxStore } from './inbox-store.js'
+import type { IEntityStore } from './entity-store.js'
 
 export type { Config, WebChannel }
 
@@ -37,6 +38,10 @@ export interface EngineContext {
    *  autonomous trigger sources (cron / task), which append directly
    *  under a synthetic `automation:<source>` workspace id. */
   inboxStore: IInboxStore
+  /** Durable cross-workspace tracked-index (assets / topics). Written by
+   *  workspace agents via the entity_upsert MCP tool; read by the Tracked
+   *  tab. Notes point at entities with `[[name]]` links. */
+  entityStore: IEntityStore
   /** Provider router — resolves the active profile to an AIProvider and
    *  drives one-shot / test calls. The in-process agent loop (formerly
    *  AgentCenter) is retired; the model loop now runs inside the native

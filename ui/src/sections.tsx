@@ -22,6 +22,7 @@
 import type { ComponentType } from 'react'
 import { ChatChannelListContainer } from './components/ChatChannelListContainer'
 import { InboxSidebar } from './components/InboxSidebar'
+import { TrackedSidebar } from './components/TrackedSidebar'
 import { WorkspacesSidebar } from './components/workspace/WorkspacesSidebar'
 import { PushApprovalPanel } from './components/PushApprovalPanel'
 import { SettingsCategoryList } from './components/SettingsCategoryList'
@@ -52,6 +53,10 @@ const SECTION_BY_KEY: Record<ActivitySection, SidebarSection> = {
   inbox: {
     title: 'Inbox',
     Secondary: InboxSidebar,
+  },
+  tracked: {
+    title: 'Tracked',
+    Secondary: TrackedSidebar,
   },
   workspaces: {
     title: 'Workspaces',

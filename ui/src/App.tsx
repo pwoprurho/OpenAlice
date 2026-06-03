@@ -17,7 +17,7 @@ import { getFocusedTab } from './tabs/types'
  * Each maps to one or more tab kinds via tabs/registry.ts (defaultSpecForActivity).
  */
 export type Page =
-  | 'chat' | 'inbox' | 'workspaces' | 'portfolio' | 'news' | 'automation' | 'market'
+  | 'chat' | 'inbox' | 'tracked' | 'workspaces' | 'portfolio' | 'news' | 'automation' | 'market'
   | 'trading-as-git'
   | 'settings' | 'dev'
 

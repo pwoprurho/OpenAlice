@@ -27,6 +27,7 @@ export type ViewSpec =
   | { kind: 'uta-detail';     params: { id: string } }
   | { kind: 'dev';            params: { tab: 'tools' | 'snapshots' | 'logs' | 'simulator' } }
   | { kind: 'inbox';               params: Record<string, never> }
+  | { kind: 'tracked';             params: Record<string, never> }
 
 export type ViewKind = ViewSpec['kind']
 
@@ -43,6 +44,7 @@ export type ViewKind = ViewSpec['kind']
 export type ActivitySection =
   | 'chat'
   | 'inbox'
+  | 'tracked'
   | 'workspaces'
   | 'trading-as-git'
   | 'settings'

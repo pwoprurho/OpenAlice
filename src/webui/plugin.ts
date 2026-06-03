@@ -22,6 +22,7 @@ import { createPersonaRoutes } from './routes/persona.js'
 import { createNewsRoutes } from './routes/news.js'
 import { createMarketRoutes } from './routes/market.js'
 import { createInboxRoutes } from './routes/inbox.js'
+import { createEntityRoutes } from './routes/entities.js'
 import { createVersionRoutes } from './routes/version.js'
 import { createAuthRoutes } from './routes/auth.js'
 import { createAuthMiddleware } from './middleware/auth.js'
@@ -215,6 +216,13 @@ export class WebPlugin implements Plugin {
     })
     if (this.workspaceServiceRef) this.workspaceServiceRef.current = this.workspaceService
     app.route('/api/workspaces', createWorkspaceRoutes(this.workspaceService))
+    // Tracked entities — read surface for the Tracked tab. Mounted here (not
+    // with the other /api/* routes above) because backlink scanning needs the
+    // workspace registry, which only exists once workspaceService is created.
+    app.route(
+      '/api/entities',
+      createEntityRoutes({ entityStore: ctx.entityStore, registry: this.workspaceService.registry }),
+    )
 
     // ==================== Mount opentypebb (market data HTTP) ====================
     // opentypebb is Alice's first-class market-data package; its router is

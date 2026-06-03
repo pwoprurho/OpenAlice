@@ -64,6 +64,9 @@ export function UrlAdopter() {
         {/* Inbox (workspace-anchored, Linear-style) */}
         <Route path="/inbox" element={<AdoptStatic spec={{ kind: 'inbox', params: {} }} />} />
 
+        {/* Tracked (entity index) */}
+        <Route path="/tracked" element={<AdoptStatic spec={{ kind: 'tracked', params: {} }} />} />
+
         {/* Workspaces */}
         <Route path="/workspaces" element={<AdoptStatic spec={{ kind: 'workspace-list', params: {} }} />} />
         {/* Template catalog routes must come before /workspaces/:wsId so the
@@ -206,6 +209,7 @@ function SetSidebarOnly({ section }: { section: import('./types').ActivitySectio
 function specToSection(spec: ViewSpec): ActivitySection {
   switch (spec.kind) {
     case 'inbox':              return 'inbox'
+    case 'tracked':            return 'tracked'
     case 'workspace':
     case 'workspace-list':
     case 'template-catalog':
