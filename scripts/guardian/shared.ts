@@ -21,7 +21,7 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { watch, mkdir } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, basename } from 'node:path'
 import { probeFreePort } from '../probe-port.js'
 
 export interface GuardianPorts {
@@ -326,9 +326,4 @@ export async function startFlagWatcher(opts: FlagWatchOpts): Promise<() => void>
   })().catch(() => { /* swallow — already logged */ })
 
   return () => abort.abort()
-}
-
-function basename(p: string): string {
-  const i = p.lastIndexOf('/')
-  return i >= 0 ? p.slice(i + 1) : p
 }

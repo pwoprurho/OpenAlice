@@ -202,22 +202,23 @@ async function main(): Promise<void> {
     console.log('✓ UTA restarted cleanly (startedAt changed)')
     summary(`✅ UTA restart on ${process.platform}: clean re-spawn.`)
   } else {
-    console.warn('⚠️  UTA did NOT re-spawn within timeout after restart flag — likely an orphaned old UTA holding the port (Windows shell-wrapper kill). This is the known option-A gap; trigger for tree-kill / option B.')
-    summary(`⚠️ UTA restart on ${process.platform}: did not re-spawn (suspected orphan holding port).`)
+    console.warn('⚠️  UTA did NOT re-spawn within timeout after the restart flag. Either the flag watcher never fired or the old UTA was not reaped (port still held). This is the broker-config restart path — see scripts/guardian/shared.ts startFlagWatcher + UTAController.restart.')
+    summary(`⚠️ UTA restart on ${process.platform}: did not re-spawn — broker-config restart path is broken.`)
   }
 
   // ── SOFT: teardown orphan check ───────────────────────────
-  // Ask Guardian to shut down, then see whether the ports actually freed.
-  // A lingering bound port after shutdown == orphaned grandchild process.
+  // Tree-kill the whole stack, then check the ports actually freed. A port
+  // still bound after a tree-kill means a process escaped the tree (e.g. a
+  // shell-wrapped grandchild detached from its wrapper on Windows).
   console.log('\n— teardown orphan check —')
-  try { child.kill() } catch { /* noop */ }
-  await sleep(6_000)
+  forceCleanup()
+  await sleep(5_000)
   const stillUta = await portBound(utaPort)
   const stillWeb = await portBound(webPort)
   if (stillUta || stillWeb) {
     const which = [stillUta && `UTA:${utaPort}`, stillWeb && `Alice:${webPort}`].filter(Boolean).join(', ')
-    console.warn(`⚠️  Ports still bound after shutdown (orphan processes): ${which}`)
-    summary(`⚠️ Teardown orphans on ${process.platform}: ${which} still bound.`)
+    console.warn(`⚠️  Ports still bound after tree-kill (a process escaped the tree): ${which}`)
+    summary(`⚠️ Teardown on ${process.platform}: ${which} still bound after tree-kill.`)
   } else {
     console.log('✓ Clean teardown — no orphaned ports')
     summary(`✅ Teardown on ${process.platform}: clean, no orphans.`)
