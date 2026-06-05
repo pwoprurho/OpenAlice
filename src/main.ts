@@ -27,6 +27,7 @@ import { OpenBBCommodityClient } from './domain/market-data/client/openbb-api/co
 import { OpenBBEconomyClient } from './domain/market-data/client/openbb-api/economy-client.js'
 import { createMarketSearchTools } from './tool/market.js'
 import { createAnalysisTools } from './tool/analysis.js'
+import { createSectorRotationTools } from './tool/sector-rotation.js'
 import { createEconomyTools } from './tool/economy.js'
 import { SessionStore } from './core/session.js'
 import { createInboxStore } from './core/inbox-store.js'
@@ -207,6 +208,7 @@ async function main() {
     toolCenter.register(createNewsArchiveTools(newsStore), 'news')
   }
   toolCenter.register(createAnalysisTools(equityClient, cryptoClient, currencyClient, commodityClient), 'analysis')
+  toolCenter.register(createSectorRotationTools(equityClient), 'sector-rotation')
   toolCenter.register(createEconomyTools(economyClient, commodityClient), 'economy')
 
   console.log(`tool-center: ${toolCenter.list().length} tools registered`)
