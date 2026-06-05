@@ -81,6 +81,7 @@ export const opencodeAdapter: CliAdapter = {
     // post-spawn, captures the id, persists it as resumeHint, and
     // `opencode --session <id>` (composeCommand) resumes by id.
     transcriptDiscovery: 'subprocess',
+    headless: true,
   },
 
   composeCommand(_base: readonly string[], ctx: SpawnContext): readonly string[] {
@@ -91,6 +92,15 @@ export const opencodeAdapter: CliAdapter = {
     if (ctx.resume === undefined) return head;
     if (ctx.resume === 'last') return [...head, '--continue'];
     return [...head, '--session', ctx.resume.sessionId];
+  },
+
+  // Headless: `opencode run <prompt>` is non-interactive and exits at the turn
+  // boundary. MCP rides OPENCODE_CONFIG_CONTENT (composeEnv, same as
+  // interactive) so the agent reaches inbox_push; prompt is the trailing
+  // positional after a `--` end-of-options terminator (so a `-`-leading prompt
+  // isn't read as a flag).
+  composeHeadlessCommand(_base: readonly string[], _ctx: SpawnContext, prompt: string): readonly string[] {
+    return ['opencode', 'run', '--format', 'json', '--', prompt];
   },
 
   composeEnv(ctx: SpawnContext): Record<string, string> {

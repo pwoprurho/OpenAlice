@@ -63,6 +63,7 @@ export const piAdapter: CliAdapter = {
     // at spawn and records it immediately — by-id resume with no disk-watching,
     // immune to pi's lazy transcript write + the PI_CODING_AGENT_DIR redirect.
     assignsSessionId: true,
+    headless: true,
   },
 
   composeCommand(_base: readonly string[], ctx: SpawnContext): readonly string[] {
@@ -72,6 +73,15 @@ export const piAdapter: CliAdapter = {
     if (ctx.resume === undefined) return head;
     if (ctx.resume === 'last') return [...head, '--continue'];
     return [...head, '--session-id', ctx.resume.sessionId];
+  },
+
+  // Headless: `pi -p <prompt>` is non-interactive and exits at the turn
+  // boundary. The MCP bridge + skills auto-load from `<cwd>/.pi` (process cwd =
+  // workspace), so the agent reaches inbox_push without any flag; prompt is the
+  // trailing positional after a `--` end-of-options terminator (so a `-`-leading
+  // prompt isn't read as a flag).
+  composeHeadlessCommand(_base: readonly string[], _ctx: SpawnContext, prompt: string): readonly string[] {
+    return ['pi', '-p', '--mode', 'json', '--', prompt];
   },
 
   composeEnv(ctx: SpawnContext): Record<string, string> {

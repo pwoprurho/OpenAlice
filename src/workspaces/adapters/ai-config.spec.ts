@@ -255,6 +255,77 @@ describe('assignsSessionId capability (gates the launcher\'s assign-id-at-spawn 
   });
 });
 
+describe('composeHeadlessCommand (one-shot headless argv, prompt placed per-CLI)', () => {
+  const ctx = (env: Record<string, string> = {}) => ({ cwd: '/ws', env });
+
+  it('all four agent adapters declare the headless capability', () => {
+    expect(claudeAdapter.capabilities.headless).toBe(true);
+    expect(codexAdapter.capabilities.headless).toBe(true);
+    expect(opencodeAdapter.capabilities.headless).toBe(true);
+    expect(piAdapter.capabilities.headless).toBe(true);
+  });
+
+  it('claude: -p --output-format json -- <prompt> (prompt after -- terminator, never --bare)', () => {
+    expect(claudeAdapter.composeHeadlessCommand!(['claude'], ctx(), 'do x')).toEqual([
+      'claude',
+      '-p',
+      '--output-format',
+      'json',
+      '--',
+      'do x',
+    ]);
+  });
+
+  it('codex: shared -c MCP head + exec --json -- <prompt> (both servers)', () => {
+    const env = { OPENALICE_MCP_URL: 'http://127.0.0.1:47332/mcp', AQ_WS_ID: 'ws-1' };
+    expect(codexAdapter.composeHeadlessCommand!(['codex'], ctx(env), 'do x')).toEqual([
+      'codex',
+      '-c',
+      'mcp_servers.openalice.url="http://127.0.0.1:47332/mcp"',
+      '-c',
+      'mcp_servers.openalice-workspace.url="http://127.0.0.1:47332/mcp/ws-1"',
+      'exec',
+      '--json',
+      '--',
+      'do x',
+    ]);
+  });
+
+  it('opencode: run --format json -- <prompt> (MCP via env, not flags)', () => {
+    expect(opencodeAdapter.composeHeadlessCommand!(['opencode'], ctx(), 'do x')).toEqual([
+      'opencode',
+      'run',
+      '--format',
+      'json',
+      '--',
+      'do x',
+    ]);
+  });
+
+  it('pi: -p --mode json -- <prompt> (bridge auto-loads from cwd)', () => {
+    expect(piAdapter.composeHeadlessCommand!(['pi'], ctx(), 'do x')).toEqual([
+      'pi',
+      '-p',
+      '--mode',
+      'json',
+      '--',
+      'do x',
+    ]);
+  });
+
+  it('a prompt that starts with - is placed after the -- terminator (not parsed as a flag)', () => {
+    const dashy = '--help me by explaining X';
+    for (const a of [claudeAdapter, codexAdapter, opencodeAdapter, piAdapter]) {
+      const argv = a.composeHeadlessCommand!(['bin'], ctx({ OPENALICE_MCP_URL: 'http://x/mcp', AQ_WS_ID: 'w' }), dashy);
+      const sep = argv.lastIndexOf('--');
+      expect(sep).toBeGreaterThanOrEqual(0);
+      // the dashy prompt is the last token, AFTER the terminator
+      expect(argv[argv.length - 1]).toBe(dashy);
+      expect(sep).toBe(argv.length - 2);
+    }
+  });
+});
+
 describe('piAdapter AI-config', () => {
   const mcpEnv = { OPENALICE_MCP_URL: 'http://127.0.0.1:47332/mcp', AQ_WS_ID: 'ws-abc' };
 

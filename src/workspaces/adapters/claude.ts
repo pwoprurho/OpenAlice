@@ -44,6 +44,7 @@ export const claudeAdapter: CliAdapter = {
     resumeLast: false,
     resumeById: true,
     transcriptDiscovery: 'fs-watch',
+    headless: true,
   },
 
   composeCommand(base: readonly string[], ctx: SpawnContext): readonly string[] {
@@ -54,6 +55,16 @@ export const claudeAdapter: CliAdapter = {
       );
     }
     return [...base, '--resume', ctx.resume.sessionId];
+  },
+
+  // Headless: `claude -p` is non-interactive and exits at the turn boundary.
+  // MCP rides the workspace `.mcp.json` (same as interactive) — so NEVER pass
+  // `--bare`, which sets CLAUDE_CODE_SIMPLE=1 and disables MCP (the agent would
+  // lose inbox_push). The prompt is the trailing positional AFTER a `--`
+  // end-of-options terminator, so a prompt that starts with `-`/`--` isn't
+  // mis-parsed as a flag (verified: without `--`, claude errors out).
+  composeHeadlessCommand(base: readonly string[], _ctx: SpawnContext, prompt: string): readonly string[] {
+    return [...base, '-p', '--output-format', 'json', '--', prompt];
   },
 
   async writeAiConfig(cwd: string, cred: WorkspaceAiCred): Promise<void> {

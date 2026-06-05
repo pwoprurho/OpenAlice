@@ -66,6 +66,7 @@ export const codexAdapter: CliAdapter = {
     // carries { id, cwd }, so we attribute by cwd and persist the id as
     // resumeHint. Then `codex resume <id>` (composeCommand) resumes by id.
     transcriptDiscovery: 'subprocess',
+    headless: true,
   },
 
   /**
@@ -77,36 +78,18 @@ export const codexAdapter: CliAdapter = {
    * default and override modes.
    */
   composeCommand(_base: readonly string[], ctx: SpawnContext): readonly string[] {
-    // Read from the spawn-bound env (which service.ts populates with the
-    // backend's actual MCP port), NOT from process.env. The backend's own
-    // env only carries OPENALICE_MCP_PORT (set by the dev orchestrator);
-    // OPENALICE_MCP_URL is composed per-spawn and injected via buildSpawnEnv.
-    // Reading process.env here used to fall back to the historical 3001
-    // hardcode and route codex at a port nothing listens on — visible in
-    // path.trace as `composedCommand: [..., 'http://127.0.0.1:3001/mcp']`.
-    const mcpUrl = ctx.env['OPENALICE_MCP_URL'];
-    if (!mcpUrl) {
-      throw new Error('codex adapter: OPENALICE_MCP_URL missing from spawn env');
-    }
-    const workspaceId = ctx.env['AQ_WS_ID'];
-    if (!workspaceId) {
-      throw new Error('codex adapter: AQ_WS_ID missing from spawn env');
-    }
-    const head = [
-      'codex',
-      '-c',
-      `mcp_servers.openalice.url="${mcpUrl}"`,
-      '-c',
-      // `openalice-workspace` is a valid TOML bare key (hyphen is allowed in
-      // bare keys), so it needs NO quoting. Quoting the segment as
-      // `"openalice-workspace"` made codex carry the literal quotes into the
-      // MCP server name, which then failed codex's own `^[a-zA-Z0-9_-]+$`
-      // name check ("Invalid MCP server name '\"openalice-workspace\"'").
-      `mcp_servers.openalice-workspace.url="${mcpUrl}/${workspaceId}"`,
-    ];
+    const head = codexMcpHead(ctx);
     if (ctx.resume === undefined) return head;
     if (ctx.resume === 'last') return [...head, 'resume', '--last'];
     return [...head, 'resume', ctx.resume.sessionId];
+  },
+
+  // Headless: `codex exec <prompt>` is non-interactive and exits at the turn
+  // boundary. Same `-c` MCP injection as composeCommand (shared head) so the
+  // agent reaches inbox_push; prompt is the trailing positional after a `--`
+  // end-of-options terminator (so a `-`-leading prompt isn't read as a flag).
+  composeHeadlessCommand(_base: readonly string[], ctx: SpawnContext, prompt: string): readonly string[] {
+    return [...codexMcpHead(ctx), 'exec', '--json', '--', prompt];
   },
 
   async writeAiConfig(cwd: string, cred: WorkspaceAiCred): Promise<void> {
@@ -275,6 +258,39 @@ export const codexAdapter: CliAdapter = {
     return out;
   },
 };
+
+/**
+ * The `codex -c mcp_servers.*` head shared by interactive `composeCommand` and
+ * headless `composeHeadlessCommand` — so the two never drift on MCP wiring.
+ *
+ * Reads OPENALICE_MCP_URL / AQ_WS_ID from the spawn-bound env (which service.ts
+ * populates with the backend's actual MCP port), NOT process.env — the backend
+ * env only carries OPENALICE_MCP_PORT; the URL is composed per-spawn and
+ * injected via buildSpawnEnv. Reading process.env here used to fall back to the
+ * historical 3001 hardcode and route codex at a dead port.
+ */
+function codexMcpHead(ctx: SpawnContext): string[] {
+  const mcpUrl = ctx.env['OPENALICE_MCP_URL'];
+  if (!mcpUrl) {
+    throw new Error('codex adapter: OPENALICE_MCP_URL missing from spawn env');
+  }
+  const workspaceId = ctx.env['AQ_WS_ID'];
+  if (!workspaceId) {
+    throw new Error('codex adapter: AQ_WS_ID missing from spawn env');
+  }
+  return [
+    'codex',
+    '-c',
+    `mcp_servers.openalice.url="${mcpUrl}"`,
+    '-c',
+    // `openalice-workspace` is a valid TOML bare key (hyphen is allowed in bare
+    // keys), so it needs NO quoting. Quoting the segment as
+    // `"openalice-workspace"` made codex carry the literal quotes into the MCP
+    // server name, which then failed codex's own `^[a-zA-Z0-9_-]+$` name check
+    // ("Invalid MCP server name '\"openalice-workspace\"'").
+    `mcp_servers.openalice-workspace.url="${mcpUrl}/${workspaceId}"`,
+  ];
+}
 
 const CODEX_ROLLOUT_RE = /^rollout-.*\.jsonl$/;
 
