@@ -379,8 +379,9 @@ export const YF_SCREENER_ALIAS_DICT: Record<string, string> = {
 
 export const YFPredefinedScreenerDataSchema = EquityPerformanceDataSchema.extend({
   avg_volume: z.number().nullable().default(null).describe('Average daily trading volume over the trailing 3 months.'),
-  relative_volume: z.number().nullable().default(null).describe("Today's volume divided by the 3-month average volume. >1 means trading heavier than usual; the right-side, cross-ticker-comparable read of volume."),
+  relative_volume: z.number().nullable().default(null).describe("Today's volume divided by the 3-month average volume. >1 means trading heavier than usual; the relative, intra-ticker read — 'unusual for itself?'."),
   turnover: z.number().nullable().default(null).describe("Today's volume divided by shares outstanding — share turnover, more sensitive for small caps."),
+  dollar_volume: z.number().nullable().default(null).describe("Price × volume — traded notional. The cross-ticker-comparable absolute read of volume ('how much money is here?'), and the unit that aggregates to a sector."),
   open: z.number().nullable().default(null).describe('Open price for the day.'),
   high: z.number().nullable().default(null).describe('High price for the day.'),
   low: z.number().nullable().default(null).describe('Low price for the day.'),

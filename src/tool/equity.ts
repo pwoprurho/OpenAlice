@@ -138,20 +138,27 @@ If unsure about the symbol, use marketSearchForResearch to find it.`,
 Returns top gainers, losers, or most actively traded stocks. Use this to get a
 pulse on what the market is trading today.
 
-Each row carries volume-context fields beyond raw price/volume:
-- relative_volume — today's volume / its 3-month average. THIS is how to read
-  volume: raw "most active" is just the usual mega-caps (AAPL, TSLA always
-  trade billions). relative_volume >2 surfaces stocks trading genuinely
-  unusually — the right-side, cross-ticker-comparable signal.
+Each row carries volume-context fields beyond raw price/volume. Volume has two
+orthogonal readings — use the one that fits the question:
+- relative_volume — today's volume / its 3-month average. The RELATIVE,
+  intra-ticker read: "is this name unusual for itself?". raw "most active" is
+  just the usual mega-caps (AAPL, TSLA always trade billions); relative_volume
+  >2 surfaces genuine anomalies. Use for event/spike detection.
+- dollar_volume — price × volume (traded notional). The ABSOLUTE,
+  cross-ticker-comparable read: "how much money is actually here?". This is the
+  unit that compares across tickers and aggregates to a sector (raw share
+  volume can't — 1M shares is different money at $5 vs $500). Use for capital
+  weight / cross-sector work / tradability.
 - turnover — volume / shares outstanding (more sensitive for small caps).
 - avg_volume — the 3-month baseline.
 
-Set sortBy="relative_volume" to rank by unusual volume instead of the default
-(price move for gainers/losers, absolute volume for active). Volume-context
-fields are populated on the default yfinance data only.`,
+Set sortBy to re-rank: "relative_volume" for unusual volume, "dollar_volume"
+for where the money is. Default keeps the provider ranking (price move for
+gainers/losers, absolute share volume for active). Volume-context fields are
+populated on the default yfinance data only.`,
       inputSchema: z.object({
         type: z.enum(['gainers', 'losers', 'active']).describe('"gainers" for top price gainers, "losers" for top losers, "active" for most actively traded by absolute volume'),
-        sortBy: z.enum(['default', 'relative_volume']).optional().describe('"default" keeps the provider ranking; "relative_volume" re-ranks by unusual volume (today vs 3-month average), surfacing genuine volume spikes over ever-active mega-caps'),
+        sortBy: z.enum(['default', 'relative_volume', 'dollar_volume']).optional().describe('"default" keeps the provider ranking; "relative_volume" re-ranks by unusual volume (today vs 3-month avg); "dollar_volume" re-ranks by traded notional (price × volume) — where the money actually is'),
       }).meta({ examples: [{ type: 'active', sortBy: 'relative_volume' }] }),
       execute: async ({ type, sortBy }) => {
         let rows: EquityDiscoveryData[]
@@ -167,10 +174,10 @@ fields are populated on the default yfinance data only.`,
             break
         }
 
-        if (sortBy === 'relative_volume') {
-          // Rank by unusual volume; rows missing relative_volume sink to the bottom.
+        if (sortBy === 'relative_volume' || sortBy === 'dollar_volume') {
+          // Re-rank by the chosen volume axis; rows missing it sink to the bottom.
           rows = [...rows].sort(
-            (a, b) => (b.relative_volume ?? -Infinity) - (a.relative_volume ?? -Infinity),
+            (a, b) => (b[sortBy] ?? -Infinity) - (a[sortBy] ?? -Infinity),
           )
         }
 

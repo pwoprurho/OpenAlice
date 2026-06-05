@@ -116,12 +116,19 @@ export async function getPredefinedScreener(
     const vol = result.regularMarketVolume
     const avgVol = result.averageDailyVolume3Month
     const sharesOut = result.sharesOutstanding
+    const price = result.regularMarketPrice
     result.relative_volume =
       typeof vol === 'number' && typeof avgVol === 'number' && avgVol > 0 ? vol / avgVol : null
     result.turnover =
       typeof vol === 'number' && typeof sharesOut === 'number' && sharesOut > 0
         ? vol / sharesOut
         : null
+    // dollar_volume (price × volume) is the cross-ticker-comparable absolute:
+    // raw share volume isn't (1M shares means different money at $5 vs $500).
+    // This is the unit that aggregates to a sector. relative_volume answers
+    // "unusual for itself?"; dollar_volume answers "how much money is here?".
+    result.dollar_volume =
+      typeof vol === 'number' && typeof price === 'number' ? vol * price : null
 
     if (result.regularMarketChange != null && result.regularMarketVolume != null) {
       output.push(result)
