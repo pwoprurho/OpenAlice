@@ -679,6 +679,81 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
     }
   });
 
+  // Headless task dispatch — the standard automation API. Spawns the
+  // workspace's agent CLI in one-shot headless mode with a positional prompt,
+  // runs to natural exit, returns exit/duration + bounded output tails. The
+  // agent reports its actual result via `inbox_push`; this endpoint just waits
+  // on the process exit (the turn boundary). No session/PTY — a fresh one-shot
+  // clone each call (no respawn, not pooled). Synchronous: the request stays
+  // open until the task exits (the cron/automation trigger calls
+  // `svc.runHeadlessTask` directly instead). Body: { prompt, agent?, timeoutMs? }.
+  //   curl -XPOST .../:id/headless -d '{"prompt":"...","agent":"claude"}'
+  app.post('/:id/headless', async (c) => {
+    const id = c.req.param('id');
+    if (!validId(id)) return c.json({ error: 'not_found' }, 404);
+    let prompt: string;
+    let timeoutMs: number;
+    let agentId: string | undefined;
+    try {
+      const body = await safeJson(c);
+      const fields = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+      const rawPrompt = fields['prompt'];
+      // Gate on trimmed length so a whitespace-only prompt can't spawn a no-op
+      // agent run; pass the original prompt through unchanged.
+      if (typeof rawPrompt !== 'string' || rawPrompt.trim().length === 0) {
+        return c.json({ error: 'prompt_required' }, 400);
+      }
+      if (rawPrompt.length > 16000) {
+        return c.json({ error: 'prompt_too_long', message: 'max 16000 chars' }, 400);
+      }
+      prompt = rawPrompt;
+      const rawTimeout = fields['timeoutMs'];
+      timeoutMs =
+        typeof rawTimeout === 'number' && rawTimeout > 0 ? Math.min(rawTimeout, 1_800_000) : 300_000;
+      const rawAgent = fields['agent'];
+      if (typeof rawAgent === 'string' && rawAgent.length > 0) agentId = rawAgent;
+    } catch (err) {
+      return c.json({ error: 'bad_request', message: (err as Error).message }, 400);
+    }
+    const meta = svc.registry.get(id);
+    if (!meta) return c.json({ error: 'workspace_not_found' }, 404);
+    if (agentId && !svc.adapters.get(agentId)) {
+      return c.json({ error: 'unknown_agent', message: `no adapter: ${agentId}` }, 400);
+    }
+    // An explicit agent must be one ENABLED on this workspace — else
+    // resolveAdapter would honor it and spawn a CLI with no provider config
+    // injected (silent fallback to the user's global config). Omitting `agent`
+    // (→ workspace default) stays fine.
+    if (agentId && !meta.agents.includes(agentId)) {
+      return c.json({ error: 'agent_not_enabled', message: `agent "${agentId}" not enabled on this workspace` }, 400);
+    }
+    const adapter = svc.resolveAdapter(meta, agentId);
+    if (!adapter.capabilities.headless || !adapter.composeHeadlessCommand) {
+      return c.json({ error: 'no_headless', message: `adapter "${adapter.id}" has no headless mode` }, 400);
+    }
+    // Same one-time bootstrap as a real spawn (trust/MCP wiring), idempotent.
+    try {
+      if (adapter.bootstrap) {
+        await adapter.bootstrap({ wsId: id, cwd: meta.dir, launcherRepoRoot: svc.config.launcherRepoRoot });
+      }
+    } catch (err) {
+      launcherLogger.error('headless.bootstrap_failed', { id, agent: adapter.id, err });
+    }
+    launcherLogger.info('workspace.headless_started', {
+      id,
+      agent: adapter.id,
+      promptLen: prompt.length,
+      timeoutMs,
+    });
+    try {
+      const result = await svc.runHeadlessTask(meta, adapter, prompt, timeoutMs);
+      return c.json(result);
+    } catch (err) {
+      launcherLogger.error('workspace.headless_failed', { id, agent: adapter.id, err });
+      return c.json({ error: 'headless_failed', message: (err as Error).message }, 500);
+    }
+  });
+
   app.delete('/:id/sessions/:sid', async (c) => {
     const id = c.req.param('id');
     const token = c.req.param('sid');

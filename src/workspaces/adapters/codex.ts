@@ -1,9 +1,10 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { createInterface } from 'node:readline';
 
-import type { BootstrapContext, CliAdapter, SpawnContext, WorkspaceAiCred } from '../cli-adapter.js';
+import type { BootstrapContext, CliAdapter, OnDiskSession, SpawnContext, WorkspaceAiCred } from '../cli-adapter.js';
 import { readWorkspaceFile, writeWorkspaceFile } from '../file-service.js';
 
 const CODEX_CONFIG_PATH = '.codex/config.toml';
@@ -59,7 +60,13 @@ export const codexAdapter: CliAdapter = {
     parallelPerCwd: true,
     resumeLast: true,
     resumeById: true,
-    transcriptDiscovery: 'none',
+    // by-id resume (claude-level): codex can't be assigned an id at spawn, so
+    // the watcher polls `listOnDisk` post-spawn — codex writes a global
+    // `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` whose line-1 `session_meta`
+    // carries { id, cwd }, so we attribute by cwd and persist the id as
+    // resumeHint. Then `codex resume <id>` (composeCommand) resumes by id.
+    transcriptDiscovery: 'subprocess',
+    headless: true,
   },
 
   /**
@@ -71,36 +78,22 @@ export const codexAdapter: CliAdapter = {
    * default and override modes.
    */
   composeCommand(_base: readonly string[], ctx: SpawnContext): readonly string[] {
-    // Read from the spawn-bound env (which service.ts populates with the
-    // backend's actual MCP port), NOT from process.env. The backend's own
-    // env only carries OPENALICE_MCP_PORT (set by the dev orchestrator);
-    // OPENALICE_MCP_URL is composed per-spawn and injected via buildSpawnEnv.
-    // Reading process.env here used to fall back to the historical 3001
-    // hardcode and route codex at a port nothing listens on — visible in
-    // path.trace as `composedCommand: [..., 'http://127.0.0.1:3001/mcp']`.
-    const mcpUrl = ctx.env['OPENALICE_MCP_URL'];
-    if (!mcpUrl) {
-      throw new Error('codex adapter: OPENALICE_MCP_URL missing from spawn env');
-    }
-    const workspaceId = ctx.env['AQ_WS_ID'];
-    if (!workspaceId) {
-      throw new Error('codex adapter: AQ_WS_ID missing from spawn env');
-    }
-    const head = [
-      'codex',
-      '-c',
-      `mcp_servers.openalice.url="${mcpUrl}"`,
-      '-c',
-      // `openalice-workspace` is a valid TOML bare key (hyphen is allowed in
-      // bare keys), so it needs NO quoting. Quoting the segment as
-      // `"openalice-workspace"` made codex carry the literal quotes into the
-      // MCP server name, which then failed codex's own `^[a-zA-Z0-9_-]+$`
-      // name check ("Invalid MCP server name '\"openalice-workspace\"'").
-      `mcp_servers.openalice-workspace.url="${mcpUrl}/${workspaceId}"`,
-    ];
+    const head = codexMcpHead(ctx);
     if (ctx.resume === undefined) return head;
     if (ctx.resume === 'last') return [...head, 'resume', '--last'];
     return [...head, 'resume', ctx.resume.sessionId];
+  },
+
+  // Headless: `codex exec` is non-interactive, but its DEFAULT approval policy
+  // CANCELS the agent's actions (MCP tool calls AND shell commands) when there's
+  // no human to approve — so inbox_push fails "user cancelled MCP tool call".
+  // `approval_policy=never` lets it run autonomously. CRITICAL: this `-c` must
+  // be GLOBAL (alongside the mcp_servers `-c` in codexMcpHead, before `exec`) —
+  // an exec-LEVEL `-c` drops the global config and the MCP servers stop loading
+  // (verified: that yields "no MCP tool matching inbox_push"). `--` terminates
+  // options before the trailing prompt.
+  composeHeadlessCommand(_base: readonly string[], ctx: SpawnContext, prompt: string): readonly string[] {
+    return [...codexMcpHead(ctx), '-c', 'approval_policy="never"', 'exec', '--json', '--', prompt];
   },
 
   async writeAiConfig(cwd: string, cred: WorkspaceAiCred): Promise<void> {
@@ -224,7 +217,126 @@ export const codexAdapter: CliAdapter = {
   async bootstrap(ctx: BootstrapContext): Promise<void> {
     await ensureTrustedProject(ctx.cwd);
   },
+
+  /**
+   * List codex sessions belonging to THIS workspace cwd, for the transcript
+   * watcher's post-spawn id capture (codex can't be assigned an id at spawn).
+   * Sessions live at `$CODEX_HOME/sessions` (override mode) or
+   * `~/.codex/sessions` (default), partitioned `YYYY/MM/DD`, GLOBAL across all
+   * cwds. We read each rollout's line-1 `session_meta { id, cwd }` (written at
+   * session start) and keep only those whose cwd matches — scanning just the
+   * newest dated leaves since a just-spawned session is today's.
+   */
+  async listOnDisk(cwd: string): Promise<readonly OnDiskSession[]> {
+    const root = existsSync(join(cwd, '.codex'))
+      ? join(cwd, '.codex', 'sessions')
+      : join(homedir(), '.codex', 'sessions');
+    const target = resolve(cwd);
+    const out: OnDiskSession[] = [];
+    for (const leaf of await recentDatedLeaves(root, 2)) {
+      let files: string[];
+      try {
+        files = await readdir(leaf);
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        if (!CODEX_ROLLOUT_RE.test(f)) continue;
+        const fp = join(leaf, f);
+        try {
+          const meta = JSON.parse(await firstLine(fp)) as {
+            type?: string;
+            payload?: { id?: string; cwd?: string };
+          };
+          const id = meta.payload?.id;
+          const rolloutCwd = meta.payload?.cwd;
+          if (meta.type !== 'session_meta' || typeof id !== 'string' || typeof rolloutCwd !== 'string') continue;
+          if (resolve(rolloutCwd) !== target) continue;
+          const st = await stat(fp);
+          out.push({ sessionId: id, file: fp, mtime: st.mtime.toISOString(), sizeBytes: st.size });
+        } catch {
+          // partial / unreadable rollout — skip
+        }
+      }
+    }
+    return out;
+  },
 };
+
+/**
+ * The `codex -c mcp_servers.*` head shared by interactive `composeCommand` and
+ * headless `composeHeadlessCommand` — so the two never drift on MCP wiring.
+ *
+ * Reads OPENALICE_MCP_URL / AQ_WS_ID from the spawn-bound env (which service.ts
+ * populates with the backend's actual MCP port), NOT process.env — the backend
+ * env only carries OPENALICE_MCP_PORT; the URL is composed per-spawn and
+ * injected via buildSpawnEnv. Reading process.env here used to fall back to the
+ * historical 3001 hardcode and route codex at a dead port.
+ */
+function codexMcpHead(ctx: SpawnContext): string[] {
+  const mcpUrl = ctx.env['OPENALICE_MCP_URL'];
+  if (!mcpUrl) {
+    throw new Error('codex adapter: OPENALICE_MCP_URL missing from spawn env');
+  }
+  const workspaceId = ctx.env['AQ_WS_ID'];
+  if (!workspaceId) {
+    throw new Error('codex adapter: AQ_WS_ID missing from spawn env');
+  }
+  return [
+    'codex',
+    '-c',
+    `mcp_servers.openalice.url="${mcpUrl}"`,
+    '-c',
+    // `openalice-workspace` is a valid TOML bare key (hyphen is allowed in bare
+    // keys), so it needs NO quoting. Quoting the segment as
+    // `"openalice-workspace"` made codex carry the literal quotes into the MCP
+    // server name, which then failed codex's own `^[a-zA-Z0-9_-]+$` name check
+    // ("Invalid MCP server name '\"openalice-workspace\"'").
+    `mcp_servers.openalice-workspace.url="${mcpUrl}/${workspaceId}"`,
+  ];
+}
+
+const CODEX_ROLLOUT_RE = /^rollout-.*\.jsonl$/;
+
+/** Newest `count` `YYYY/MM/DD` leaf dirs under a date-partitioned root. A
+ *  just-spawned session is in today's leaf, so the newest few suffice. */
+async function recentDatedLeaves(root: string, count: number): Promise<string[]> {
+  const newestNumeric = async (dir: string, n: number): Promise<string[]> => {
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch {
+      return [];
+    }
+    return names
+      .filter((x) => /^\d+$/.test(x))
+      .sort()
+      .reverse()
+      .slice(0, n)
+      .map((x) => join(dir, x));
+  };
+  const leaves: string[] = [];
+  for (const y of await newestNumeric(root, 1)) {
+    for (const m of await newestNumeric(y, 1)) {
+      for (const d of await newestNumeric(m, count)) leaves.push(d);
+    }
+  }
+  return leaves;
+}
+
+/** First line only — codex rollout line-1 (session_meta) can be many KB
+ *  (it embeds the full base instructions), so stream rather than readFile. */
+async function firstLine(fp: string): Promise<string> {
+  const input = createReadStream(fp, { encoding: 'utf8' });
+  const rl = createInterface({ input, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) return line;
+    return '';
+  } finally {
+    rl.close();
+    input.destroy();
+  }
+}
 
 /**
  * Add (or no-op if present) a `[projects."<abs>"] trust_level = "trusted"`

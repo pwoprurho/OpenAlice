@@ -6,7 +6,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -155,6 +155,23 @@ describe('codexAdapter AI-config', () => {
   it('readAiConfig returns null when no files exist', async () => {
     expect(await codexAdapter.readAiConfig!(dir)).toBeNull();
   });
+
+  it('listOnDisk returns only rollouts whose session_meta cwd matches this workspace', async () => {
+    // Workspace has its own .codex → adapter reads <cwd>/.codex/sessions (not ~).
+    const leaf = join(dir, '.codex', 'sessions', '2026', '06', '05');
+    await mkdir(leaf, { recursive: true });
+    const mine = { type: 'session_meta', payload: { id: 'mine-uuid-0001', cwd: dir } };
+    const other = { type: 'session_meta', payload: { id: 'other-uuid-0002', cwd: '/some/other/workspace' } };
+    // line-1 is a (potentially huge) session_meta; subsequent lines are turns.
+    await writeFile(join(leaf, 'rollout-2026-06-05T10-00-00-mine.jsonl'), JSON.stringify(mine) + '\n{"type":"turn"}\n');
+    await writeFile(join(leaf, 'rollout-2026-06-05T11-00-00-other.jsonl'), JSON.stringify(other) + '\n');
+    const found = await codexAdapter.listOnDisk!(dir);
+    expect(found.map((s) => s.sessionId)).toEqual(['mine-uuid-0001']);
+  });
+
+  it('listOnDisk returns [] when there are no sessions', async () => {
+    expect(await codexAdapter.listOnDisk!(dir)).toEqual([]);
+  });
 });
 
 describe('opencodeAdapter AI-config', () => {
@@ -222,6 +239,94 @@ describe('opencodeAdapter AI-config', () => {
 
   it('readAiConfig returns null when no file exists', async () => {
     expect(await opencodeAdapter.readAiConfig!(dir)).toBeNull();
+  });
+});
+
+describe('assignsSessionId capability (gates the launcher\'s assign-id-at-spawn path)', () => {
+  it('only pi assigns its own session id; others harvest (fs-watch) or stay last-only', () => {
+    // The spawn factory mints a uuid + persists resumeHint only when this is
+    // true, and pi's composeCommand turns the synthesized {sessionId} into
+    // `--session-id`. claude harvests via fs-watch; codex/opencode capture
+    // post-spawn (subprocess/content-filter) — none assign.
+    expect(piAdapter.capabilities.assignsSessionId).toBe(true);
+    expect(claudeAdapter.capabilities.assignsSessionId ?? false).toBe(false);
+    expect(codexAdapter.capabilities.assignsSessionId ?? false).toBe(false);
+    expect(opencodeAdapter.capabilities.assignsSessionId ?? false).toBe(false);
+  });
+});
+
+describe('composeHeadlessCommand (one-shot headless argv, prompt placed per-CLI)', () => {
+  const ctx = (env: Record<string, string> = {}) => ({ cwd: '/ws', env });
+
+  it('all four agent adapters declare the headless capability', () => {
+    expect(claudeAdapter.capabilities.headless).toBe(true);
+    expect(codexAdapter.capabilities.headless).toBe(true);
+    expect(opencodeAdapter.capabilities.headless).toBe(true);
+    expect(piAdapter.capabilities.headless).toBe(true);
+  });
+
+  it('claude: -p --output-format json -- <prompt> (prompt after -- terminator, never --bare)', () => {
+    expect(claudeAdapter.composeHeadlessCommand!(['claude'], ctx(), 'do x')).toEqual([
+      'claude',
+      '-p',
+      '--output-format',
+      'json',
+      '--',
+      'do x',
+    ]);
+  });
+
+  it('codex: shared -c MCP head + exec --json -- <prompt> (both servers)', () => {
+    const env = { OPENALICE_MCP_URL: 'http://127.0.0.1:47332/mcp', AQ_WS_ID: 'ws-1' };
+    expect(codexAdapter.composeHeadlessCommand!(['codex'], ctx(env), 'do x')).toEqual([
+      'codex',
+      '-c',
+      'mcp_servers.openalice.url="http://127.0.0.1:47332/mcp"',
+      '-c',
+      'mcp_servers.openalice-workspace.url="http://127.0.0.1:47332/mcp/ws-1"',
+      '-c',
+      'approval_policy="never"',
+      'exec',
+      '--json',
+      '--',
+      'do x',
+    ]);
+  });
+
+  it('opencode: run --format json -- <prompt> (MCP via env, not flags)', () => {
+    expect(opencodeAdapter.composeHeadlessCommand!(['opencode'], ctx(), 'do x')).toEqual([
+      'opencode',
+      'run',
+      '--format',
+      'json',
+      '--',
+      'do x',
+    ]);
+  });
+
+  it('pi: -p --mode json <prompt> (bare trailing positional — pi rejects --)', () => {
+    expect(piAdapter.composeHeadlessCommand!(['pi'], ctx(), 'do x')).toEqual([
+      'pi',
+      '-p',
+      '--mode',
+      'json',
+      'do x',
+    ]);
+  });
+
+  it('claude/codex/opencode place a -leading prompt after a -- terminator', () => {
+    const dashy = '--help me by explaining X';
+    for (const a of [claudeAdapter, codexAdapter, opencodeAdapter]) {
+      const argv = a.composeHeadlessCommand!(['bin'], ctx({ OPENALICE_MCP_URL: 'http://x/mcp', AQ_WS_ID: 'w' }), dashy);
+      expect(argv[argv.length - 1]).toBe(dashy); // prompt is the last token
+      expect(argv[argv.length - 2]).toBe('--'); // immediately after the terminator
+    }
+  });
+
+  it('pi takes the prompt as a bare trailing positional (no -- terminator available)', () => {
+    const argv = piAdapter.composeHeadlessCommand!(['pi'], ctx(), 'hello');
+    expect(argv[argv.length - 1]).toBe('hello');
+    expect(argv).not.toContain('--');
   });
 });
 

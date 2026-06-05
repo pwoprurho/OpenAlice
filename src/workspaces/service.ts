@@ -8,6 +8,7 @@
  * Lifecycle: `createWorkspaceService()` at plugin start; `dispose()` at stop.
  */
 
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { basename, delimiter as pathDelimiter, join } from 'node:path';
 
@@ -22,6 +23,7 @@ import { AdapterRegistry, type CliAdapter } from './cli-adapter.js';
 import { loadConfig, type ServerConfig } from './config.js';
 import { logger as launcherLogger } from './logger.js';
 import { runHeadlessProbe, type HeadlessProbeResult } from './probe.js';
+import { runHeadlessTask, type HeadlessTaskResult } from './headless-task.js';
 import { ScrollbackStore } from './scrollback-store.js';
 import { SessionPool, type SessionFactoryContext } from './session-pool.js';
 import { SessionRegistry, type SessionRecord } from './session-registry.js';
@@ -83,6 +85,21 @@ export interface WorkspaceService {
     prompt: string,
     timeoutMs: number,
   ): Promise<HeadlessProbeResult>;
+  /**
+   * Dispatch a one-shot HEADLESS task: spawn the adapter's
+   * `composeHeadlessCommand` (prompt placed) on a plain pipe, run to natural
+   * exit (= done), return exit/duration + output tails. The automation
+   * primitive — the agent reports via `inbox_push`; this just waits on exit.
+   * Reuses the spawn env/cwd of a fresh interactive spawn (same MCP injection),
+   * but is NOT pooled (one-shot, no respawn). Throws if the adapter has no
+   * headless mode.
+   */
+  runHeadlessTask(
+    meta: WorkspaceMeta,
+    adapter: CliAdapter,
+    prompt: string,
+    timeoutMs: number,
+  ): Promise<HeadlessTaskResult>;
   isShuttingDown(): boolean;
   dispose(reason: string): Promise<void>;
 }
@@ -277,12 +294,51 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     });
   };
 
+  const runHeadlessTaskMethod = async (
+    ws: WorkspaceMeta,
+    adapter: CliAdapter,
+    prompt: string,
+    timeoutMs: number,
+  ): Promise<HeadlessTaskResult> => {
+    if (!adapter.capabilities.headless || !adapter.composeHeadlessCommand) {
+      throw new Error(`adapter "${adapter.id}" has no headless mode`);
+    }
+    // Reuse a fresh interactive spawn's env/cwd (identical MCP injection),
+    // then swap the interactive command for the one-shot headless argv.
+    const { cwd, env } = composeSpawnInputs(ws, adapter, undefined);
+    const command = adapter.composeHeadlessCommand(config.command, { cwd, env }, prompt);
+    return runHeadlessTask({
+      command,
+      cwd,
+      env,
+      timeoutMs,
+      logger: launcherLogger.child({ scope: 'headless', wsId: ws.id, agent: adapter.id }),
+    });
+  };
+
   const pool = new SessionPool(
     (wsId, ctx) => {
       const ws = registry.get(wsId);
       if (!ws) throw new Error(`workspace not found: ${wsId}`);
       const adapter = resolveAdapter(ws, ctx.agentId);
-      const { command: composedCommand, env, transcriptDir } = composeSpawnInputs(ws, adapter, ctx.resume);
+      // Assigned-id resume (e.g. pi): on a FRESH spawn of an id-assigning
+      // adapter, mint a uuid, thread it through composeCommand's {sessionId}
+      // intent (`--session-id`, create-or-reopen), and persist it as resumeHint
+      // immediately — "self-archive", so reattach resumes BY ID instead of
+      // fragile `--continue`/last. The record is pre-allocated (SessionPool.spawn
+      // takes a pre-allocated recordId), so the registry update is safe;
+      // fire-and-forget like the transcript-watcher's hint write.
+      let resume = ctx.resume;
+      if (resume === undefined && adapter.capabilities.assignsSessionId) {
+        const sessionId = randomUUID();
+        resume = { sessionId };
+        void sessionRegistry
+          .update(wsId, ctx.recordId, { resumeHint: { kind: 'agent-session-id', value: sessionId } })
+          .catch((err) =>
+            launcherLogger.warn('assigned_session_id.persist_failed', { wsId, recordId: ctx.recordId, err }),
+          );
+      }
+      const { command: composedCommand, env, transcriptDir } = composeSpawnInputs(ws, adapter, resume);
 
       // path.trace — single line capturing every path the spawn touches. The
       // raison d'être of the workspace-sessions.log file: any two fields that
@@ -300,10 +356,10 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
         transcriptDir,
         projectKey: transcriptDir ? basename(transcriptDir) : null,
         composedCommand,
-        resumeMode: ctx.resume === undefined
+        resumeMode: resume === undefined
           ? 'fresh'
-          : ctx.resume === 'last' ? 'last' : 'by-id',
-        resumeId: ctx.resume && ctx.resume !== 'last' ? ctx.resume.sessionId : null,
+          : resume === 'last' ? 'last' : 'by-id',
+        resumeId: resume && resume !== 'last' ? resume.sessionId : null,
       });
 
       return {
@@ -411,6 +467,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     publicMeta,
     computeSpawnPlan,
     runHeadlessProbe: runHeadlessProbeMethod,
+    runHeadlessTask: runHeadlessTaskMethod,
     isShuttingDown: () => shuttingDown,
     dispose,
   };

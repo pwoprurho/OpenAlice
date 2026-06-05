@@ -83,6 +83,24 @@ export interface CliAdapter {
     readonly resumeLast: boolean;
     readonly resumeById: boolean;
     readonly transcriptDiscovery: 'fs-watch' | 'subprocess' | 'none';
+    /**
+     * The adapter mints its OWN session id at spawn. On a FRESH spawn the
+     * launcher generates a uuid, threads it through `composeCommand`'s resume
+     * `{sessionId}` intent (the CLI creates-or-reopens that id), and persists
+     * it as `resumeHint` immediately — so a later reattach resumes BY ID, not
+     * via fragile `--continue`/last. Requires the CLI's session-id flag to
+     * create-if-missing (e.g. pi `--session-id`). Adapters that instead harvest
+     * the id post-spawn (fs-watch / subprocess discovery) leave this falsy.
+     */
+    readonly assignsSessionId?: boolean;
+    /**
+     * The adapter exposes a one-shot HEADLESS mode (consumes a positional
+     * prompt, exits at the turn boundary) via `composeHeadlessCommand`. The
+     * launcher dispatches automation tasks through it — spawn → run → the agent
+     * reports via `inbox_push` → exit, no human attached. The four agent CLIs
+     * set this; `shell` does not (no agent-turn concept).
+     */
+    readonly headless?: boolean;
   };
 
   /**
@@ -95,6 +113,20 @@ export interface CliAdapter {
    *   base + { id }    → [...base, 'resume', id]
    */
   composeCommand(base: readonly string[], ctx: SpawnContext): readonly string[];
+
+  /**
+   * One-shot HEADLESS argv for an automation task — like `composeCommand`, but
+   * the process consumes `prompt` and EXITS at the turn boundary (vs the
+   * interactive TUI that waits for input). The adapter places `prompt` at the
+   * CLI-correct position (claude right after `-p`; codex/opencode/pi trailing).
+   * MUST keep the SAME MCP injection as `composeCommand` so the agent can reach
+   * `inbox_push`. Present iff `capabilities.headless` is true.
+   *   claude:   [...base, -p, <prompt>, --output-format, json]   // never --bare
+   *   codex:    [codex, -c mcp…, exec, --json, <prompt>]
+   *   opencode: [opencode, run, --format, json, <prompt>]
+   *   pi:       [pi, -p, --mode, json, <prompt>]
+   */
+  composeHeadlessCommand?(base: readonly string[], ctx: SpawnContext, prompt: string): readonly string[];
 
   /** Optional per-CLI env adjustments on top of `spawn-env.ts`'s baseline. */
   envOverrides?(parent: NodeJS.ProcessEnv): EnvOverrides;

@@ -40,10 +40,14 @@ const PI_PROVIDER_NAME = 'workspace';
  * — covers OpenAI-compatible + CN/local gateways); openai-responses /
  * anthropic-messages are future, add when a case appears.
  *
- * RESUME is a top-level TUI flag (`dist/main.js:251-257`): `--continue` (last in
- * cwd) / `--session-id <id>` (deterministic reopen-or-create). transcript
- * discovery 'none' — sessions live global + cwd-bucketed (same posture as
- * codex/opencode); a future by-id-harvest path is `--mode json` / `--mode rpc`.
+ * RESUME is first-class by-id (claude-level), via launcher-ASSIGNED id rather
+ * than disk harvesting: `--session-id <id>` is create-or-reopen
+ * (`dist/main.js:251-257`), so on a fresh spawn the launcher mints a uuid,
+ * `composeCommand` emits `--session-id <uuid>`, and the launcher persists it as
+ * `resumeHint` at spawn (capability `assignsSessionId`). Reattach then resumes
+ * BY ID. This sidesteps pi's lazy transcript write (file only appears after the
+ * first assistant turn) and the PI_CODING_AGENT_DIR redirect — neither matters
+ * when the launcher already knows the id. transcriptDiscovery stays 'none'.
  */
 export const piAdapter: CliAdapter = {
   id: 'pi',
@@ -55,6 +59,11 @@ export const piAdapter: CliAdapter = {
     resumeLast: true,
     resumeById: true,
     transcriptDiscovery: 'none',
+    // pi `--session-id <id>` is create-or-reopen, so the launcher mints the id
+    // at spawn and records it immediately — by-id resume with no disk-watching,
+    // immune to pi's lazy transcript write + the PI_CODING_AGENT_DIR redirect.
+    assignsSessionId: true,
+    headless: true,
   },
 
   composeCommand(_base: readonly string[], ctx: SpawnContext): readonly string[] {
@@ -64,6 +73,16 @@ export const piAdapter: CliAdapter = {
     if (ctx.resume === undefined) return head;
     if (ctx.resume === 'last') return [...head, '--continue'];
     return [...head, '--session-id', ctx.resume.sessionId];
+  },
+
+  // Headless: `pi -p <prompt>` is non-interactive and exits at the turn
+  // boundary. The MCP bridge + skills auto-load from `<cwd>/.pi` (process cwd =
+  // workspace), so the agent reaches inbox_push without any flag. NOTE: pi
+  // REJECTS a `--` end-of-options terminator ("Unknown option: --", verified
+  // 0.78.1), so the prompt is a bare trailing positional — a prompt literally
+  // starting with `-`/`--` is unprotected on pi (rare for task prompts).
+  composeHeadlessCommand(_base: readonly string[], _ctx: SpawnContext, prompt: string): readonly string[] {
+    return ['pi', '-p', '--mode', 'json', prompt];
   },
 
   composeEnv(ctx: SpawnContext): Record<string, string> {
