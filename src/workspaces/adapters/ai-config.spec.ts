@@ -225,6 +225,19 @@ describe('opencodeAdapter AI-config', () => {
   });
 });
 
+describe('assignsSessionId capability (gates the launcher\'s assign-id-at-spawn path)', () => {
+  it('only pi assigns its own session id; others harvest (fs-watch) or stay last-only', () => {
+    // The spawn factory mints a uuid + persists resumeHint only when this is
+    // true, and pi's composeCommand turns the synthesized {sessionId} into
+    // `--session-id`. claude harvests via fs-watch; codex/opencode capture
+    // post-spawn (subprocess/content-filter) — none assign.
+    expect(piAdapter.capabilities.assignsSessionId).toBe(true);
+    expect(claudeAdapter.capabilities.assignsSessionId ?? false).toBe(false);
+    expect(codexAdapter.capabilities.assignsSessionId ?? false).toBe(false);
+    expect(opencodeAdapter.capabilities.assignsSessionId ?? false).toBe(false);
+  });
+});
+
 describe('piAdapter AI-config', () => {
   const mcpEnv = { OPENALICE_MCP_URL: 'http://127.0.0.1:47332/mcp', AQ_WS_ID: 'ws-abc' };
 

@@ -83,6 +83,16 @@ export interface CliAdapter {
     readonly resumeLast: boolean;
     readonly resumeById: boolean;
     readonly transcriptDiscovery: 'fs-watch' | 'subprocess' | 'none';
+    /**
+     * The adapter mints its OWN session id at spawn. On a FRESH spawn the
+     * launcher generates a uuid, threads it through `composeCommand`'s resume
+     * `{sessionId}` intent (the CLI creates-or-reopens that id), and persists
+     * it as `resumeHint` immediately — so a later reattach resumes BY ID, not
+     * via fragile `--continue`/last. Requires the CLI's session-id flag to
+     * create-if-missing (e.g. pi `--session-id`). Adapters that instead harvest
+     * the id post-spawn (fs-watch / subprocess discovery) leave this falsy.
+     */
+    readonly assignsSessionId?: boolean;
   };
 
   /**
