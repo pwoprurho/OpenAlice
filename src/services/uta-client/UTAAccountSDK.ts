@@ -16,6 +16,8 @@ import type {
   Position,
   OpenOrder,
   Quote,
+  Bar,
+  BarParams,
   MarketClock,
   BrokerHealth,
   BrokerHealthInfo,
@@ -139,6 +141,26 @@ export class UTAAccountSDK {
 
   getMarketClock(): Promise<MarketClock> {
     return this.client.get<MarketClock>(`/api/trading/uta/${encodeURIComponent(this.id)}/market-clock`)
+  }
+
+  /**
+   * Historical OHLCV bars for a contract. Mirrors `getQuote`: the body may
+   * be a full `Contract` or an `{ aliceId }` hint, expanded server-side via
+   * the broker's native-key decoder. The server-side route + per-broker
+   * `getHistorical` land in Phase 1; until then this 404s at runtime (no
+   * vendor flow calls it). `Date` fields serialize to ISO strings over the
+   * wire; the route revives them.
+   */
+  getHistorical(
+    query: Contract | (Partial<Contract> & { aliceId?: string }),
+    params: BarParams,
+  ): Promise<Bar[]> {
+    return this.client
+      .post<{ bars: Bar[] }>(
+        `/api/trading/uta/${encodeURIComponent(this.id)}/historical`,
+        { contract: query, params },
+      )
+      .then((r) => r.bars)
   }
 
   searchContracts(pattern: string): Promise<ContractDescription[]> {

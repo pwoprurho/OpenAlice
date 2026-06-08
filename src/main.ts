@@ -27,6 +27,7 @@ import { OpenBBCommodityClient } from './domain/market-data/client/openbb-api/co
 import { OpenBBEconomyClient } from './domain/market-data/client/openbb-api/economy-client.js'
 import { createMarketSearchTools } from './tool/market.js'
 import { createAnalysisTools } from './tool/analysis.js'
+import { createBarService } from './domain/market-data/bars/index.js'
 import { createSectorRotationTools } from './tool/sector-rotation.js'
 import { createEconomyTools } from './tool/economy.js'
 import { SessionStore } from './core/session.js'
@@ -188,6 +189,18 @@ async function main() {
 
   const marketSearch = { symbolIndex, cryptoClient, currencyClient, commodityCatalog }
 
+  // Federated bar layer — vendor (OpenTypeBB) + broker (UTA) OHLCV behind one
+  // barId-keyed interface. Vendor branch live now; UTA branch lands with Phase 1.
+  const barService = createBarService({
+    marketSearch,
+    equityClient,
+    cryptoClient,
+    currencyClient,
+    commodityClient,
+    utaManager,
+    vendorProviders: config.marketData.providers,
+  })
+
   // ==================== Tool Registration ====================
 
   toolCenter.register(createThinkingTools(), 'thinking')
@@ -207,7 +220,7 @@ async function main() {
   if (config.news.enabled) {
     toolCenter.register(createNewsArchiveTools(newsStore), 'news')
   }
-  toolCenter.register(createAnalysisTools(equityClient, cryptoClient, currencyClient, commodityClient), 'analysis')
+  toolCenter.register(createAnalysisTools(barService), 'analysis')
   toolCenter.register(createSectorRotationTools(equityClient), 'sector-rotation')
   toolCenter.register(createEconomyTools(economyClient, commodityClient), 'economy')
 
@@ -369,6 +382,7 @@ async function main() {
     bbEngine: getSDKExecutor(),
     marketSearch,
     equityClient,
+    barService,
     utaManager,
     newsProvider: newsStore,
   }

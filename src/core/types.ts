@@ -3,6 +3,7 @@ import type { UTAManagerSDK } from '../services/uta-client/index.js'
 import type { INewsProvider } from '../domain/news/types.js'
 import type { MarketSearchDeps } from '../domain/market-data/aggregate-search.js'
 import type { EquityClientLike } from '../domain/market-data/client/types.js'
+import type { BarService } from '../domain/market-data/bars/index.js'
 import type { CronEngine } from '../task/cron/engine.js'
 import type { Heartbeat } from '../task/heartbeat/index.js'
 import type { Config, WebChannel } from './config.js'
@@ -66,6 +67,10 @@ export interface EngineContext {
   /** Equity market-data client. Shared between the equity/analysis/sector-rotation
    *  AI tools and the /api/market/* HTTP routes (e.g. sector-rotation). */
   equityClient: EquityClientLike
+  /** Federated K-line / bar layer — unifies vendor (OpenTypeBB) + broker (UTA)
+   *  OHLCV behind one barId-keyed interface. Consumed by the analysis tools and
+   *  (Phase 3) the /api/bars chart route. */
+  barService: BarService
 
   // Trading — HTTP-backed SDK that talks to the co-located UTA service.
   // FxService and SnapshotService live entirely inside UTA after Step 6;

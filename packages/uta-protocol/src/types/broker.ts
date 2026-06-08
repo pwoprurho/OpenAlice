@@ -173,6 +173,50 @@ export interface MarketClock {
   timestamp?: Date
 }
 
+/**
+ * Normalized bar interval — Alice-facing enum. Each broker maps this to its
+ * native bar-size / period / timeframe string. Keep this list small and
+ * additive; brokers declare which subset they support via
+ * `AccountCapabilities.historicalBars.supportedBarSizes`.
+ */
+export type BarInterval = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w'
+
+/**
+ * What price stream the bars represent. Mirrors IBKR `whatToShow`; other
+ * brokers only support TRADES (the default) and ignore non-TRADES values.
+ */
+export type BarWhatToShow = 'TRADES' | 'MIDPOINT' | 'BID' | 'ASK'
+
+export interface BarParams {
+  /** Normalized interval; the broker maps it to its native bar size. */
+  interval: BarInterval
+  /** Inclusive lower bound. If omitted, the broker derives a window from `limit`. */
+  start?: Date
+  /** Inclusive upper bound (default: now). */
+  end?: Date
+  /** Max number of bars to return (most-recent-first truncation by the broker). */
+  limit?: number
+  /** Price-stream selector — only IBKR honors non-TRADES values; others ignore. */
+  whatToShow?: BarWhatToShow
+}
+
+/**
+ * One OHLCV bar. Monetary fields are strings — the trading side keeps
+ * Decimal-as-string end-to-end (same convention as `Quote`/`Position`). The
+ * read-only analysis surface (`domain/market-data`) converts to number at its
+ * own boundary.
+ */
+export interface Bar {
+  /** Bar open time (UTC). */
+  timestamp: Date
+  open: string
+  high: string
+  low: string
+  close: string
+  /** Base-asset volume for the bar. */
+  volume: string
+}
+
 // ==================== Broker health ====================
 
 export type BrokerHealth = 'healthy' | 'degraded' | 'offline'
@@ -189,9 +233,26 @@ export interface BrokerHealthInfo {
 
 // ==================== Account capabilities ====================
 
+/**
+ * Historical-bar capability, carrying entitlement/quality semantics rather
+ * than a bare boolean:
+ *   - 'realtime'     full-quality exchange data (CCXT free public OHLCV)
+ *   - 'iex'          IEX-only feed, partial tape (Alpaca free tier)
+ *   - 'delayed'      15-min delayed (IBKR without a market-data subscription)
+ *   - 'subscription' full data, gated on an active subscription
+ */
+export interface HistoricalBarsCapability {
+  supported: boolean
+  quality?: 'realtime' | 'iex' | 'delayed' | 'subscription'
+  /** Subset of BarInterval this broker actually maps to a native bar size. */
+  supportedBarSizes?: BarInterval[]
+}
+
 export interface AccountCapabilities {
   supportedSecTypes: string[]
   supportedOrderTypes: string[]
+  /** Absent ⇒ no historical-bar support (loud-refuse on getHistorical). */
+  historicalBars?: HistoricalBarsCapability
 }
 
 // ==================== Broker config field descriptor ====================
@@ -265,6 +326,15 @@ export interface IBroker<TMeta = unknown> {
   getOrder(orderId: string): Promise<OpenOrder | null>
   getQuote(contract: Contract): Promise<Quote>
   getMarketClock(): Promise<MarketClock>
+
+  /**
+   * Historical OHLCV bars. Optional — brokers without time-series data
+   * (e.g. LeverUp/Pyth) leave it undefined and declare no `historicalBars`
+   * capability; `UnifiedTradingAccount.getHistorical` loud-refuses with a
+   * `BrokerError('CONFIG', ...)` rather than silently returning `[]`. Each
+   * implementation maps `BarParams.interval` to its native bar size.
+   */
+  getHistorical?(contract: Contract, params: BarParams): Promise<Bar[]>
 
   // ---- Capabilities ----
 

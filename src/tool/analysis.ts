@@ -8,87 +8,30 @@
 
 import { tool } from 'ai'
 import { z } from 'zod'
-import type { EquityClientLike, CryptoClientLike, CurrencyClientLike, CommodityClientLike } from '@/domain/market-data/client/types'
+import type { BarService } from '@/domain/market-data/bars/index'
 import { IndicatorCalculator } from '@/domain/analysis/indicator/calculator'
-import type { IndicatorContext, OhlcvData, HistoricalDataResult, DataSourceMeta } from '@/domain/analysis/indicator/types'
+import type { IndicatorContext, HistoricalDataResult } from '@/domain/analysis/indicator/types'
 
-/** 根据 interval 决定拉取的日历天数（约 1 倍冗余） */
-function getCalendarDays(interval: string): number {
-  const match = interval.match(/^(\d+)([dwhm])$/)
-  if (!match) return 365 // fallback: 1 年
-
-  const n = parseInt(match[1])
-  const unit = match[2]
-
-  switch (unit) {
-    case 'd': return n * 730   // 日线：2 年
-    case 'w': return n * 1825  // 周线：5 年
-    case 'h': return n * 90    // 小时线：90 天
-    case 'm': return n * 30    // 分钟线：30 天
-    default:  return 365
-  }
-}
-
-function buildStartDate(interval: string): string {
-  const calendarDays = getCalendarDays(interval)
-  const startDate = new Date()
-  startDate.setDate(startDate.getDate() - calendarDays)
-  return startDate.toISOString().slice(0, 10)
-}
-
+/**
+ * Build the indicator context over the federated bar service. v1 keeps its
+ * plain-symbol / vendor-default contract (the AI still writes `CLOSE('AAPL','1d')`
+ * and passes `asset`); the federation resolves transparently and the returned
+ * `meta` reports the actual source (UTA vs vendor). Window heuristics + null
+ * filtering now live in the bar service.
+ */
 function buildContext(
   asset: 'equity' | 'crypto' | 'currency' | 'commodity',
-  equityClient: EquityClientLike,
-  cryptoClient: CryptoClientLike,
-  currencyClient: CurrencyClientLike,
-  commodityClient: CommodityClientLike,
+  barService: BarService,
 ): IndicatorContext {
   return {
     getHistoricalData: async (symbol, interval): Promise<HistoricalDataResult> => {
-      const start_date = buildStartDate(interval)
-
-      let raw: Array<Record<string, unknown>>
-      switch (asset) {
-        case 'equity':
-          raw = await equityClient.getHistorical({ symbol, start_date, interval })
-          break
-        case 'crypto':
-          raw = await cryptoClient.getHistorical({ symbol, start_date, interval })
-          break
-        case 'currency':
-          raw = await currencyClient.getHistorical({ symbol, start_date, interval })
-          break
-        case 'commodity':
-          raw = await commodityClient.getSpotPrices({ symbol, start_date })
-          break
-      }
-
-      // Filter out bars with null OHLC (yfinance returns null for incomplete/missing data)
-      const data = raw.filter(
-        (d): d is Record<string, unknown> & OhlcvData =>
-          d.close != null && d.open != null && d.high != null && d.low != null,
-      ) as OhlcvData[]
-
-      data.sort((a, b) => a.date.localeCompare(b.date))
-
-      const meta: DataSourceMeta = {
-        symbol,
-        from: data.length > 0 ? data[0].date : '',
-        to: data.length > 0 ? data[data.length - 1].date : '',
-        bars: data.length,
-      }
-
-      return { data, meta }
+      const { bars, meta } = await barService.getBars({ symbol, assetClass: asset }, { interval })
+      return { data: bars, meta }
     },
   }
 }
 
-export function createAnalysisTools(
-  equityClient: EquityClientLike,
-  cryptoClient: CryptoClientLike,
-  currencyClient: CurrencyClientLike,
-  commodityClient: CommodityClientLike,
-) {
+export function createAnalysisTools(barService: BarService) {
   return {
     calculateIndicator: tool({
       description: `Calculate technical indicators for any asset using formula expressions.
@@ -130,7 +73,7 @@ Use marketSearchForResearch to find the correct symbol first.`,
         precision: z.number().int().min(0).max(10).optional().describe('Decimal places (default: 4)'),
       }).meta({ examples: [{ asset: 'equity', formula: "SMA(CLOSE('AAPL', '1d'), 50)" }] }),
       execute: async ({ asset, formula, precision }) => {
-        const context = buildContext(asset, equityClient, cryptoClient, currencyClient, commodityClient)
+        const context = buildContext(asset, barService)
         const calculator = new IndicatorCalculator(context)
         return await calculator.calculate(formula, precision)
       },

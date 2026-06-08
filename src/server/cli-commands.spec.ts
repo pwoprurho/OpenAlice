@@ -31,7 +31,7 @@ describe('CLI_EXPORTS — data export (global tools)', () => {
   tc.register(createMarketSearchTools(any), 'market-search')
   tc.register(createEquityTools(any), 'equity')
   tc.register(createNewsArchiveTools(any), 'news')
-  tc.register(createAnalysisTools(any, any, any, any), 'analysis')
+  tc.register(createAnalysisTools(any), 'analysis')
   tc.register(createEconomyTools(any, any), 'economy')
 
   it('every mapped verb resolves to a registered global tool', () => {

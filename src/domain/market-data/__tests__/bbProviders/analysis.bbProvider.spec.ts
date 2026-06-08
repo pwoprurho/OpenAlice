@@ -14,6 +14,25 @@ import { SDKCryptoClient } from '@/domain/market-data/client/typebb/crypto-clien
 import { SDKCurrencyClient } from '@/domain/market-data/client/typebb/currency-client.js'
 import { SDKCommodityClient } from '@/domain/market-data/client/typebb/commodity-client.js'
 import { createAnalysisTools } from '@/tool/analysis.js'
+import { createBarService } from '@/domain/market-data/bars/index.js'
+import type { EquityClientLike, CryptoClientLike, CurrencyClientLike, CommodityClientLike } from '@/domain/market-data/client/types.js'
+
+/** Wrap the vendor clients in a bar service (analysis only uses the vendor
+ *  getBars path — marketSearch / utaManager are stubbed). */
+function makeBarService(
+  equityClient: EquityClientLike,
+  cryptoClient: CryptoClientLike,
+  currencyClient: CurrencyClientLike,
+  commodityClient: CommodityClientLike,
+  commodity = 'yfinance',
+) {
+  return createBarService({
+    marketSearch: { symbolIndex: {} as never, cryptoClient, currencyClient, commodityCatalog: {} as never },
+    equityClient, cryptoClient, currencyClient, commodityClient,
+    utaManager: { has: async () => false, get: async () => undefined },
+    vendorProviders: { equity: 'yfinance', crypto: 'yfinance', currency: 'yfinance', commodity },
+  })
+}
 
 let ctx: TestContext
 let calculateIndicator: ReturnType<typeof createAnalysisTools>['calculateIndicator']
@@ -29,7 +48,7 @@ beforeAll(async () => {
   const currencyClient = new SDKCurrencyClient(executor, 'currency', 'yfinance', creds, routeMap)
   const commodityClient = new SDKCommodityClient(executor, 'commodity', 'yfinance', creds, routeMap)
 
-  const tools = createAnalysisTools(equityClient, cryptoClient, currencyClient, commodityClient)
+  const tools = createAnalysisTools(makeBarService(equityClient, cryptoClient, currencyClient, commodityClient))
   calculateIndicator = tools.calculateIndicator
 })
 
@@ -142,7 +161,7 @@ describe('analysis e2e — commodity with FMP', () => {
     const cryptoClient = new SDKCryptoClient(executor, 'crypto', 'yfinance', ctx.credentials, routeMap)
     const currencyClient = new SDKCurrencyClient(executor, 'currency', 'yfinance', ctx.credentials, routeMap)
 
-    const tools = createAnalysisTools(equityClient, cryptoClient, currencyClient, commodityClientFmp)
+    const tools = createAnalysisTools(makeBarService(equityClient, cryptoClient, currencyClient, commodityClientFmp, 'fmp'))
     const result: any = await tools.calculateIndicator.execute!(
       { asset: 'commodity', formula: "CLOSE('gold', '1d')[-1]" },
       { toolCallId: 'test', messages: [] as any, abortSignal: undefined as any },

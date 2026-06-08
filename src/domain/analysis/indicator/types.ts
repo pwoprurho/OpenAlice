@@ -17,12 +17,24 @@ export interface OhlcvData {
   [key: string]: unknown
 }
 
-/** 数据来源元数据 — 从实际 bar 数据提取，不人造 */
+/** 数据来源元数据 — 从实际 bar 数据提取，不人造。
+ *  新增字段(全可选,向后兼容)由联邦 bar 层填充,告诉请求方这根 K 线来自
+ *  UTA(broker)还是 vendor。结构上与 market-data `BarMeta` 一致。 */
 export interface DataSourceMeta {
   symbol: string
   from: string   // 第一根 bar 的 date
   to: string     // 最后一根 bar 的 date
   bars: number
+  /** 'uta'(broker) | 'vendor' — bar 的来源种类。 */
+  source?: 'uta' | 'vendor'
+  /** 具体源 id:vendor provider 名(yfinance)或 UTA 账户 id(alpaca-paper)。 */
+  sourceId?: string
+  /** "{sourceId}|{nativeSymbol}" — 操作命名空间的唯一句柄。 */
+  barId?: string
+  /** vendor 路径报请求 provider;openbb-api 路径报响应 provider。 */
+  provider?: string
+  /** 数据档位:free|delayed|subscription|iex|realtime。 */
+  barCapability?: 'free' | 'delayed' | 'subscription' | 'iex' | 'realtime'
 }
 
 /** getHistoricalData 的返回值 — OHLCV + 元数据 */
