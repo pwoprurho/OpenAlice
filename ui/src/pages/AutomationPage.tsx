@@ -95,7 +95,6 @@ function CronSection() {
   }
 
   const handleDelete = async (job: CronJob) => {
-    if (job.name === '__heartbeat__') return
     try {
       await api.cron.remove(job.id)
       await loadJobs()
@@ -162,7 +161,6 @@ function CronJobCard({ job, onToggle, onRunNow, onDelete }: {
   onDelete: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
-  const isHeartbeat = job.name === '__heartbeat__'
 
   return (
     <div className={`rounded-lg border ${job.enabled ? 'border-border' : 'border-border/50 opacity-60'} bg-bg`}>
@@ -173,9 +171,7 @@ function CronJobCard({ job, onToggle, onRunNow, onDelete }: {
         {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className={`text-sm font-medium ${isHeartbeat ? 'text-purple' : 'text-text'}`}>
-              {isHeartbeat ? '💓 heartbeat' : job.name}
-            </span>
+            <span className="text-sm font-medium text-text">{job.name}</span>
             <span className="text-xs text-text-muted">{job.id}</span>
             {job.state.lastStatus === 'error' && (
               <span className="text-xs text-red">
@@ -207,15 +203,13 @@ function CronJobCard({ job, onToggle, onRunNow, onDelete }: {
           >
             {expanded ? '▾' : '▸'}
           </button>
-          {!isHeartbeat && (
-            <button
-              onClick={onDelete}
-              title="Delete"
-              className="p-1.5 rounded text-text-muted hover:text-red hover:bg-bg-tertiary transition-colors text-xs"
-            >
-              ✕
-            </button>
-          )}
+          <button
+            onClick={onDelete}
+            title="Delete"
+            className="p-1.5 rounded text-text-muted hover:text-red hover:bg-bg-tertiary transition-colors text-xs"
+          >
+            ✕
+          </button>
         </div>
       </div>
 

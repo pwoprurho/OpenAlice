@@ -21,83 +21,12 @@ export const configApi = {
     return res.json()
   },
 
-  // ==================== Profile CRUD ====================
+  // ==================== Presets ====================
 
   async getPresets(): Promise<{ presets: Preset[] }> {
     const res = await fetch('/api/config/presets')
     if (!res.ok) throw new Error('Failed to load presets')
     return res.json()
-  },
-
-  async getProfiles(): Promise<{
-    profiles: Record<string, Profile>
-    credentials: Record<string, Credential>
-    activeProfile: string
-  }> {
-    const res = await fetch('/api/config/profiles')
-    if (!res.ok) throw new Error('Failed to load profiles')
-    return res.json()
-  },
-
-  async getSdkAdapters(): Promise<{ adapters: SdkAdapterInfo[] }> {
-    const res = await fetch('/api/config/sdk-adapters')
-    if (!res.ok) throw new Error('Failed to load SDK adapters')
-    return res.json()
-  },
-
-  async createProfile(slug: string, profile: Profile): Promise<{ slug: string; profile: Profile }> {
-    const res = await fetch('/api/config/profiles', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ slug, profile }),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to create profile' }))
-      throw new Error(err.error || 'Failed to create profile')
-    }
-    return res.json()
-  },
-
-  async updateProfile(slug: string, profile: Profile): Promise<{ slug: string; profile: Profile }> {
-    const res = await fetch(`/api/config/profiles/${encodeURIComponent(slug)}`, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify(profile),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to update profile' }))
-      throw new Error(err.error || 'Failed to update profile')
-    }
-    return res.json()
-  },
-
-  async deleteProfile(slug: string): Promise<void> {
-    const res = await fetch(`/api/config/profiles/${encodeURIComponent(slug)}`, { method: 'DELETE' })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to delete profile' }))
-      throw new Error(err.error || 'Failed to delete profile')
-    }
-  },
-
-  async testProfile(profileData: Profile): Promise<{ ok: boolean; response?: string; error?: string }> {
-    const res = await fetch('/api/config/profiles/test', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(profileData),
-    })
-    return res.json()
-  },
-
-  async setActiveProfile(slug: string): Promise<void> {
-    const res = await fetch('/api/config/active-profile', {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({ slug }),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to set active profile' }))
-      throw new Error(err.error || 'Failed to set active profile')
-    }
   },
 
   // ==================== Credential Vault ====================

@@ -47,17 +47,16 @@ export interface MessageSentPayload {
 
 // ==================== Canonical AgentWork events ====================
 //
-// All "Alice runs an async task" flows funnel through these four
-// canonical events instead of per-trigger-source event types. The
-// `source` field on each payload is the routing key — consumers
-// filter on it instead of subscribing to separate event types.
-//
-// `agent.work.requested` is externally-ingestable (webhook). The
-// done/skip/error events are internal-only.
+// DORMANT since World B was deleted: the in-process consumer
+// (agent-work-listener) is gone, so nothing acts on these today.
+// `agent.work.requested` is still externally-ingestable via the webhook
+// `/api/events/ingest` (it lands in the event log + Flow), kept so a future
+// webhook→headless-workspace listener can consume it without re-adding a wire
+// type. done/skip/error are no longer emitted by anyone. The `source` field is
+// the routing key consumers would filter on.
 
 export interface AgentWorkRequestedPayload {
-  /** Which trigger source produced this work request. Drives the
-   *  agent-work-listener's source-registry lookup. */
+  /** Which trigger source produced this work request. */
   source: AgentWorkSource
   /** The AI prompt to execute. */
   prompt: string

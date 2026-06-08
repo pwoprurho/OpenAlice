@@ -1,8 +1,7 @@
 /**
  * MCP Export — shared bridge from Vercel AI SDK tools to MCP format.
  *
- * Used by both `src/server/mcp.ts` (external MCP server) and
- * `src/ai-providers/agent-sdk/tool-bridge.ts` (Agent SDK in-process MCP).
+ * Used by `src/server/mcp.ts` (the external MCP server workspaces connect to).
  *
  * Handles:
  * - Zod shape extraction with number coercion (MCP clients may send "80" instead of 80)
