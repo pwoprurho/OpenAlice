@@ -17,7 +17,9 @@
 import { resolve } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import {
-  probePorts,
+  readPortsFile,
+  resolvePortConfig,
+  planPorts,
   spawnChild,
   waitForHttp,
   installCascadeShutdown,
@@ -27,8 +29,9 @@ import {
 } from './shared.js'
 
 async function main(): Promise<void> {
-  const ports = await probePorts()
   const dataHome = process.cwd()
+  // env (OPENALICE_*_PORT) > data/config/ports.json > default+probe.
+  const ports = await planPorts(resolvePortConfig(process.env, await readPortsFile(dataHome)))
   const flagPath = resolve(dataHome, 'data/control/restart-uta.flag')
 
   console.log('')

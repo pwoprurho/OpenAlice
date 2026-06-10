@@ -20,8 +20,8 @@
 
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { watch, mkdir } from 'node:fs/promises'
-import { dirname, basename } from 'node:path'
+import { watch, mkdir, readFile } from 'node:fs/promises'
+import { dirname, basename, resolve } from 'node:path'
 import { probeFreePort } from '../probe-port.js'
 
 export interface GuardianPorts {
@@ -30,16 +30,117 @@ export interface GuardianPorts {
   utaPort: number
 }
 
-/** Probe all three ports starting from defaults. Returns triple. */
-export async function probePorts(opts: {
-  webStart?: number
-  utaStart?: number
-} = {}): Promise<GuardianPorts> {
-  const webStart = opts.webStart ?? 47331
-  const utaStart = opts.utaStart ?? 47333
-  const webPort = await probeFreePort(webStart)
-  const mcpPort = await probeFreePort(webPort + 1)
-  const utaPort = await probeFreePort(Math.max(utaStart, mcpPort + 1))
+// ── Port configuration (L1 → L2) ────────────────────────────
+//
+// Ports are spawn-time-fixed: Guardian (L2) resolves them once and injects
+// them into the children via env (see memory:port-architecture-3-layers).
+// User-facing configuration lives in L1 — `data/config/ports.json`:
+//
+//   { "web": 47331, "mcp": 47332, "uta": 47333 }   (all keys optional)
+//
+// Deliberately a data/config file and NOT a dotenv file: the data dir is the
+// one location every topology agrees on (dev repo, docker volume, Electron
+// userData), and OpenAlice does not want an env file that invites API keys —
+// those belong in the credential vault UI.
+//
+// Precedence per port: explicit env (OPENALICE_*_PORT) > ports.json > default.
+// An EXPLICITLY configured port that is already taken fails loud — silently
+// drifting off a value the user pinned would be worse than aborting. Only
+// unconfigured ports keep the probe-upward-from-default behavior.
+
+const PORT_DEFAULTS = { web: 47331, mcp: 47332, uta: 47333 } as const
+
+export type PortName = keyof typeof PORT_DEFAULTS
+
+export interface PortChoice {
+  value: number
+  /** Where the value came from — only 'default' ports may drift via probing. */
+  source: 'env' | 'file' | 'default'
+}
+
+export type PortConfig = Record<PortName, PortChoice>
+
+const ENV_KEYS: Record<PortName, string> = {
+  web: 'OPENALICE_WEB_PORT',
+  mcp: 'OPENALICE_MCP_PORT',
+  uta: 'OPENALICE_UTA_PORT',
+}
+
+function parsePort(raw: unknown, origin: string): number {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    throw new Error(`[guardian] invalid port ${JSON.stringify(raw)} from ${origin} — expected an integer in 1..65535`)
+  }
+  return n
+}
+
+/**
+ * Read `data/config/ports.json` under `userDataHome`. Missing file → {}.
+ * Present-but-broken (bad JSON / non-integer values) fails loud — a typo in
+ * explicit config should abort the boot, not silently fall back to defaults.
+ */
+export async function readPortsFile(userDataHome: string): Promise<Partial<Record<PortName, number>>> {
+  const filePath = resolve(userDataHome, 'data', 'config', 'ports.json')
+  let raw: string
+  try {
+    raw = await readFile(filePath, 'utf8')
+  } catch {
+    return {}
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    throw new Error(`[guardian] ${filePath} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`[guardian] ${filePath} must be a JSON object like {"web":47331,"mcp":47332,"uta":47333}`)
+  }
+  const out: Partial<Record<PortName, number>> = {}
+  for (const name of Object.keys(PORT_DEFAULTS) as PortName[]) {
+    const v = (parsed as Record<string, unknown>)[name]
+    if (v !== undefined) out[name] = parsePort(v, `${filePath} ("${name}")`)
+  }
+  return out
+}
+
+/** Resolve each port's value + source: env > ports.json > default. */
+export function resolvePortConfig(
+  env: NodeJS.ProcessEnv,
+  file: Partial<Record<PortName, number>>,
+): PortConfig {
+  const pick = (name: PortName): PortChoice => {
+    const envRaw = env[ENV_KEYS[name]]
+    if (envRaw !== undefined && envRaw !== '') {
+      return { value: parsePort(envRaw, ENV_KEYS[name]), source: 'env' }
+    }
+    const fromFile = file[name]
+    if (fromFile !== undefined) return { value: fromFile, source: 'file' }
+    return { value: PORT_DEFAULTS[name], source: 'default' }
+  }
+  return { web: pick('web'), mcp: pick('mcp'), uta: pick('uta') }
+}
+
+/**
+ * Turn a resolved PortConfig into bindable ports. Explicit (env/file) ports
+ * assert-free and fail loud when taken; default ports probe upward (web from
+ * 47331, mcp from web+1, uta from max(47333, mcp+1)) — the historical
+ * collision-dodging behavior.
+ */
+export async function planPorts(cfg: PortConfig): Promise<GuardianPorts> {
+  const claim = async (name: PortName, choice: PortChoice, probeStart: number): Promise<number> => {
+    if (choice.source === 'default') return probeFreePort(probeStart)
+    try {
+      return await probeFreePort(choice.value, choice.value)
+    } catch {
+      throw new Error(
+        `[guardian] port ${choice.value} (${name}, from ${choice.source === 'env' ? ENV_KEYS[name] : 'data/config/ports.json'}) is already in use — free it or configure another port`,
+      )
+    }
+  }
+  const webPort = await claim('web', cfg.web, PORT_DEFAULTS.web)
+  const mcpPort = await claim('mcp', cfg.mcp, webPort + 1)
+  const utaPort = await claim('uta', cfg.uta, Math.max(PORT_DEFAULTS.uta, mcpPort + 1))
   return { webPort, mcpPort, utaPort }
 }
 

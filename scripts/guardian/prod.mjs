@@ -23,14 +23,57 @@
  */
 
 import { spawn } from 'node:child_process'
-import { mkdir, watch } from 'node:fs/promises'
+import { mkdir, readFile, watch } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-const WEB_PORT = Number(process.env.OPENALICE_WEB_PORT ?? 47331)
-const MCP_PORT = Number(process.env.OPENALICE_MCP_PORT ?? 47332)
-const UTA_PORT = Number(process.env.OPENALICE_UTA_PORT ?? 47333)
 const DATA_HOME = process.env.OPENALICE_USER_DATA_HOME ?? '/data'
+
+// Port precedence: env (OPENALICE_*_PORT) > data/config/ports.json > default.
+// Mirrors scripts/guardian/shared.ts (kept inline — the runtime image ships
+// no TS tooling). Broken explicit config fails loud rather than silently
+// falling back; an in-use port fails at bind, also loud.
+function parsePort(raw, origin) {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    throw new Error(`[guardian/prod] invalid port ${JSON.stringify(raw)} from ${origin} — expected an integer in 1..65535`)
+  }
+  return n
+}
+
+async function readPortsFile(userDataHome) {
+  const filePath = resolve(userDataHome, 'data', 'config', 'ports.json')
+  let raw
+  try {
+    raw = await readFile(filePath, 'utf8')
+  } catch {
+    return {}
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    throw new Error(`[guardian/prod] ${filePath} is not valid JSON: ${err?.message ?? err}`)
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`[guardian/prod] ${filePath} must be a JSON object like {"web":47331,"mcp":47332,"uta":47333}`)
+  }
+  const out = {}
+  for (const name of ['web', 'mcp', 'uta']) {
+    if (parsed[name] !== undefined) out[name] = parsePort(parsed[name], `${filePath} ("${name}")`)
+  }
+  return out
+}
+
+const portsFile = await readPortsFile(DATA_HOME)
+const pickPort = (envKey, fileValue, fallback) => {
+  const envRaw = process.env[envKey]
+  if (envRaw !== undefined && envRaw !== '') return parsePort(envRaw, envKey)
+  return fileValue ?? fallback
+}
+const WEB_PORT = pickPort('OPENALICE_WEB_PORT', portsFile.web, 47331)
+const MCP_PORT = pickPort('OPENALICE_MCP_PORT', portsFile.mcp, 47332)
+const UTA_PORT = pickPort('OPENALICE_UTA_PORT', portsFile.uta, 47333)
 const FLAG_PATH = resolve(DATA_HOME, 'data/control/restart-uta.flag')
 const UTA_URL = `http://127.0.0.1:${UTA_PORT}`
 
