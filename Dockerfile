@@ -30,16 +30,20 @@ COPY ui/package.json ui/
 
 RUN pnpm install --frozen-lockfile
 
-# Source + build. `pnpm build` runs `turbo run build` (workspace packages
-# + UI Vite build + services/uta tsup) then `tsup` bundles the Alice
-# backend into `dist/main.js`. UTA service ends up at
-# `services/uta/dist/uta.js`.
+# Source + build. Mirrors root `pnpm build` (turbo: workspace packages +
+# UI Vite build + services/uta, then `tsup` bundles the Alice backend
+# into `dist/main.js` — UTA ends up at `services/uta/dist/uta.js`), but
+# EXCLUDES the Electron desktop shell: `apps/desktop` matches the
+# `apps/*` workspace glob, yet its package.json is deliberately absent
+# from the manifest layer above, so its deps (electron, ~500MB) are
+# never installed — an unfiltered `turbo run build` would die on TS2307
+# "Cannot find module 'electron'". The server image never needs it.
 COPY . .
-RUN pnpm build
+RUN pnpm exec turbo run build --filter='!@traderalice/desktop' \
+    && pnpm exec tsup src/main.ts --format esm --dts
 
-# Strip dev deps before the runtime stage harvests node_modules. With
-# `electron` + `electron-builder` (each ~500MB) in devDependencies, this
-# is the difference between a 2.9GB image and a sub-1GB image. `CI=true`
+# Strip dev deps (typescript, turbo, vitest, vite, …) before the runtime
+# stage harvests node_modules — a multi-hundred-MB cut. `CI=true`
 # satisfies pnpm's "won't remove modules without TTY confirmation" check.
 RUN CI=true pnpm prune --prod --config.ignore-scripts=true
 
@@ -48,12 +52,19 @@ FROM node:22-trixie-slim AS runtime
 WORKDIR /app
 
 # Bash + POSIX utils are required by workspace bootstrap.sh scripts;
-# trixie-slim already ships them. `tini` becomes PID 1 so signals
-# (SIGTERM from `docker stop`) reach the Guardian supervisor cleanly
-# instead of getting dropped by Node's default PID-1 behaviour, and
-# zombies from short-lived children (workspace CLI auth flows, etc.)
-# get reaped.
-RUN apt-get update && apt-get install -y --no-install-recommends tini \
+# trixie-slim already ships them — but NOT `git`, which every template's
+# bootstrap.sh needs (`git init` per the Harness rule; auto-quant /
+# finance-research also `git clone`). Without it, creating any
+# Chat/Workspace in the container fails with exit 127. `ca-certificates`
+# keeps HTTPS clones of satellite repos working in the slim image.
+# `tini` becomes PID 1 so signals (SIGTERM from `docker stop`) reach the
+# Guardian supervisor cleanly instead of getting dropped by Node's
+# default PID-1 behaviour, and zombies from short-lived children
+# (workspace CLI auth flows, etc.) get reaped.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git \
+        tini \
     && rm -rf /var/lib/apt/lists/*
 
 # Two agent CLIs installed globally so they're on PATH for the PTY
