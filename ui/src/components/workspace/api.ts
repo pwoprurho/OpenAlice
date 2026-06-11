@@ -110,6 +110,9 @@ export interface TemplateInfo {
   /** Sort key for dashboard grouping. Lower = earlier. Templates without
    *  a declared `groupOrder` sort after declared ones, by name. */
   readonly groupOrder?: number;
+  /** Community-tier: bundles a third-party ecosystem maintained outside
+   *  OpenAlice. Rendered under a separate "Community" section. */
+  readonly community?: boolean;
   readonly defaultAgents: readonly string[];
   /** Template version, declared in README frontmatter. "0.0.0" when missing. */
   readonly version: string;

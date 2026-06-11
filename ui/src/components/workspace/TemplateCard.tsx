@@ -1,4 +1,5 @@
 import { Bot, Code, Cpu, Sparkles, Terminal, type LucideIcon } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import type { AgentInfo, TemplateInfo } from './api'
 
@@ -42,6 +43,7 @@ interface Props {
 }
 
 export function TemplateCard({ template: t, agents, onOpen }: Props) {
+  const { t: tr } = useTranslation()
   const title = t.displayName ?? humanize(t.name)
   return (
     <button
@@ -58,6 +60,11 @@ export function TemplateCard({ template: t, agents, onOpen }: Props) {
             <span className="text-[11px] font-mono text-text-muted tabular-nums">
               v{t.version}
             </span>
+            {t.community && (
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-text-muted">
+                {tr('templates.communityBadge')}
+              </span>
+            )}
           </div>
           {t.description && (
             <p className="text-[12px] text-text-muted line-clamp-3 mt-1">
@@ -69,7 +76,7 @@ export function TemplateCard({ template: t, agents, onOpen }: Props) {
 
       <div className="border-t border-border pt-3 flex items-center gap-3 flex-wrap">
         <div className="text-[10px] uppercase tracking-wider text-text-muted/70">
-          Agents
+          {tr('templates.agentsLabel')}
         </div>
         <div className="flex items-center gap-2 text-text-muted flex-wrap">
           {agents.map((a) => (

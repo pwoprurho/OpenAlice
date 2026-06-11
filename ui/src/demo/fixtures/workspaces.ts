@@ -83,6 +83,7 @@ export const financeResearchTemplate: TemplateInfo = {
   description:
     'Finance research workspace bundling himself65/finance-skills (yfinance market data, valuation, earnings, social readers, sentiment).',
   groupOrder: 30,
+  community: true,
   defaultAgents: ['claude', 'codex'],
   version: '0.1.0',
   hasReadme: false,
@@ -92,7 +93,7 @@ export const chatTemplate: TemplateInfo = {
   name: 'chat',
   displayName: 'Chat',
   description:
-    "Chat workspace wired to OpenAlice's MCP server — full trading/market tool surface available to the agent.",
+    'General-purpose Alice workspace — full market/research data surface via the alice*/traderhub CLIs (default) or MCP, per launch choice. Trading tools require MCP mode.',
   groupOrder: 10,
   defaultAgents: ['claude', 'codex'],
   version: '0.1.0',

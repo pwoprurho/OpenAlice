@@ -37,6 +37,13 @@ export interface TemplateMeta {
    * `template.json` — no frontend code change required.
    */
   readonly groupOrder?: number;
+  /**
+   * Community-tier template: bundles a third-party ecosystem maintained
+   * outside OpenAlice (satellite/upstream repos). UI surfaces render these
+   * under a separate "Community" section so the official/community
+   * priority split stays legible. Absent = official.
+   */
+  readonly community?: boolean;
   /** Absolute path to the template's `bootstrap.sh`. */
   readonly bootstrapScript: string;
   /** Absolute path to the template's `files/` directory (may not exist). */
@@ -127,6 +134,7 @@ export class TemplateRegistry {
         ...(tplMeta.description !== undefined ? { description: tplMeta.description } : {}),
         ...(tplMeta.displayName !== undefined ? { displayName: tplMeta.displayName } : {}),
         ...(tplMeta.groupOrder !== undefined ? { groupOrder: tplMeta.groupOrder } : {}),
+        ...(tplMeta.community !== undefined ? { community: tplMeta.community } : {}),
         bootstrapScript,
         filesDir,
         templateDir,
@@ -177,6 +185,9 @@ interface ParsedTemplateMeta {
   readonly description?: string;
   readonly displayName?: string;
   readonly groupOrder?: number;
+  /** Community-tier template: bundles a third-party ecosystem maintained
+   *  outside OpenAlice. UI surfaces separate these from official templates. */
+  readonly community?: boolean;
   readonly defaultAgents: readonly string[];
   readonly injectMcp: boolean | 'inbox';
   readonly injectPersona: boolean;
@@ -252,6 +263,7 @@ async function readTemplateMeta(path: string): Promise<ParsedTemplateMeta> {
       typeof obj['groupOrder'] === 'number' && Number.isFinite(obj['groupOrder'])
         ? obj['groupOrder']
         : undefined;
+    const community = obj['community'] === true ? true : undefined;
     const defaultAgents = Array.isArray(obj['defaultAgents'])
       ? obj['defaultAgents'].filter((a): a is string => typeof a === 'string')
       : null;
@@ -270,6 +282,7 @@ async function readTemplateMeta(path: string): Promise<ParsedTemplateMeta> {
       ...(description !== undefined ? { description } : {}),
       ...(displayName !== undefined ? { displayName } : {}),
       ...(groupOrder !== undefined ? { groupOrder } : {}),
+      ...(community !== undefined ? { community } : {}),
       defaultAgents: defaultAgents && defaultAgents.length > 0 ? defaultAgents : ['claude'],
       injectMcp,
       injectPersona,

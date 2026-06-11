@@ -148,7 +148,7 @@ export class WorkspaceCreator {
     // template manifest), then the initial commit. The launcher — not the
     // bootstrap script — owns what lands in the workspace's first commit.
     try {
-      const effectiveTemplate = resolveInjection(template, options?.toolAccess ?? 'mcp');
+      const effectiveTemplate = resolveInjection(template, options?.toolAccess ?? 'cli');
       await injectWorkspaceContext({ template: effectiveTemplate, wsId: id, dir });
     } catch (err) {
       log.warn('inject.failed', { err });

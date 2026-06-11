@@ -44,6 +44,7 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
         ...(t.description !== undefined ? { description: t.description } : {}),
         ...(t.displayName !== undefined ? { displayName: t.displayName } : {}),
         ...(t.groupOrder !== undefined ? { groupOrder: t.groupOrder } : {}),
+        ...(t.community !== undefined ? { community: t.community } : {}),
         defaultAgents: t.defaultAgents,
         version: t.version,
         hasReadme: t.readmePath !== undefined,
