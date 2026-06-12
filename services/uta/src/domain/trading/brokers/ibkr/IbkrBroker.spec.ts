@@ -89,3 +89,64 @@ describe('IbkrBroker — nativeKey grammar (hub/leaf identity)', () => {
     expect(sym.secType).toBe('STK')
   })
 })
+
+describe('IbkrBroker — getAccount mixed-currency math (ANG-101 / issues #295 #314)', () => {
+  function brokerWithCache(values: Record<string, string>, positions: unknown[]): IbkrBroker {
+    const b = bareBroker()
+    ;(b as unknown as { bridge: unknown }).bridge = {
+      getAccountCache: () => ({ values: new Map(Object.entries(values)), positions }),
+    }
+    return b
+  }
+  const hkdPos = { contract: { conId: 1 }, currency: 'HKD', unrealizedPnL: '-4767.62', marketValue: '46426.72' }
+  const usdPos = { contract: { conId: 2 }, currency: 'USD', unrealizedPnL: '368.80', marketValue: '2913.10' }
+
+  it('converts per-position PnL via TWS ExchangeRate tags instead of blind-summing', async () => {
+    const b = brokerWithCache({
+      TotalCashValue: '1036370.91', NetLiquidation: '1046101.70',
+      'ExchangeRate:HKD': '0.1276211',
+      RealizedPnL: '0', BuyingPower: '0', InitMarginReq: '0', MaintMarginReq: '0',
+    }, [hkdPos, usdPos])
+    const a = await b.getAccount()
+    // -4767.62 × 0.1276211 + 368.80 = -239.66… (blind sum was -4398.82)
+    expect(Number(a.unrealizedPnL)).toBeCloseTo(-239.66, 1)
+    // Mixed book → TWS's consolidated NetLiquidation tag wins (#314)
+    expect(a.netLiquidation).toBe('1046101.7')
+  })
+
+  it('missing FX rate falls back to broker values, never sums garbage', async () => {
+    const b = brokerWithCache({
+      TotalCashValue: '1036370.91', NetLiquidation: '1046101.70', UnrealizedPnL: '-240',
+      RealizedPnL: '0', BuyingPower: '0', InitMarginReq: '0', MaintMarginReq: '0',
+    }, [hkdPos, usdPos])
+    const a = await b.getAccount()
+    expect(a.unrealizedPnL).toBe('-240')
+    expect(a.netLiquidation).toBe('1046101.7')
+  })
+
+  it('same-currency book keeps the reconstructed (fresher) netLiquidation', async () => {
+    const b = brokerWithCache({
+      TotalCashValue: '1000', NetLiquidation: '99999',
+      RealizedPnL: '0', BuyingPower: '0', InitMarginReq: '0', MaintMarginReq: '0',
+    }, [{ ...usdPos, multiplier: '1', quantity: '10' }])
+    const a = await b.getAccount()
+    expect(a.netLiquidation).not.toBe('99999') // cash + Σ marketValue, not the cached tag
+  })
+})
+
+describe('IbkrBroker — dead-connection gate (issue #294)', () => {
+  it('cache-backed reads and order paths refuse loudly when the socket is known-dead', async () => {
+    const b = bareBroker()
+    ;(b as unknown as { bridge: unknown }).bridge = { connectionDead: true }
+
+    await expect(b.getAccount()).rejects.toThrow(/connection lost/i)
+    await expect(b.getPositions()).rejects.toThrow(/connection lost/i)
+
+    const { contract, order } = stkOrder()
+    const r = await b.placeOrder(contract, order)
+    // placeOrder catches and returns { success: false } — the message must
+    // still carry the dead-connection cause, not a generic failure.
+    expect(r.success).toBe(false)
+    expect(r.error).toMatch(/connection lost/i)
+  })
+})

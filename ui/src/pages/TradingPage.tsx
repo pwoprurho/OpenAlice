@@ -708,7 +708,7 @@ function TestResultPanel({ result, utaId }: { result: TestConnectionResult; utaI
               <tbody>
                 {visiblePositions.map((p, i) => (
                   <tr key={i} className="border-t border-border">
-                    <td className="px-2.5 py-1.5 text-text font-mono">{p.contract.aliceId ?? p.contract.localSymbol ?? p.contract.symbol ?? '?'}</td>
+                    <td className="px-2.5 py-1.5 text-text font-mono" title={p.contract.aliceId}>{p.contract.symbol ?? p.contract.localSymbol ?? p.contract.aliceId ?? '?'}</td>
                     <td className="px-2.5 py-1.5 text-text-muted">{p.side}</td>
                     <td className="px-2.5 py-1.5 text-right text-text">{p.quantity}</td>
                     <td className="px-2.5 py-1.5 text-right text-text">{p.currency} {p.marketValue}</td>

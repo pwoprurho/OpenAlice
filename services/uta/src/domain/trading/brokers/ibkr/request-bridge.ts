@@ -374,7 +374,18 @@ export class RequestBridge extends DefaultEWrapper {
     this.accountId_ = accounts[0] ?? null
   }
 
+  /** True once the socket is known-dead (connectionClosed or a failed
+   *  heartbeat) and until the next successful (re)connect. The IBKR account
+   *  surface is cache-backed — without this flag a dead-but-idle connection
+   *  serves stale data and SWALLOWS ORDERS while health stays green
+   *  (issue #294). */
+  private connectionDead_ = false
+  get connectionDead(): boolean { return this.connectionDead_ }
+  markDead(): void { this.connectionDead_ = true }
+  markAlive(): void { this.connectionDead_ = false }
+
   override connectionClosed(): void {
+    this.connectionDead_ = true
     this.rejectAll(new BrokerError('NETWORK', 'Connection to TWS/Gateway lost'))
 
     if (this.connectReject) {
@@ -531,10 +542,20 @@ export class RequestBridge extends DefaultEWrapper {
     if (this.accountCache_) this.upsertPosition(this.accountCache_.positions, contract, row)
   }
 
-  override updateAccountValue(key: string, val: string, _currency: string, _accountName: string): void {
-    this.accountCachePending_?.values.set(key, val)
+  override updateAccountValue(key: string, val: string, currency: string, _accountName: string): void {
+    // Multi-currency families (CashBalance, NetLiquidationByCurrency,
+    // ExchangeRate, …) arrive once PER CURRENCY plus a consolidated BASE
+    // line. Store the composite key always; the plain key is reserved for
+    // the consolidated value — BASE wins it and, once written, a
+    // per-currency line can never overwrite it (issue #295: last-write-wins
+    // left whichever currency arrived last in the plain slot).
+    const apply = (m: Map<string, string>): void => {
+      if (currency) m.set(`${key}:${currency}`, val)
+      if (!currency || currency === 'BASE' || !m.has(`${key}:BASE`)) m.set(key, val)
+    }
+    if (this.accountCachePending_) apply(this.accountCachePending_.values)
     // Deltas must be visible immediately, not at the next downloadEnd swap.
-    this.accountCache_?.values.set(key, val)
+    if (this.accountCache_) apply(this.accountCache_.values)
   }
 
   override accountDownloadEnd(_accountName: string): void {

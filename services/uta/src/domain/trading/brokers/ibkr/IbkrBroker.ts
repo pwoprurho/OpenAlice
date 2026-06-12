@@ -94,7 +94,39 @@ export class IbkrBroker implements IBroker {
 
   // ==================== Lifecycle ====================
 
+  /** Periodic socket probe — see _ensureAlive / issue #294. */
+  private heartbeatTimer_: ReturnType<typeof setInterval> | null = null
+
+  /** Loud-refuse on a known-dead connection. The account surface is
+   *  cache-backed, so without this gate a dead socket serves stale reads
+   *  and accepts orders that never transmit (issue #294). */
+  private _ensureAlive(): void {
+    if (this.bridge?.connectionDead) {
+      throw new BrokerError('NETWORK',
+        'TWS/Gateway connection lost — reconnect pending. Cached data may be stale; orders will NOT transmit.')
+    }
+  }
+
+  private startHeartbeat(): void {
+    if (this.heartbeatTimer_) clearInterval(this.heartbeatTimer_)
+    this.heartbeatTimer_ = setInterval(() => {
+      if (this.bridge.connectionDead) return
+      this.bridge.requestCurrentTime(5000).catch(() => {
+        console.warn(`IbkrBroker[${this.id}]: heartbeat failed — marking connection dead`)
+        this.bridge.markDead()
+      })
+    }, 45_000)
+    // Don't hold the process open for the probe
+    this.heartbeatTimer_.unref?.()
+  }
+
   async init(): Promise<void> {
+    // A half-open socket still reports isConnected() — when the heartbeat
+    // (or connectionClosed) flagged it dead, force a teardown so the
+    // recovery loop's re-init actually reconnects instead of no-opping.
+    if (this.bridge.connectionDead && this.client.isConnected()) {
+      try { this.client.disconnect() } catch { /* already torn down */ }
+    }
     // Idempotent — skip if already connected (e.g. UTA re-wrapping a shared broker)
     if (this.client.isConnected()) return
 
@@ -123,6 +155,8 @@ export class IbkrBroker implements IBroker {
     try {
       this.bridge.startAccountSubscription(this.accountId)
       await this.bridge.waitForAccountReady()
+      this.bridge.markAlive()
+      this.startHeartbeat()
       console.log(`IbkrBroker[${this.id}]: connected (account=${this.accountId}, host=${host}:${port}, clientId=${clientId})`)
     } catch (err) {
       throw BrokerError.from(err, 'NETWORK')
@@ -130,6 +164,7 @@ export class IbkrBroker implements IBroker {
   }
 
   async close(): Promise<void> {
+    if (this.heartbeatTimer_) { clearInterval(this.heartbeatTimer_); this.heartbeatTimer_ = null }
     this.bridge.stopAccountSubscription()
     this.client.disconnect()
   }
@@ -331,6 +366,7 @@ export class IbkrBroker implements IBroker {
     if (!contract.currency) contract.currency = 'USD'
 
     try {
+      this._ensureAlive()
       const orderId = this.bridge.getNextOrderId()
       const promise = this.bridge.requestOrder(orderId)
       this.client.placeOrder(orderId, contract, order)
@@ -347,6 +383,7 @@ export class IbkrBroker implements IBroker {
 
   async modifyOrder(orderId: string, changes: Partial<Order>): Promise<PlaceOrderResult> {
     try {
+      this._ensureAlive()
       // IBKR modifies orders by re-calling placeOrder with the same orderId
       const original = await this.getOrder(orderId)
       if (!original) {
@@ -380,6 +417,7 @@ export class IbkrBroker implements IBroker {
 
   async cancelOrder(orderId: string, orderCancel?: OrderCancel): Promise<PlaceOrderResult> {
     try {
+      this._ensureAlive()
       const numericId = parseInt(orderId, 10)
       const promise = this.bridge.requestOrder(numericId)
       this.client.cancelOrder(numericId, orderCancel ?? new OrderCancel())
@@ -434,26 +472,58 @@ export class IbkrBroker implements IBroker {
    * Data Channels"). During overnight hours, the reconstructed netLiq
    * will be stale even though Blue Ocean ATS prices may be moving.
    */
+  /** TWS-provided FX rate (currency → base) from the ExchangeRate account
+   *  tags. Returns null when TWS didn't send one for this currency. */
+  private fxRate(values: Map<string, string>, currency: string): Decimal | null {
+    const raw = values.get(`ExchangeRate:${currency}`)
+    if (raw == null) return null
+    try { return new Decimal(raw) } catch { return null }
+  }
+
   async getAccount(): Promise<AccountInfo> {
+    this._ensureAlive()
     const download = this.bridge.getAccountCache()
     if (!download) throw new BrokerError('NETWORK', 'Account data not yet available')
 
+    const baseCurrency = download.values.get('BaseCurrency') ?? 'USD'
     const totalCashValue = new Decimal(download.values.get('TotalCashValue') ?? '0')
-    let positionUnrealizedPnL = new Decimal(0)
+
+    // Position-derived account math is only currency-safe when every line is
+    // in the base currency. Mixed books (HKD stock + USD stock) used to
+    // blind-sum different units (ANG-101: HKD -4767 + USD +369 reported as
+    // USD -4398). TWS hands us per-currency ExchangeRate tags — convert per
+    // position; if a rate is missing, fall back to TWS's own consolidated
+    // NetLiquidation tag (already FX-correct) rather than summing garbage.
+    const mixed = download.positions.some((pos) => (pos.currency || baseCurrency) !== baseCurrency)
+
+    let positionUnrealizedPnL: Decimal | null = new Decimal(0)
+    let positionMarketValue: Decimal | null = new Decimal(0)
     for (const pos of download.positions) {
-      positionUnrealizedPnL = positionUnrealizedPnL.plus(pos.unrealizedPnL)
+      const ccy = pos.currency || baseCurrency
+      const rate = ccy === baseCurrency ? new Decimal(1) : this.fxRate(download.values, ccy)
+      if (rate === null) { positionUnrealizedPnL = null; positionMarketValue = null; break }
+      positionUnrealizedPnL = positionUnrealizedPnL!.plus(new Decimal(pos.unrealizedPnL).mul(rate))
+      positionMarketValue = positionMarketValue!.plus(new Decimal(pos.marketValue).mul(rate))
     }
 
-    const netLiquidation = download.positions.length > 0
-      ? aggregateAccountFromPositions(totalCashValue, download.positions).netLiquidation
-      : new Decimal(download.values.get('NetLiquidation') ?? '0')
+    const brokerNetLiq = new Decimal(download.values.get('NetLiquidation') ?? '0')
+    // Freshness-vs-authority: same-currency books keep the reconstructed
+    // value (position marks refresh faster than the server-cached tag, see
+    // docstring above). Mixed books prefer the broker tag (issue #314) —
+    // reconstruction is rate-converted and only used when the tag is absent.
+    const reconstructedNetLiq = positionMarketValue !== null
+      ? totalCashValue.plus(positionMarketValue)
+      : null
+    const netLiquidation = download.positions.length === 0 ? brokerNetLiq
+      : mixed ? (brokerNetLiq.isZero() ? (reconstructedNetLiq ?? brokerNetLiq) : brokerNetLiq)
+      : aggregateAccountFromPositions(totalCashValue, download.positions).netLiquidation
 
-    const unrealizedPnL = download.positions.length > 0
+    const unrealizedPnL = download.positions.length > 0 && positionUnrealizedPnL !== null
       ? positionUnrealizedPnL
       : new Decimal(download.values.get('UnrealizedPnL') ?? '0')
 
     return {
-      baseCurrency: download.values.get('BaseCurrency') ?? 'USD',
+      baseCurrency,
       netLiquidation: netLiquidation.toString(),
       totalCashValue: totalCashValue.toString(),
       unrealizedPnL: unrealizedPnL.toString(),
@@ -483,6 +553,7 @@ export class IbkrBroker implements IBroker {
    * snapshot mode and can see overnight session data.
    */
   async getPositions(): Promise<Position[]> {
+    this._ensureAlive()
     const download = this.bridge.getAccountCache()
     if (!download) throw new BrokerError('NETWORK', 'Account data not yet available')
     return download.positions

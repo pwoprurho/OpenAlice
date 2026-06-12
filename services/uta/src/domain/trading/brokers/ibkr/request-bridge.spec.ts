@@ -99,3 +99,38 @@ describe('RequestBridge — account cache delta semantics', () => {
     expect(b.getAccountCache()!.positions.map((p) => p.contract.conId)).toEqual([1])
   })
 })
+
+describe('RequestBridge — currency-aware account values (issue #295)', () => {
+  function readyBridge(): RequestBridge {
+    const b = new RequestBridge()
+    ;(b as unknown as { accountCachePending_: unknown }).accountCachePending_ = { positions: [], values: new Map() }
+    b.accountDownloadEnd('DU1')
+    return b
+  }
+
+  it('BASE wins the plain key regardless of arrival order', () => {
+    const b = readyBridge()
+    b.updateAccountValue('CashBalance', '1036370', 'BASE', 'DU1')
+    b.updateAccountValue('CashBalance', '-51005', 'HKD', 'DU1')   // arrives after BASE
+    const v = b.getAccountCache()!.values
+    expect(v.get('CashBalance')).toBe('1036370')                   // not clobbered
+    expect(v.get('CashBalance:HKD')).toBe('-51005')
+    expect(v.get('CashBalance:BASE')).toBe('1036370')
+  })
+
+  it('BASE arriving late still reclaims the plain key', () => {
+    const b = readyBridge()
+    b.updateAccountValue('CashBalance', '-51005', 'HKD', 'DU1')    // HKD first
+    const v = b.getAccountCache()!.values
+    expect(v.get('CashBalance')).toBe('-51005')                    // provisional
+    b.updateAccountValue('CashBalance', '1036370', 'BASE', 'DU1')
+    expect(v.get('CashBalance')).toBe('1036370')                   // corrected
+  })
+
+  it('single-send tags (one currency line, no BASE) keep the plain key', () => {
+    const b = readyBridge()
+    b.updateAccountValue('NetLiquidation', '1046101.70', 'USD', 'DU1')
+    expect(b.getAccountCache()!.values.get('NetLiquidation')).toBe('1046101.70')
+    expect(b.getAccountCache()!.values.get('ExchangeRate:USD')).toBeUndefined()
+  })
+})

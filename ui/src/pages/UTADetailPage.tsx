@@ -713,8 +713,8 @@ function OpenOrdersTable({ orders }: { orders: unknown[] }) {
           {rows.map((o, i) => (
             <tr key={i} className="border-t border-border">
               <td className="px-3 py-2 font-mono text-text-muted text-[11px]">{String(o.orderId ?? '—')}</td>
-              <td className="px-3 py-2 font-mono text-text">
-                {o.contract?.aliceId ?? o.contract?.localSymbol ?? o.contract?.symbol ?? '?'}
+              <td className="px-3 py-2 font-mono text-text" title={o.contract?.aliceId}>
+                {o.contract?.symbol ?? o.contract?.localSymbol ?? o.contract?.aliceId ?? '?'}
               </td>
               <td className={`px-3 py-2 font-medium ${o.order?.action === 'BUY' ? 'text-green' : o.order?.action === 'SELL' ? 'text-red' : 'text-text'}`}>{o.order?.action ?? '—'}</td>
               <td className="px-3 py-2 text-text-muted">{o.order?.orderType ?? '—'}</td>
