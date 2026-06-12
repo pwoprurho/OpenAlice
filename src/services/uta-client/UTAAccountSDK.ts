@@ -168,13 +168,18 @@ export class UTAAccountSDK {
   }
 
   searchContracts(pattern: string): Promise<ContractDescription[]> {
-    // The existing `/api/trading/contracts/search` is aggregated across
-    // accounts; per-account search isn't a route yet. Fall back to the
-    // aggregated endpoint and filter by id. Route added in Step 6 follow-up.
+    // The `/api/trading/contracts/search` route is aggregated across
+    // accounts and returns FLAT rows `{ source, contract, ... }` — one per
+    // hit, tagged with the owning account. (An earlier SDK version assumed
+    // a grouped `{ id, results[] }` shape; the find() never matched and
+    // every per-account search silently returned [] — an analysis-killing
+    // false negative: "SOL isn't tradeable" when it plainly was.)
     return this.client
-      .get<{ results: Array<{ id: string; results: ContractDescription[] }> }>(
+      .get<{ results: Array<{ source: string } & ContractDescription> }>(
         `/api/trading/contracts/search`, { pattern })
-      .then((r) => r.results.find((b) => b.id === this.id)?.results ?? [])
+      .then((r) => r.results
+        .filter((row) => row.source === this.id)
+        .map(({ source: _source, ...desc }) => desc as ContractDescription))
   }
 
   // ==================== Contract details ====================

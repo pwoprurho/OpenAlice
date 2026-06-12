@@ -114,6 +114,22 @@ const positiveNumeric = z
   )
   .transform((v) => (v === '' ? undefined : v))
 
+
+/** Distinguish "no accounts configured" from "your source matched nothing"
+ *  — and list what WOULD match, so the agent self-corrects in one step
+ *  instead of concluding no accounts exist. */
+async function noAccountsError(manager: UTAManagerSDK, source?: string): Promise<{ error: string }> {
+  try {
+    const ids = (await manager.listUTAs()).map((u: { id: string }) => u.id)
+    if (source && ids.length > 0) {
+      return { error: `Unknown source "${source}". Available accounts: ${ids.join(', ')}.` }
+    }
+    return { error: ids.length === 0 ? 'No trading accounts configured.' : 'No accounts available.' }
+  } catch {
+    return { error: 'No accounts available.' }
+  }
+}
+
 export function createTradingTools(manager: UTAManagerSDK): Record<string, Tool> {
   return {
     listUTAs: tool({
@@ -144,14 +160,14 @@ hitting the broker, which otherwise expects the bare base ticker.`,
         // Source-scoped: when the caller pinned an account, only that one is
         // hit; otherwise fan out to all configured accounts.
         const targets = await manager.resolve(source)
-        if (targets.length === 0) return { error: 'No accounts available.' }
+        if (targets.length === 0) return await noAccountsError(manager, source)
         const all: Array<Record<string, unknown>> = []
         const settled = await Promise.allSettled(
           targets.map(async (uta) => ({ id: uta.id, results: await uta.searchContracts(brokerPattern) })),
         )
         for (const r of settled) {
           if (r.status !== 'fulfilled') continue
-          for (const desc of r.value.results) all.push({ source: r.value.id, ...desc })
+          for (const desc of r.value.results) all.push({ source: r.value.id, ...desc, contract: compactContract((desc as { contract?: unknown }).contract) })
         }
         if (all.length === 0) return { results: [], message: `No contracts found matching "${brokerPattern}" (input: "${pattern}").` }
         return all
@@ -197,7 +213,7 @@ If this tool returns an error with transient=true, wait a few seconds and retry 
       }).meta({ examples: [{ source: 'alpaca-paper' }] }),
       execute: async ({ source }) => {
         const targets = await manager.resolve(source)
-        if (targets.length === 0) return { error: 'No accounts available.' }
+        if (targets.length === 0) return await noAccountsError(manager, source)
         try {
           const results = await Promise.all(targets.map(async (uta) => ({ source: uta.id, ...compactAccountInfo(await uta.getAccount()) })))
           return results.length === 1 ? results[0] : results
@@ -216,7 +232,7 @@ If this tool returns an error with transient=true, wait a few seconds and retry 
       }).meta({ examples: [{ source: 'alpaca-paper' }] }),
       execute: async ({ source, symbol }) => {
         const targets = await manager.resolve(source)
-        if (targets.length === 0) return { positions: [], message: 'No accounts available.' }
+        if (targets.length === 0) return { positions: [], ...(await noAccountsError(manager, source)) }
         // FX rates table — UTA's /fx-rates collects every currency in
         // use server-side and returns a flat lookup. Locally we treat
         // missing rates as 1.0 (the broker probably reported a USD-side
@@ -356,7 +372,7 @@ If this tool returns an error with transient=true, wait a few seconds and retry 
       inputSchema: z.object({ source: z.string().optional().describe(sourceDesc(false)) }).meta({ examples: [{ source: 'alpaca-paper' }] }),
       execute: async ({ source }) => {
         const targets = await manager.resolve(source)
-        if (targets.length === 0) return { error: 'No accounts available.' }
+        if (targets.length === 0) return await noAccountsError(manager, source)
         try {
           const results = await Promise.all(targets.map(async (uta) => ({ source: uta.id, ...await uta.getMarketClock() })))
           return results.length === 1 ? results[0] : results
@@ -418,7 +434,7 @@ IMPORTANT: Check this BEFORE making new trading decisions.`,
       }).meta({ examples: [{ source: 'alpaca-paper', priceChanges: [{ symbol: 'AAPL', change: '+10%' }] }] }),
       execute: async ({ source, priceChanges }) => {
         const targets = await manager.resolve(source)
-        if (targets.length === 0) return { error: 'No accounts available.' }
+        if (targets.length === 0) return await noAccountsError(manager, source)
         const results: Array<Record<string, unknown>> = []
         for (const uta of targets) results.push({ source: uta.id, ...await uta.simulatePriceChange(priceChanges) })
         return results.length === 1 ? results[0] : results
@@ -525,7 +541,7 @@ Optional: attach takeProfit and/or stopLoss for automatic exit orders.`,
     }),
 
     tradingPush: tool({
-      description: 'Trading push requires manual approval — call tradingStatus to show the user what is pending, then tell them to approve (via Web UI, Telegram /trading, or other connected channels).',
+      description: 'Trading push requires manual approval — call tradingStatus to show the user what is pending, then ask them to approve it on the Web UI (Trading as Git page, or the account detail page).',
       inputSchema: z.object({
         source: z.string().optional().describe(sourceDesc(false, 'If omitted, checks all accounts.')),
       }).meta({ examples: [{ source: 'alpaca-paper' }] }),
@@ -544,7 +560,7 @@ Optional: attach takeProfit and/or stopLoss for automatic exit orders.`,
           return { message: 'No committed operations to push.' }
         }
         return {
-          message: 'Push requires manual approval. The user can approve pending operations from any connected channel (Web UI, Telegram /trading, etc).',
+          message: 'Push requires manual approval. Tell the user to review and approve the pending operations in the Web UI (Trading as Git page, or the account detail page).',
           pending: pending.map(({ uta, status }) => ({
             source: uta.id,
             ...compactStatus(status),
@@ -582,7 +598,7 @@ Optional: attach takeProfit and/or stopLoss for automatic exit orders.`,
       }).meta({ examples: [{ source: 'alpaca-paper', limit: 20 }] }),
       execute: async ({ source, limit }) => {
         const targets = await manager.resolve(source)
-        if (targets.length === 0) return { error: 'No accounts available.' }
+        if (targets.length === 0) return await noAccountsError(manager, source)
         try {
           const all = (await Promise.all(targets.map(async (uta) =>
             (await uta.orderHistory(limit ?? 50)).map((o) => ({ account: uta.id, ...o })),
@@ -602,7 +618,7 @@ Optional: attach takeProfit and/or stopLoss for automatic exit orders.`,
       }).meta({ examples: [{ source: 'alpaca-paper', limit: 20 }] }),
       execute: async ({ source, limit }) => {
         const targets = await manager.resolve(source)
-        if (targets.length === 0) return { error: 'No accounts available.' }
+        if (targets.length === 0) return await noAccountsError(manager, source)
         try {
           const all = (await Promise.all(targets.map(async (uta) =>
             (await uta.tradeHistory(limit ?? 50)).map((t) => ({ account: uta.id, ...t })),
