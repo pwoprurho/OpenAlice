@@ -187,6 +187,10 @@ export function WorkspaceAIConfigModal({ wsId, onClose }: Props) {
       (tab === 'claude' && savedForm.authMode !== form.authMode)
     )
   }, [bundle, form, tab])
+  // The primary footer button morphs Test → Save off this: an unsaved change
+  // has to clear the connection test before it can be saved, so the lit button
+  // is always the next action to take.
+  const needsTest = dirty && !testPassedForCurrent
 
   const applyCredential = () => {
     const cred = credentials.find((x) => x.slug === pickedCredential)
@@ -602,14 +606,6 @@ export function WorkspaceAIConfigModal({ wsId, onClose }: Props) {
             >
               Reset to global default
             </button>
-            <button
-              onClick={handleTest}
-              disabled={!canTest || testing || saving}
-              title={!canTest ? 'Fill base URL, API key, and model first' : undefined}
-              className="px-3 py-2 rounded-md border border-border text-text-muted hover:text-text text-[12px] disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {testing ? 'Testing…' : 'Test'}
-            </button>
           </div>
           <div className="flex gap-2">
             <button
@@ -619,20 +615,28 @@ export function WorkspaceAIConfigModal({ wsId, onClose }: Props) {
             >
               Cancel
             </button>
-            <button
-              onClick={handleSave}
-              disabled={saving || !dirty || !testPassedForCurrent}
-              title={
-                !dirty
-                  ? undefined
-                  : !testPassedForCurrent
-                  ? 'Click Test and get a passing reply before saving'
-                  : undefined
-              }
-              className="px-4 py-2 rounded-md bg-accent text-bg text-[13px] font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent/90 transition-colors"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
+            {/* Single primary CTA that walks the gate: an unverified change
+                shows Test, and only a passing reply morphs it into Save. The
+                action you can take is the one that's lit — no hidden rule that
+                Save needs a prior Test. */}
+            {needsTest ? (
+              <button
+                onClick={handleTest}
+                disabled={!canTest || testing || saving}
+                title={!canTest ? 'Fill base URL, API key, and model first' : undefined}
+                className="px-4 py-2 rounded-md bg-accent text-bg text-[13px] font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent/90 transition-colors"
+              >
+                {testing ? 'Testing…' : 'Test'}
+              </button>
+            ) : (
+              <button
+                onClick={handleSave}
+                disabled={saving || !dirty}
+                className="px-4 py-2 rounded-md bg-accent text-bg text-[13px] font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent/90 transition-colors"
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            )}
           </div>
         </div>
       </div>
