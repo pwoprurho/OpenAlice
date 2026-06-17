@@ -112,8 +112,10 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
     token: z.string().optional(),
   })
 
-  // Static base fields. Exchange dropdown options + per-exchange credential fields
-  // are fetched dynamically by the frontend (see /api/trading/config/ccxt/* routes).
+  // Static base fields for the legacy dynamic-config form. There is NO dynamic
+  // exchange-enumeration route today — `options: []` ships empty and the wizard
+  // drives CCXT accounts through BROKER_PRESET_CATALOG (the CCXT Custom preset),
+  // not this field list. A populated exchange dropdown would be net-new work.
   static configFields: BrokerConfigField[] = [
     { name: 'exchange', type: 'select', label: 'Exchange', required: true, options: [] },
     { name: 'sandbox', type: 'boolean', label: 'Sandbox Mode', default: false },
@@ -189,11 +191,32 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
     this.exchange = new ExchangeClass(credentials)
 
     if (config.sandbox) {
-      this.exchange.setSandboxMode(true)
+      try {
+        this.exchange.setSandboxMode(true)
+      } catch (err) {
+        // CCXT throws NotSupported for exchanges with no testnet/sandbox URL.
+        // Make it a permanent, actionable CONFIG error — symmetric with the
+        // demoTrading branch below — instead of an unclassified UNKNOWN.
+        throw new BrokerError('CONFIG', `${this.exchangeName}: cannot enable Sandbox — ${err instanceof Error ? err.message : String(err)}`)
+      }
     }
 
     if (config.demoTrading) {
-      (this.exchange as unknown as { enableDemoTrading: (enable: boolean) => void }).enableDemoTrading(true)
+      const ex = this.exchange as unknown as { urls?: Record<string, unknown>; enableDemoTrading: (enable: boolean) => void }
+      try {
+        ex.enableDemoTrading(true)
+      } catch (err) {
+        // CCXT throws e.g. NotSupported when demo + sandbox are combined.
+        throw new BrokerError('CONFIG', `${this.exchangeName}: cannot enable Demo Trading — ${err instanceof Error ? err.message : String(err)}`)
+      }
+      // CCXT's base enableDemoTrading swaps urls.api ← urls.demo. Exchanges with
+      // no demo endpoint (e.g. okx, whose demo IS sandbox's x-simulated-trading
+      // header — not a separate domain) end up with urls.api === undefined and
+      // only fail much later with a cryptic "Cannot read properties of undefined
+      // (reading 'rest')" when the first request builds its URL. Fail loudly now.
+      if (ex.urls?.['api'] === undefined) {
+        throw new BrokerError('CONFIG', `${this.exchangeName} has no CCXT demo-trading endpoint. Turn off Demo Trading; if this exchange has a testnet, enable Sandbox instead, or use the dedicated ${this.exchangeName} preset.`)
+      }
     }
   }
 
