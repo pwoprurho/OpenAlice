@@ -43,6 +43,14 @@ const AGENT_SESSION_ID_RE = /^[A-Za-z0-9_.-]{8,128}$/;
 /** Upper bound on a quick-chat seed prompt — matches the headless-dispatch cap. */
 const MAX_SEED_PROMPT = 16000;
 
+// In-flight resume coalescing, keyed `${wsId}::${recordId}`. A frontend
+// double-fire (two POST /resume within ms — ANG-120) would otherwise both pass
+// the "already running?" gate while the session is still paused and each call
+// pool.spawn() → two agent processes racing on one transcript. Later callers
+// await the in-flight resume; the in-lock pool.get() re-check then yields
+// alreadyRunning instead of a second spawn.
+const resumeInFlight = new Map<string, Promise<unknown>>();
+
 /** The template quick-chat reuses-or-creates its workspace from. */
 const QUICK_CHAT_TEMPLATE = 'chat';
 
@@ -590,121 +598,140 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
     if (!validId(id) || !SESSION_ID_RE.test(token)) {
       return c.json({ error: 'not_found' }, 404);
     }
-    const record = svc.sessionRegistry.get(id, token);
-    if (!record) return c.json({ error: 'not_found' }, 404);
-    if (record.state === 'running' && svc.pool.get(token)) {
-      return c.json({ ok: true, alreadyRunning: true });
-    }
-    const meta = svc.registry.get(id);
-    if (!meta) return c.json({ error: 'workspace_not_found' }, 404);
-    const adapter = svc.adapters.get(record.agent);
-    if (!adapter) {
-      return c.json({
-        error: 'unknown_agent',
-        message: `record references unknown adapter: ${record.agent}`,
-      }, 500);
-    }
-    const resume = resumeFromRecord(record, adapter);
-    const plan = svc.computeSpawnPlan(meta, adapter, resume);
-    // path.trace at the moment the resume decision is taken — captures what
-    // we're ABOUT to do, before bootstrap or spawn. If a downstream step
-    // diverges (e.g. claude CLI writes jsonl to a different projectKey),
-    // we compare this against the transcript.watch.register trace.
-    launcherLogger.event('path.trace', {
-      where: 'resume.attempt',
-      wsId: id,
-      recordId: token,
-      agent: adapter.id,
-      wsDir: meta.dir,
-      spawnCwd: plan.spawnCwd,
-      envPWD: plan.envPWD,
-      transcriptDir: plan.transcriptDir,
-      projectKey: plan.projectKey,
-      composedCommand: plan.composedCommand,
-      resumeMode: plan.resumeMode,
-      resumeId: plan.resumeId,
-      resumeHintInRecord: record.resumeHint ?? null,
-    });
+    // Serialize concurrent resumes of this record (ANG-120 — see resumeInFlight).
+    // A later double-fire awaits the in-flight resume, then doResume()'s in-lock
+    // pool.get() re-check short-circuits it to alreadyRunning instead of spawning
+    // a second agent on the same transcript.
+    const lockKey = `${id}::${token}`;
+    const inFlight = resumeInFlight.get(lockKey);
+    if (inFlight) await inFlight.catch(() => undefined);
+    const run = doResume();
+    resumeInFlight.set(lockKey, run);
     try {
-      if (adapter.bootstrap) {
-        await adapter.bootstrap({
-          wsId: id,
-          cwd: meta.dir,
-          launcherRepoRoot: svc.config.launcherRepoRoot,
-        });
+      return await run;
+    } finally {
+      if (resumeInFlight.get(lockKey) === run) resumeInFlight.delete(lockKey);
+    }
+
+    async function doResume() {
+      const record = svc.sessionRegistry.get(id, token);
+      if (!record) return c.json({ error: 'not_found' }, 404);
+      // Re-check INSIDE the lock: a concurrent resume that just settled may have
+      // already spawned this session.
+      if (svc.pool.get(token)) {
+        return c.json({ ok: true, alreadyRunning: true });
       }
-    } catch (err) {
-      launcherLogger.error('adapter.bootstrap_failed_on_resume', { id, agent: adapter.id, err });
-      return c.json({ error: 'bootstrap_failed', message: (err as Error).message }, 500);
-    }
-    let initialReplayBytes: Buffer | null = null;
-    if (record.agent === 'shell' && record.scrollbackFile) {
-      initialReplayBytes = await svc.scrollbackStore.read(record.scrollbackFile);
-    }
-    try {
-      const ctx: SessionFactoryContext = {
-        ...(resume !== undefined ? { resume } : {}),
-        agentId: record.agent,
-        recordId: record.id,
-        recordName: record.name,
-        ...(initialReplayBytes ? { initialReplayBytes } : {}),
-      };
-      const session = svc.pool.spawn(id, ctx);
-      // Give the child a brief window to prove it stays up. If it exits
-      // within ~800ms (claude --continue against a stale projectKey, broken
-      // .mcp.json, missing trust, etc.) we'd otherwise return 200 OK while
-      // the pool respawn-loops itself into a circuit breaker behind the
-      // user's back. Surface the failure so the caller knows resume failed.
-      const earlyExit = await session.waitForFirstExit(800);
-      if (earlyExit) {
-        svc.pool.disposeToken(token, 'resume_early_exit');
-        await svc.sessionRegistry
-          .update(id, token, { state: 'paused', lastActiveAt: new Date().toISOString() })
-          .catch(() => undefined);
-        launcherLogger.warn('workspace.session_resume_early_exit', {
-          id,
-          sessionId: token,
-          agent: adapter.id,
-          code: earlyExit.code,
-          signal: earlyExit.signal,
-        });
+      const meta = svc.registry.get(id);
+      if (!meta) return c.json({ error: 'workspace_not_found' }, 404);
+      const adapter = svc.adapters.get(record.agent);
+      if (!adapter) {
         return c.json({
-          error: 'spawn_died',
-          message: `agent exited within startup window (code=${earlyExit.code})`,
-          exitCode: earlyExit.code,
-          signal: earlyExit.signal,
+          error: 'unknown_agent',
+          message: `record references unknown adapter: ${record.agent}`,
         }, 500);
       }
-      if (record.scrollbackFile) {
-        await svc.scrollbackStore.remove(record.scrollbackFile);
-        delete (record as { scrollbackFile?: string }).scrollbackFile;
+      const resume = resumeFromRecord(record, adapter);
+      const plan = svc.computeSpawnPlan(meta, adapter, resume);
+      // path.trace at the moment the resume decision is taken — captures what
+      // we're ABOUT to do, before bootstrap or spawn. If a downstream step
+      // diverges (e.g. claude CLI writes jsonl to a different projectKey),
+      // we compare this against the transcript.watch.register trace.
+      launcherLogger.event('path.trace', {
+        where: 'resume.attempt',
+        wsId: id,
+        recordId: token,
+        agent: adapter.id,
+        wsDir: meta.dir,
+        spawnCwd: plan.spawnCwd,
+        envPWD: plan.envPWD,
+        transcriptDir: plan.transcriptDir,
+        projectKey: plan.projectKey,
+        composedCommand: plan.composedCommand,
+        resumeMode: plan.resumeMode,
+        resumeId: plan.resumeId,
+        resumeHintInRecord: record.resumeHint ?? null,
+      });
+      try {
+        if (adapter.bootstrap) {
+          await adapter.bootstrap({
+            wsId: id,
+            cwd: meta.dir,
+            launcherRepoRoot: svc.config.launcherRepoRoot,
+          });
+        }
+      } catch (err) {
+        launcherLogger.error('adapter.bootstrap_failed_on_resume', { id, agent: adapter.id, err });
+        return c.json({ error: 'bootstrap_failed', message: (err as Error).message }, 500);
       }
-      await svc.sessionRegistry
-        .update(id, token, { state: 'running', lastActiveAt: new Date().toISOString() })
-        .catch((err) =>
-          launcherLogger.warn('session_registry.resume_update_failed', { id, token, err }),
-        );
-      launcherLogger.info('workspace.session_resumed', {
-        id,
-        sessionId: token,
-        name: session.name,
-        pid: session.pid,
-        agent: adapter.id,
-        resume: resume === undefined ? null : resume === 'last' ? 'last' : resume.sessionId,
-        scrollbackBytes: initialReplayBytes?.length ?? 0,
-      });
-      return c.json({
-        ok: true,
-        sessionId: session.recordId,
-        wsId: session.wsId,
-        name: session.name,
-        pid: session.pid,
-        agent: adapter.id,
-        startedAt: session.startedAt,
-      });
-    } catch (err) {
-      launcherLogger.error('workspace.session_resume_failed', { id, token, err });
-      return c.json({ error: 'resume_failed', message: (err as Error).message }, 500);
+      let initialReplayBytes: Buffer | null = null;
+      if (record.agent === 'shell' && record.scrollbackFile) {
+        initialReplayBytes = await svc.scrollbackStore.read(record.scrollbackFile);
+      }
+      try {
+        const ctx: SessionFactoryContext = {
+          ...(resume !== undefined ? { resume } : {}),
+          agentId: record.agent,
+          recordId: record.id,
+          recordName: record.name,
+          ...(initialReplayBytes ? { initialReplayBytes } : {}),
+        };
+        const session = svc.pool.spawn(id, ctx);
+        // Give the child a brief window to prove it stays up. If it exits
+        // within ~800ms (claude --continue against a stale projectKey, broken
+        // .mcp.json, missing trust, etc.) we'd otherwise return 200 OK while
+        // the pool respawn-loops itself into a circuit breaker behind the
+        // user's back. Surface the failure so the caller knows resume failed.
+        const earlyExit = await session.waitForFirstExit(800);
+        if (earlyExit) {
+          svc.pool.disposeToken(token, 'resume_early_exit');
+          await svc.sessionRegistry
+            .update(id, token, { state: 'paused', lastActiveAt: new Date().toISOString() })
+            .catch(() => undefined);
+          launcherLogger.warn('workspace.session_resume_early_exit', {
+            id,
+            sessionId: token,
+            agent: adapter.id,
+            code: earlyExit.code,
+            signal: earlyExit.signal,
+          });
+          return c.json({
+            error: 'spawn_died',
+            message: `agent exited within startup window (code=${earlyExit.code})`,
+            exitCode: earlyExit.code,
+            signal: earlyExit.signal,
+          }, 500);
+        }
+        if (record.scrollbackFile) {
+          await svc.scrollbackStore.remove(record.scrollbackFile);
+          delete (record as { scrollbackFile?: string }).scrollbackFile;
+        }
+        await svc.sessionRegistry
+          .update(id, token, { state: 'running', lastActiveAt: new Date().toISOString() })
+          .catch((err) =>
+            launcherLogger.warn('session_registry.resume_update_failed', { id, token, err }),
+          );
+        launcherLogger.info('workspace.session_resumed', {
+          id,
+          sessionId: token,
+          name: session.name,
+          pid: session.pid,
+          agent: adapter.id,
+          resume: resume === undefined ? null : resume === 'last' ? 'last' : resume.sessionId,
+          scrollbackBytes: initialReplayBytes?.length ?? 0,
+        });
+        return c.json({
+          ok: true,
+          sessionId: session.recordId,
+          wsId: session.wsId,
+          name: session.name,
+          pid: session.pid,
+          agent: adapter.id,
+          startedAt: session.startedAt,
+        });
+      } catch (err) {
+        launcherLogger.error('workspace.session_resume_failed', { id, token, err });
+        return c.json({ error: 'resume_failed', message: (err as Error).message }, 500);
+      }
     }
   });
 
