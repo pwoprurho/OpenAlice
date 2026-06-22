@@ -100,7 +100,9 @@ export function ChatLandingPage() {
   // opencode/pi have no login of their own, so a quick-chat send must seed them
   // with a vault credential. claude/codex skip all of this (own CLI login).
   const needsCred = effectiveAgent !== null && LOGINLESS_AGENTS.has(effectiveAgent)
-  // Compatible vault creds for the selected runtime (null = not yet loaded).
+  // The loginless-runtime credential set (null = not yet loaded). opencode and
+  // pi are both provider-agnostic and share one compatibility set (any wire), so
+  // a single preloaded list serves both — see the mount-time fetch below.
   const [creds, setCreds] = useState<SavedCredential[] | null>(null)
   // The cred the user explicitly picked (null = use the default below).
   const [pickedCred, setPickedCred] = useState<string | null>(null)
@@ -115,20 +117,21 @@ export function ChatLandingPage() {
     [workspaces],
   )
 
-  // Load compatible creds whenever the loginless runtime changes; reset the
-  // explicit pick so the default (detected/first) re-derives for the new agent.
+  // Preload the loginless credential set ONCE on mount — NOT gated on the
+  // selected agent. Previously this fired only after the agents list resolved
+  // and the user landed on opencode/pi, so the dropdown's data was a second,
+  // late-starting request that visibly lagged behind the agent button (a
+  // request waterfall). Fetching at mount runs it in parallel with the agents
+  // load, so the picker is ready the instant opencode/pi is chosen. opencode and
+  // pi share the same compatibility (any configured wire), so one fetch covers
+  // both; claude/codex never show the picker.
   useEffect(() => {
-    if (!needsCred || effectiveAgent === null) {
-      setCreds(null)
-      return
-    }
     let live = true
-    setPickedCred(null)
-    listAgentCredentials(effectiveAgent)
+    listAgentCredentials('opencode')
       .then((list) => { if (live) setCreds(list) })
       .catch(() => { if (live) setCreds([]) })
     return () => { live = false }
-  }, [needsCred, effectiveAgent])
+  }, [])
 
   // Detect today's workspace's current cred for this runtime (for the default
   // selection + the overwrite notice). Only when the workspace already exists.
