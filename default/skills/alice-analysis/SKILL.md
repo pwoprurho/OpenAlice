@@ -3,8 +3,9 @@ name: alice-analysis
 description: >
   How to compute technical analysis with OpenAlice's Quant Calculator (v2) via
   `alice analysis` — a small Python/pandas-subset scripting language over
-  K-lines, keyed by barId so you compute on a SPECIFIC source (a broker's bars
-  matching what you trade, or a named vendor) and can batch many
+  K-lines, keyed by barId so you compute on a SPECIFIC source — prefer a
+  broker's bars (matches what you trade, realtime) over a free vendor like
+  yfinance (delayed fallback) — and can batch many
   timeframes/symbols/indicators in ONE call. Use whenever the task is
   technical/quantitative on price data: "RSI on BTC", "is AAPL above its
   200-day", "50/200 golden cross check", "multi-timeframe momentum", "how
@@ -24,8 +25,23 @@ of values). Get barIds from `alice analysis search-bars` first.
 
 ```bash
 alice analysis search-bars --query AAPL
-alice analysis quant --script $'s = bars("yfinance|AAPL", "1d", count=250, asset="equity")\nsma(s.close, 50)'
+# Pick a broker barId if one came back (realtime, matches your fills); fall back to a vendor only if not.
+alice analysis quant --script $'s = bars("alpaca-paper|AAPL", "1d", count=250)\nsma(s.close, 50)'
 ```
+
+## Choosing a source
+
+`search-bars` federates broker bars and vendor bars (freshest-first). Pick in
+this order:
+
+1. **A broker you actually trade** (`barCapability: "realtime"`) — freshest, and
+   the chart matches your fills. Always prefer this when it's in the results.
+2. **A paid vendor** (`fmp`, …) when no broker source exists.
+3. **`yfinance` — free fallback only.** Its end-of-day bars can lag a **day or
+   two**, so never use it for anything time-sensitive (a fresh signal, an entry
+   check) or to chart a live position when a broker source is available.
+
+Vendor barIds (`yfinance|…`, `fmp|…`) need `asset=`; broker barIds infer it.
 
 ## Language
 
@@ -80,6 +96,10 @@ Records: `bbands` → `{upper, middle, lower}`; `macd` → `{macd, signal, histo
 
 ## Examples
 
+> Examples below use `yfinance|…` for brevity (it's always available without a
+> broker). When you have a broker source for the symbol, swap its barId in —
+> see *Choosing a source*.
+
 ```python
 # Momentum % over the last 20 bars
 s = bars("yfinance|AAPL", "1d", count=60, asset="equity")
@@ -120,6 +140,8 @@ supported here).
 - Indicators return the latest **scalar** — never `[-1]` them; only raw columns
   are series.
 - Vendor barIds need `asset=`; broker barIds infer it.
+- **Source freshness:** `yfinance`/`fmp` are delayed (yfinance EOD can lag a day
+  or two). Prefer a broker barId for anything you trade or anything time-sensitive.
 - No conditionals/booleans (no `if`, no crossover operator) — compute the parts
   and compare in your own reasoning, or return them in a panel.
 - For arbitrary/looping logic beyond these primitives, spawn a separate

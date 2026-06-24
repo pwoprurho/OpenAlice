@@ -259,6 +259,19 @@ export function createBarService(deps: BarServiceDeps): BarService {
         }
       }
 
+      // Order by freshness so the agent's default pick is the freshest source:
+      // broker bars (realtime) float above delayed vendors (yfinance/fmp). The
+      // list stays fully redundant — this is only the suggested ordering; every
+      // candidate is still returned. (Array.sort is stable → within-source order
+      // is preserved.)
+      const FRESHNESS_RANK: Record<BarCapability, number> = {
+        realtime: 0, iex: 1, subscription: 2, delayed: 3, free: 4,
+      }
+      out.sort(
+        (a, b) =>
+          (a.barCapability ? FRESHNESS_RANK[a.barCapability] : 5) -
+          (b.barCapability ? FRESHNESS_RANK[b.barCapability] : 5),
+      )
       return out
     },
 
