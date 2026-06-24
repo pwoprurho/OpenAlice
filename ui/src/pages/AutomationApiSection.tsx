@@ -18,7 +18,7 @@ function Block({ children }: { children: string }) {
 
 export function AutomationApiSection() {
   return (
-    <div className="max-w-prose space-y-6 text-sm leading-relaxed">
+    <div className="max-w-prose mx-auto space-y-6 text-sm leading-relaxed">
       <section className="space-y-2">
         <h2 className="text-base font-semibold text-text">Workspace automation</h2>
         <p className="text-muted">

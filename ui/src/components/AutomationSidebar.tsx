@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { Activity, CalendarClock, ChevronDown, ChevronRight, Code2, Webhook, Workflow } from 'lucide-react'
 
 import { useWorkspace } from '../tabs/store'
 import { getFocusedTab, type ViewSpec } from '../tabs/types'
@@ -9,16 +9,16 @@ import { SidebarRow } from './SidebarRow'
 type AutomationSection = Extract<ViewSpec, { kind: 'automation' }>['params']['section']
 
 const PRIMARY = [
-  { labelKey: 'automation.schedules', section: 'schedules' },
-  { labelKey: 'automation.runs', section: 'runs' },
-  { labelKey: 'automation.api', section: 'api' },
+  { labelKey: 'automation.schedules', section: 'schedules', Icon: CalendarClock },
+  { labelKey: 'automation.runs', section: 'runs', Icon: Activity },
+  { labelKey: 'automation.api', section: 'api', Icon: Code2 },
 ] as const
 
 // The old event-bus surfaces — demoted under a collapsed "Legacy" group so they
 // stay reachable without crowding the primary automation rows.
 const LEGACY = [
-  { labelKey: 'automation.flow', section: 'flow' },
-  { labelKey: 'automation.webhook', section: 'webhook' },
+  { labelKey: 'automation.flow', section: 'flow', Icon: Workflow },
+  { labelKey: 'automation.webhook', section: 'webhook', Icon: Webhook },
 ] as const
 
 type AutomationItem = (typeof PRIMARY)[number] | (typeof LEGACY)[number]
@@ -45,6 +45,7 @@ export function AutomationSidebar() {
       key={item.section}
       label={t(item.labelKey)}
       active={activeSection === item.section}
+      icon={<item.Icon size={14} strokeWidth={2} className="text-text-muted/70" aria-hidden />}
       onClick={() => openOrFocus({ kind: 'automation', params: { section: item.section } })}
     />
   )

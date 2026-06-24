@@ -114,6 +114,7 @@ export const en = {
   },
   chat: {
     newChat: 'New chat',
+    newSession: 'New session in this chat',
     newWorkspace: 'New workspace',
     moreOptions: 'More options',
     today: 'Today',

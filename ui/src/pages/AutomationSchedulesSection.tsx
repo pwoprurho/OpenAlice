@@ -247,7 +247,7 @@ export function AutomationSchedulesSection() {
 
   if (declared.length === 0) {
     return (
-      <div className="max-w-3xl space-y-3">
+      <div className="max-w-4xl mx-auto space-y-3">
         {staleBanner}
         <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
           <CalendarClock size={24} className="mx-auto text-muted/50" />
@@ -265,7 +265,7 @@ export function AutomationSchedulesSection() {
   }
 
   return (
-    <div className="max-w-3xl space-y-3">
+    <div className="max-w-4xl mx-auto space-y-3">
       {staleBanner}
       <div className="flex items-center justify-end">
         <ViewToggle view={view} onChange={setView} />

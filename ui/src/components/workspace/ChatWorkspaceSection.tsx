@@ -181,6 +181,7 @@ export function ChatWorkspaceSection(): ReactElement | null {
             onDeleteSession={(sid) => ctx.requestDeleteSession(w.id, sid)}
             onConfigure={() => ctx.openAgentConfig(w.id)}
             onDelete={() => setPendingDelete(w)}
+            onSpawn={() => void ctx.spawn(w.id, { agent: w.agents[0] ?? 'claude' })}
           />
         ))}
       </ul>
@@ -216,6 +217,8 @@ interface ChatWorkspaceRowProps {
   onDeleteSession: (sid: string) => void
   onConfigure: () => void
   onDelete: () => void
+  /** Spawn a fresh agent session in THIS workspace (and open it). */
+  onSpawn: () => void
 }
 
 function ChatWorkspaceRow(props: ChatWorkspaceRowProps): ReactElement {
@@ -271,6 +274,20 @@ function ChatWorkspaceRow(props: ChatWorkspaceRowProps): ReactElement {
               {w.sessions.length}
             </span>
           )}
+        </button>
+        {/* Always-visible "+" — spawn a fresh agent runtime in THIS day's
+            workspace (vs "New chat" which starts a whole new one). */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            props.onSpawn()
+          }}
+          className="shrink-0 w-5 h-5 rounded flex items-center justify-center text-text-muted/50 hover:text-text hover:bg-bg-secondary transition-colors"
+          title={t('chat.newSession')}
+          aria-label={t('chat.newSession')}
+        >
+          <Plus size={13} strokeWidth={2.25} />
         </button>
         <span className="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <button

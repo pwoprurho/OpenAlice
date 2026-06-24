@@ -513,8 +513,8 @@ Stuck? Here's the recommended path, roughly in order:
 
 ## Contributors
 
-We build OpenAlice in-house and [don't merge external PRs](./CONTRIBUTING.md) —
-but the community's ideas, reports, and designs shape it, and we credit every
+OpenAlice is sharper for the people who dig into it with us — the bugs they
+catch, the ideas they push, the designs and reviews they bring. Credit to every
 one. The people who've left a mark:
 
 <!-- Standouts (⭐) first. Avatars come free from https://github.com/<handle>.png :
@@ -522,6 +522,7 @@ one. The people who've left a mark:
 <p>
   <a href="https://github.com/2233admin"><img src="https://github.com/2233admin.png" width="56" height="56" alt="@2233admin" /></a>
   <a href="https://github.com/lvysssss"><img src="https://github.com/lvysssss.png" width="56" height="56" alt="@lvysssss" /></a>
+  <a href="https://github.com/walkonbothsides"><img src="https://github.com/walkonbothsides.png" width="56" height="56" alt="@walkonbothsides" /></a>
 </p>
 
 **See the full list and what each person shaped** → [CONTRIBUTORS.md](./CONTRIBUTORS.md)
