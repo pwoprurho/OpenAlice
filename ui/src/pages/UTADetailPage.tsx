@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useCallback, useMemo } from 'react'
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import type { ViewSpec } from '../tabs/types'
 import { api } from '../api'
@@ -70,8 +70,17 @@ export function UTADetailPage({ spec }: UTADetailPageProps) {
   // Live polling — account/positions/orders refresh every 15s. Account +
   // positions scope to the selected wallet (undefined ⇒ aggregate); orders
   // are not wallet-scoped (the venue order list is account-wide).
+  //
+  // Latest-wins guard: scoped CCXT reads are slow (multi-wallet venues do
+  // several round-trips), so switching the sub-account pill twice quickly
+  // leaves two fetches in flight. Without this, the slower (older) response
+  // can land last and paint the WRONG wallet's data under the selected pill.
+  // Each call claims a sequence number; a response only applies if it's still
+  // the newest in flight.
+  const reqSeq = useRef(0)
   const refreshLive = useCallback(async () => {
     if (!id) return
+    const seq = ++reqSeq.current
     setDataError(null)
     try {
       const [acct, pos, ord] = await Promise.all([
@@ -79,11 +88,13 @@ export function UTADetailPage({ spec }: UTADetailPageProps) {
         api.trading.utaPositions(id, selectedSub).catch(() => ({ positions: [] as Position[] })),
         api.trading.utaOrders(id).catch(() => ({ orders: [] as unknown[] })),
       ])
+      if (seq !== reqSeq.current) return  // superseded by a newer refresh — discard
       setAccount(acct)
       setPositions(pos.positions)
       setOrders(ord.orders)
       setLastUpdated(new Date())
     } catch (err) {
+      if (seq !== reqSeq.current) return
       setDataError(err instanceof Error ? err.message : String(err))
     }
   }, [id, selectedSub])
@@ -247,7 +258,14 @@ export function UTADetailPage({ spec }: UTADetailPageProps) {
                 <SubAccountSelector
                   subAccounts={subAccounts}
                   selected={selectedSub}
-                  onSelect={setSelectedSub}
+                  onSelect={(sub) => {
+                    // Drop the previous wallet's numbers immediately so the
+                    // panel shows "Loading account info…" during the (slow,
+                    // multi-round-trip) scoped read instead of briefly painting
+                    // the old scope's net-liquidation under the new pill.
+                    setAccount(null)
+                    setSelectedSub(sub)
+                  }}
                 />
               )}
               <AccountPanel account={account} positions={positions} delta24h={delta24h} clock={clock} />
