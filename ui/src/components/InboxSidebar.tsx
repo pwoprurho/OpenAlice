@@ -7,6 +7,7 @@ import { useInboxRead } from '../live/inbox-read'
 import { useInboxSelection } from '../live/inbox-selection'
 import { useInboxViewMode } from '../live/inbox-view-mode'
 import { groupThreads, previewForEntry } from '../live/inbox-threads'
+import { Skeleton } from './StateViews'
 import type { InboxEntry } from '../api/inbox'
 
 /**
@@ -74,7 +75,16 @@ export function InboxSidebar() {
   }, [ordered, selectedId])
 
   if (loading && entries.length === 0) {
-    return <div className="px-3 py-3 text-[12px] text-text-muted">{t('common.loading')}</div>
+    return (
+      <div className="flex flex-col py-1" aria-hidden="true">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex flex-col gap-1.5 px-3 py-2">
+            <Skeleton className="h-3 w-1/2" />
+            <Skeleton className="h-2.5 w-3/4" />
+          </div>
+        ))}
+      </div>
+    )
   }
 
   if (entries.length === 0) {

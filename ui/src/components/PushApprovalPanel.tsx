@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Skeleton } from './StateViews'
 import { formatRelativeTime, getIntlLocale } from '../lib/intl'
 import { api } from '../api'
 import { isUnsetDecimal } from '../lib/format'
@@ -110,6 +111,9 @@ export function PushApprovalPanel() {
   const [confirmingPush, setConfirmingPush] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<{ accountId: string; data: WalletPushResult } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // False until the first poll resolves, so the panel shows a skeleton on cold
+  // load instead of an immediate (misleading) "No pending operations".
+  const [loaded, setLoaded] = useState(false)
   // History UTA filter — null = show every account's commits merged. Holds
   // an accountId when narrowed to one account's log.
   const [historyFilter, setHistoryFilter] = useState<string | null>(null)
@@ -143,7 +147,7 @@ export function PushApprovalPanel() {
       setStaged(stagedResults)
       setPending(pendingResults)
       setHistory(historyResults)
-    } catch { /* ignore */ }
+    } catch { /* ignore */ } finally { setLoaded(true) }
   }, [])
 
   useEffect(() => {
@@ -360,6 +364,15 @@ export function PushApprovalPanel() {
                 <button onClick={() => setError(null)} className="ml-2 text-text-muted hover:text-text">Dismiss</button>
               </div>
             )}
+          </div>
+        ) : !loaded ? (
+          <div className="px-3 py-3 space-y-3" aria-hidden="true">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="space-y-2">
+                <Skeleton className="h-2.5 w-24" />
+                <Skeleton className="h-7 w-full rounded" />
+              </div>
+            ))}
           </div>
         ) : !hasStaged ? (
           <div className="px-3 py-4 text-[12px] text-text-muted/70 leading-relaxed">

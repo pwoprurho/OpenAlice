@@ -18,7 +18,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { api, type Preset, type WireShape } from '../api'
 import type { CredentialSummary, WorkspaceCredentialDefaultsResponse } from '../api/config'
 import { PageHeader } from '../components/PageHeader'
-import { PageLoading } from '../components/StateViews'
+import { PageLoading, Skeleton } from '../components/StateViews'
 import { Field, inputClass } from '../components/form'
 import { ModelCombobox } from '../components/credentials/PresetFields'
 import {
@@ -347,7 +347,17 @@ function WorkspaceDefaultsSection({ credentials }: { credentials: CredentialSumm
       <h2 className="text-[13px] font-semibold text-text uppercase tracking-wide mb-3">Default workspace credentials</h2>
 
       {!data ? (
-        <p className="text-[12px] text-text-muted">Loading…</p>
+        <div className="space-y-2.5" aria-hidden="true">
+          {PRIMARY_DEFAULT_AGENTS.map((a) => (
+            <div key={a.id} className="flex items-center gap-3 rounded-lg border border-border bg-bg px-4 py-3">
+              <div className="flex-1 min-w-0 space-y-1.5">
+                <Skeleton className="h-3.5 w-28 rounded" />
+                <Skeleton className="h-2.5 w-44 rounded" />
+              </div>
+              <Skeleton className="h-8 w-[240px] max-w-[240px] rounded" />
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="space-y-2.5">
           {PRIMARY_DEFAULT_AGENTS.map((a) => renderAgent(a))}

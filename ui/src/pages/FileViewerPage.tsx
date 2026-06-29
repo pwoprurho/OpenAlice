@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react'
 import { FileText } from 'lucide-react'
 
 import { FileContentView } from '../components/FileContentView'
+import { CenteredLoading } from '../components/StateViews'
 import { useWorkspaces } from '../contexts/WorkspacesContext'
 import { readWorkspaceFile, type ReadFileResult } from '../components/workspace/api'
 import type { ViewSpec } from '../tabs/types'
@@ -50,7 +51,7 @@ export function FileViewerPage({ spec }: Props) {
       <div className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-[820px] mx-auto px-6 py-6">
           {result === null ? (
-            <div className="text-[12px] text-text-muted">Loading…</div>
+            <CenteredLoading />
           ) : (
             <FileContentView path={path} result={result} />
           )}

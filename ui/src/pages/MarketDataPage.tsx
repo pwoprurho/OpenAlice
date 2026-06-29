@@ -5,6 +5,7 @@ import { ConfigSection, Field, inputClass } from '../components/form'
 import { Toggle } from '../components/Toggle'
 import { useConfigPage } from '../hooks/useConfigPage'
 import { PageHeader } from '../components/PageHeader'
+import { CenteredLoading } from '../components/StateViews'
 
 type MarketDataConfig = Record<string, unknown>
 
@@ -198,7 +199,7 @@ export function MarketDataPage() {
       <div className="flex flex-col flex-1 min-h-0">
         <PageHeader title="Market Data" description="Structured financial data — prices, fundamentals, macro indicators." />
         <div className="flex-1 flex items-center justify-center">
-          <p className="text-[13px] text-text-muted">Loading...</p>
+          <CenteredLoading />
         </div>
       </div>
     )

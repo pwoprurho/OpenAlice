@@ -1418,3 +1418,56 @@ describe('UTA — getPositions wallet reconciliation', () => {
     await expect(uta.getPositions()).resolves.toBeDefined()
   })
 })
+
+// ==================== Cold-start connecting gate ====================
+
+describe('UTA — connecting gate (non-blocking cold start)', () => {
+  it('reports connecting=true until the initial connect settles, then false', async () => {
+    const { uta } = createUTA()
+    expect(uta.getHealthInfo().connecting).toBe(true)
+    await uta.waitForConnect()
+    expect(uta.getHealthInfo().connecting).toBe(false)
+  })
+
+  it('a read during a SLOW connect fast-fails CONNECTING after the grace, without poisoning health', async () => {
+    vi.useFakeTimers()
+    try {
+      const broker = new MockBroker()
+      // Hang init() so the account is stuck in the connecting window — stands in
+      // for CCXT loadMarkets taking tens of seconds.
+      let release!: () => void
+      ;(broker as unknown as { init: () => Promise<void> }).init = () =>
+        new Promise<void>((resolve) => { release = resolve })
+
+      const { uta } = createUTA(broker)
+      expect(uta.getHealthInfo().connecting).toBe(true)
+
+      // Attach the rejection expectation BEFORE advancing time, so the
+      // rejection (which fires mid-advance) is never momentarily unhandled.
+      const assertion = expect(uta.getAccount()).rejects.toThrow(/still connecting/)
+      // Past the grace window — the read returns instead of blocking on init.
+      await vi.advanceTimersByTimeAsync(2_000)
+      await assertion
+
+      // The gate threw BEFORE the broker call, so it never registered as a
+      // failure: no counter bump, no premature recovery, account not disabled.
+      const h = uta.getHealthInfo()
+      expect(h.connecting).toBe(true)
+      expect(h.consecutiveFailures).toBe(0)
+      expect(h.recovering).toBe(false)
+      expect(h.disabled).toBe(false)
+
+      // Let the connect finish so timer/teardown is clean.
+      release()
+      await vi.runAllTimersAsync()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('serves a read normally once an instant broker has connected (grace not consumed)', async () => {
+    const { uta } = createUTA()
+    await uta.waitForConnect()
+    await expect(uta.getAccount()).resolves.toBeDefined()
+  })
+})

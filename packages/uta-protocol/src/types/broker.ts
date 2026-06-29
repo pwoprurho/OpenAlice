@@ -13,12 +13,18 @@ import './contract-ext.js'
 
 // ==================== Errors ====================
 
-export type BrokerErrorCode = 'CONFIG' | 'AUTH' | 'NETWORK' | 'EXCHANGE' | 'MARKET_CLOSED' | 'UNKNOWN'
+export type BrokerErrorCode = 'CONFIG' | 'AUTH' | 'NETWORK' | 'EXCHANGE' | 'MARKET_CLOSED' | 'CONNECTING' | 'UNKNOWN'
 
 /**
  * Structured broker error.
  * - `permanent` errors (CONFIG, AUTH) disable the account — will not be retried.
  * - Transient errors (NETWORK, EXCHANGE, MARKET_CLOSED) trigger auto-recovery.
+ * - `CONNECTING` is a special transient marker: the account is not yet (or no
+ *   longer) ready — its initial broker connect is still in flight, or it's
+ *   offline and the recovery loop is actively reconnecting. It means "data
+ *   pending, retry shortly", NOT a failure: a read returns it WITHOUT blocking
+ *   on the slow connect and WITHOUT counting as a failure (so it never degrades
+ *   health or disables the account). Recovery keeps running underneath.
  */
 export class BrokerError extends Error {
   readonly code: BrokerErrorCode
@@ -382,6 +388,13 @@ export interface BrokerHealthInfo {
   lastSuccessAt?: Date
   lastFailureAt?: Date
   recovering: boolean
+  /** True while the account's INITIAL broker connect is still in flight (e.g.
+   *  CCXT loadMarkets, which can take tens of seconds). During this window
+   *  `status` is optimistically 'healthy' (reach defaults to target) but the
+   *  broker isn't actually ready, so reads return a transient CONNECTING marker
+   *  instead of blocking. The UI shows a "connecting…" state off this flag —
+   *  `status`/`reach` alone can't distinguish it from a genuinely-ready account. */
+  connecting: boolean
   disabled: boolean
 }
 

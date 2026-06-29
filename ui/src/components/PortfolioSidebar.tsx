@@ -4,6 +4,7 @@ import { useWorkspace } from '../tabs/store'
 import { getFocusedTab } from '../tabs/types'
 import { SidebarRow } from './SidebarRow'
 import { SidebarSectionHeader } from './SidebarSectionHeader'
+import { SidebarRowsSkeleton } from './StateViews'
 
 /**
  * Portfolio sidebar — Overview + per-UTA accounts.
@@ -39,7 +40,7 @@ export function PortfolioSidebar() {
         </SidebarSectionHeader>
 
         {loading ? (
-          <p className="px-3 py-2 text-[12px] text-text-muted/70">{t('common.loading')}</p>
+          <SidebarRowsSkeleton rows={3} />
         ) : utas.length === 0 ? (
           <p className="px-3 py-2 text-[12px] text-text-muted/70 leading-relaxed">
             {t('portfolio.noAccountsYet')}

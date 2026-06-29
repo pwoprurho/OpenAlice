@@ -23,6 +23,7 @@ import { useWikilinkHandler } from '../live/wikilink'
 import { useWorkspace } from '../tabs/store'
 import { CadencePill, PriorityIndicator, STATUS_META } from './IssuesBoard'
 import { MarkdownContent } from './MarkdownContent'
+import { CenteredLoading } from './StateViews'
 
 // Run-status pill tints — mirrors AutomationRunsSection's STATUS_STYLE so the
 // Activity feed reads the same as the headless-runs panel.
@@ -611,7 +612,7 @@ export function IssueDetail({ wsId, id }: { wsId: string; id: string }) {
       <div className="mx-auto max-w-4xl px-4 py-5 md:px-6">
         {backToBoard}
         {loading ? (
-          <div className="text-sm text-muted">Loading…</div>
+          <CenteredLoading />
         ) : (
           <div className="rounded-lg border border-border bg-bg-secondary px-6 py-12 text-center">
             <ListChecks size={24} className="mx-auto text-muted/50" />

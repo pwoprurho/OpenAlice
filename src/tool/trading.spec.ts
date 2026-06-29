@@ -11,7 +11,7 @@ import Decimal from 'decimal.js'
 import { BrokerError } from '@traderalice/uta-protocol'
 import { createTradingTools } from './trading.js'
 
-type AccOpts = { account?: Record<string, unknown>; positions?: unknown[]; orders?: unknown[]; fail?: boolean }
+type AccOpts = { account?: Record<string, unknown>; positions?: unknown[]; orders?: unknown[]; fail?: boolean; connecting?: boolean }
 
 const DEFAULT_ACCOUNT = { netLiquidation: '10000', baseCurrency: 'USD', totalCashValue: '10000', unrealizedPnL: '0', realizedPnL: '0' }
 
@@ -25,12 +25,19 @@ function pos(symbol: string) {
 }
 
 function fakeAccount(id: string, o: AccOpts) {
-  const boom = () => { throw new BrokerError('NETWORK', `${id} is offline and reconnecting`) }
+  // `fail` → a real transient outage (NETWORK) → degraded bucket.
+  // `connecting` → the broker connect is still in flight (CONNECTING, what
+  // _callBroker throws during the initial-connect window) → connecting bucket,
+  // NOT degraded.
+  const guard = () => {
+    if (o.connecting) throw new BrokerError('CONNECTING', `${id} is still connecting to the broker`)
+    if (o.fail) throw new BrokerError('NETWORK', `${id} is offline and reconnecting`)
+  }
   return {
     id, label: id,
-    getAccount: async () => { if (o.fail) boom(); return o.account ?? DEFAULT_ACCOUNT },
-    getPositions: async () => { if (o.fail) boom(); return o.positions ?? [] },
-    getOrders: async () => { if (o.fail) boom(); return o.orders ?? [] },
+    getAccount: async () => { guard(); return o.account ?? DEFAULT_ACCOUNT },
+    getPositions: async () => { guard(); return o.positions ?? [] },
+    getOrders: async () => { guard(); return o.orders ?? [] },
     getPendingOrderIds: () => [],
   }
 }
@@ -143,6 +150,68 @@ describe('trading tools — partial tolerance (#390)', () => {
     const res = await run(tools.getOrders, { groupBy: 'contract' }) as Record<string, unknown>
     expect(res['acc|BTC']).toBeDefined()
     expect(res.degraded).toBeUndefined()
+  })
+})
+
+/**
+ * Cold-start non-blocking — an account still establishing its broker connection
+ * surfaces as `connecting` (pending), NOT `degraded` (broken). This is what
+ * stops the UI/agent from reporting a cold-starting account as a failure, and
+ * is the aggregation half of the fix that made reads return fast instead of
+ * blocking ~30s on CCXT loadMarkets.
+ */
+describe('trading tools — connecting state (cold-start)', () => {
+  it('getPortfolio routes a still-connecting account to `connecting`, not `degraded`', async () => {
+    const tools = createTradingTools(fakeManager([
+      fakeAccount('binance-x', { positions: [pos('BTC')] }),
+      fakeAccount('okx-readonly', { connecting: true }),
+    ]))
+    const res = await run(tools.getPortfolio, {}) as {
+      positions: unknown[]; degraded?: unknown[]; connecting: Array<{ source: string; code: string; transient: boolean }>
+    }
+    expect(res.positions).toHaveLength(1)
+    expect(res.degraded).toBeUndefined()
+    expect(res.connecting).toHaveLength(1)
+    expect(res.connecting[0].source).toBe('okx-readonly')
+    expect(res.connecting[0].code).toBe('CONNECTING')
+    expect(res.connecting[0].transient).toBe(true)
+  })
+
+  it('getPortfolio splits a real failure (degraded) from a pending connect (connecting) in one response', async () => {
+    const tools = createTradingTools(fakeManager([
+      fakeAccount('binance-x', { positions: [pos('BTC')] }),
+      fakeAccount('bybit-readonly', { fail: true }),
+      fakeAccount('okx-readonly', { connecting: true }),
+    ]))
+    const res = await run(tools.getPortfolio, {}) as {
+      positions: unknown[]; degraded: Array<{ source: string }>; connecting: Array<{ source: string }>
+    }
+    expect(res.positions).toHaveLength(1)
+    expect(res.degraded).toHaveLength(1)
+    expect(res.degraded[0].source).toBe('bybit-readonly')
+    expect(res.connecting).toHaveLength(1)
+    expect(res.connecting[0].source).toBe('okx-readonly')
+  })
+
+  it('getOrders routes a connecting account to `connecting`, leaving `degraded` unset', async () => {
+    const tools = createTradingTools(fakeManager([
+      fakeAccount('binance-x', { orders: [] }),
+      fakeAccount('okx-readonly', { connecting: true }),
+    ]))
+    const res = await run(tools.getOrders, {}) as { orders: unknown[]; degraded?: unknown[]; connecting: Array<{ source: string }> }
+    expect(res.degraded).toBeUndefined()
+    expect(res.connecting).toHaveLength(1)
+    expect(res.connecting[0].source).toBe('okx-readonly')
+  })
+
+  it('getAccount surfaces a connecting account inline with code CONNECTING', async () => {
+    const tools = createTradingTools(fakeManager([
+      fakeAccount('binance-x', {}),
+      fakeAccount('okx-readonly', { connecting: true }),
+    ]))
+    const res = await run(tools.getAccount, {}) as Array<Record<string, unknown>>
+    expect(res).toHaveLength(2)
+    expect(res.find((r) => r.source === 'okx-readonly')?.code).toBe('CONNECTING')
   })
 })
 

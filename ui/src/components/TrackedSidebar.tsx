@@ -5,6 +5,7 @@ import { entitiesLive } from '../live/entities'
 import { useTrackedSelection } from '../live/tracked-selection'
 import { SidebarRow } from './SidebarRow'
 import { SidebarSectionHeader } from './SidebarSectionHeader'
+import { SidebarRowsSkeleton } from './StateViews'
 
 /**
  * Tracked sidebar — the watchlist. A flat list of entities (assets + topics),
@@ -30,7 +31,11 @@ export function TrackedSidebar() {
   }, [entities, selected, select])
 
   if (loading && entities.length === 0) {
-    return <div className="px-3 py-3 text-[12px] text-text-muted">{t('common.loading')}</div>
+    return (
+      <div className="flex flex-col h-full overflow-y-auto py-1">
+        <SidebarRowsSkeleton rows={6} icon />
+      </div>
+    )
   }
 
   if (entities.length === 0) {

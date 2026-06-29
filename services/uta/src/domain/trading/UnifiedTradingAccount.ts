@@ -97,6 +97,12 @@ export class UnifiedTradingAccount {
   private static readonly OFFLINE_THRESHOLD = 6
   private static readonly RECOVERY_BASE_MS = 5_000
   private static readonly RECOVERY_MAX_MS = 60_000
+  /** Grace a read gives the INITIAL connect before it fast-fails with CONNECTING.
+   *  An instantly-connecting broker (mock, warm cache) settles within this and
+   *  serves real data; a slow one (CCXT loadMarkets, tens of seconds) blows past
+   *  it and the read returns "connecting" instead of blocking on the whole init.
+   *  Bounds the cold-start first-read to this, not the full connect time. */
+  private static readonly CONNECT_GRACE_MS = 1_500
 
   private _consecutiveFailures = 0
   private _lastError?: string
@@ -105,6 +111,14 @@ export class UnifiedTradingAccount {
   private _recoveryTimer?: ReturnType<typeof setTimeout>
   private _recovering = false
   private _disabled = false
+  /** True while the INITIAL broker connect is in flight (e.g. CCXT loadMarkets,
+   *  which can take tens of seconds). Reads during this window return fast with
+   *  a transient CONNECTING error instead of blocking on the slow connect — the
+   *  bug that made the whole UI hang ~30s on cold start while the optimistic
+   *  reach (below) reported "healthy". Flips false when `_connectPromise`
+   *  settles; never set true again (re-connects go through the recovery loop,
+   *  which has its own gate). Orthogonal to `_recovering`. */
+  private _connecting = true
   /** Current rung on the capability ladder. Updated by every connect/recovery
    *  probe and by live broker-call success/failure. */
   private _currentReach: UTAReach = 'down'
@@ -184,8 +198,13 @@ export class UnifiedTradingAccount {
       ? TradingGit.restore(options.savedState, gitConfig)
       : new TradingGit(gitConfig)
 
-    // Kick off broker connection asynchronously — UTA is usable immediately,
-    // broker queries will fail (tracked by health) until init succeeds.
+    // Kick off broker connection asynchronously — UTA is usable immediately;
+    // reads during the connect window return a fast transient CONNECTING marker
+    // (see `_connecting` / `_callBroker`) rather than blocking on init.
+    // `_connecting` is cleared INSIDE _connect() (right after the connect probe
+    // settles, before the health-change emit) so the first emitted health diff
+    // already carries connecting:false — clearing it here in a .finally would
+    // run after that emit and leave the UI stuck on "connecting".
     const p = this._connect()
     // Silence unhandled rejection in fire-and-forget path.
     // waitForConnect() returns the raw promise so callers can observe failures.
@@ -248,6 +267,7 @@ export class UnifiedTradingAccount {
       lastSuccessAt: this._lastSuccessAt,
       lastFailureAt: this._lastFailureAt,
       recovering: this._recovering,
+      connecting: this._connecting,
       disabled: this._disabled,
     }
   }
@@ -290,7 +310,17 @@ export class UnifiedTradingAccount {
 
   /** Initial broker connection — fire-and-forget from constructor. */
   private async _connect(): Promise<void> {
+    // Timed + logged: the connect duration is the cold-start cost this whole
+    // non-blocking path exists to absorb, so surface it on the console (a slow
+    // CCXT loadMarkets is otherwise an invisible ~30s stall).
+    const startedAt = Date.now()
+    console.log(`UTA[${this.id}]: connecting (target ${this.targetReach})…`)
     this._currentReach = await this._attemptReach()
+    // Initial connect has settled (reached, down, or disabled — _attemptReach
+    // never throws). Clear the connecting gate now, BEFORE any _emitHealthChange
+    // below, so the first health diff the UI receives reflects the real state.
+    // Re-connections go through the recovery loop, which has its own gating.
+    this._connecting = false
     // Warm the sub-account cache once the transport is up, so the (sync)
     // write-disambiguation guard has the list before any staging. Best-effort:
     // a failure here must not break connection.
@@ -305,7 +335,7 @@ export class UnifiedTradingAccount {
     if (this._reachedTarget()) {
       this._onSuccess()
       this._emitHealthChange()
-      console.log(`UTA[${this.id}]: ${this._currentReach} (${this.tier})`)
+      console.log(`UTA[${this.id}]: ${this._currentReach} (${this.tier}) in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`)
       return
     }
     // Below target → recover toward it.
@@ -313,17 +343,45 @@ export class UnifiedTradingAccount {
     this._startRecovery()
     this._emitHealthChange()
     if (this._currentReach === 'down') {
+      console.warn(`UTA[${this.id}]: unreachable after ${((Date.now() - startedAt) / 1000).toFixed(1)}s — ${this._lastError ?? 'no detail'} (recovering)`)
       throw new BrokerError('NETWORK', this._lastError ?? `Account "${this.label}" unreachable`)
     }
     // 'connected' but funded wants 'readable' — partial; recovery pursues it.
+  }
+
+  /** Race the initial connect against a short grace window. Resolves as soon as
+   *  the connect settles (an instant broker wins via microtask, well before the
+   *  timer) or the grace elapses (a slow broker). The caller re-checks
+   *  `_connecting` afterwards to decide whether to proceed or fast-fail. */
+  private _awaitConnectOrGrace(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const grace = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, UnifiedTradingAccount.CONNECT_GRACE_MS)
+      timer.unref?.()
+    })
+    return Promise.race([this._connectPromise.catch(() => {}), grace])
+      .finally(() => { if (timer) clearTimeout(timer) })
   }
 
   private async _callBroker<T>(fn: () => Promise<T>): Promise<T> {
     if (this._disabled) {
       throw new BrokerError('CONFIG', `Account "${this.label}" is disabled due to configuration error: ${this._lastError}`)
     }
+    // Initial connect still in flight (e.g. CCXT loadMarkets). Give it a short
+    // grace: an instant broker settles within it and the read proceeds with real
+    // data; a slow one is still connecting afterwards and we return FAST instead
+    // of blocking on the whole init. Thrown BEFORE the try block, so it never
+    // reaches _onFailure: no failure counter, no health degrade, no premature
+    // recovery. The background connect keeps going; a later read gets real data.
+    // This is the fix for the ~30s cold-start hang.
+    if (this._connecting) {
+      await this._awaitConnectOrGrace()
+      if (this._connecting) {
+        throw new BrokerError('CONNECTING', `Account "${this.label}" is still connecting to the broker. Data will be available shortly.`)
+      }
+    }
     if (this.health === 'offline' && this._recovering) {
-      throw new BrokerError('NETWORK', `Account "${this.label}" is offline and reconnecting. Try again shortly.`)
+      throw new BrokerError('CONNECTING', `Account "${this.label}" is offline and reconnecting. Try again shortly.`)
     }
     try {
       const result = await fn()

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { api } from '../api'
 import type { HeadlessOutput, HeadlessTaskRecord, HeadlessTaskStatus } from '../api/headless'
+import { Skeleton } from '../components/StateViews'
 import { useWorkspaces } from '../contexts/WorkspacesContext'
 import { formatRelativeTime } from '../lib/intl'
 
@@ -113,7 +114,20 @@ export function AutomationRunsSection() {
   }, [load])
 
   if (error) return <div className="text-sm text-red-400">Failed to load runs: {error}</div>
-  if (!tasks) return <div className="text-sm text-muted">Loading…</div>
+  if (!tasks)
+    return (
+      <div className="space-y-2" aria-hidden="true">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-4 border-b border-border/50 py-2">
+            <Skeleton className="h-5 w-16 rounded" />
+            <Skeleton className="h-4 w-20 rounded" />
+            <Skeleton className="h-4 flex-1 rounded" />
+            <Skeleton className="h-4 w-24 rounded" />
+            <Skeleton className="h-4 w-16 rounded" />
+          </div>
+        ))}
+      </div>
+    )
   if (tasks.length === 0) {
     return (
       <div className="text-sm text-muted">

@@ -32,6 +32,7 @@ const healthOk = {
   consecutiveFailures: 0,
   lastSuccessAt: new Date().toISOString(),
   recovering: false,
+  connecting: false,
   disabled: false,
 }
 

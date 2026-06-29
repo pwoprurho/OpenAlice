@@ -7,7 +7,7 @@ import type { UTAConfig, BrokerPreset, AccountInfo, SubAccountRef, Position, Bro
 import { useTradingConfig } from '../hooks/useTradingConfig'
 import { useAccountHealth } from '../hooks/useAccountHealth'
 import { PageHeader } from '../components/PageHeader'
-import { EmptyState } from '../components/StateViews'
+import { EmptyState, Skeleton } from '../components/StateViews'
 import { ReconnectButton } from '../components/ReconnectButton'
 import { Toggle } from '../components/Toggle'
 import { HealthBadge } from '../components/uta/HealthBadge'
@@ -180,7 +180,7 @@ export function UTADetailPage({ spec }: UTADetailPageProps) {
       }))
   }, [snapshots, id])
 
-  if (tc.loading) return <Shell title="Loading…" />
+  if (tc.loading) return <Shell title={id ?? 'UTA'}><UTADetailMainSkeleton /></Shell>
   if (!id) return <Shell title="UTA not specified" />
   if (!uta) {
     return (
@@ -268,10 +268,11 @@ export function UTADetailPage({ spec }: UTADetailPageProps) {
                   }}
                 />
               )}
-              <AccountPanel account={account} positions={positions} delta24h={delta24h} clock={clock} />
+              <AccountPanel account={account} positions={positions} delta24h={delta24h} clock={clock} connecting={health?.connecting ?? false} />
             </div>
 
             <div className="lg:order-1 min-w-0 space-y-5">
+              {!lastUpdated ? <UTADetailMainSkeleton /> : <>
               {curvePoints.length >= 2 && (
                 <EquityCurve
                   points={curvePoints}
@@ -292,6 +293,7 @@ export function UTADetailPage({ spec }: UTADetailPageProps) {
               />
 
               <OrdersArea utaId={id} openOrders={orders} />
+              </>}
             </div>
           </div>
         </div>
@@ -380,11 +382,38 @@ function sumFinite(values: number[]): number {
  * fabricated zero. (Live examples: Alpaca has no realizedPnL; CCXT/okx has
  * realizedPnL but no buyingPower.)
  */
-function AccountPanel({ account, positions, delta24h, clock }: {
+/** Cold-start placeholder for the UTA-detail main column (curve + positions +
+ *  orders), shown until the first live read lands — instead of a blank pane or
+ *  a misleading "No open positions" while the (sometimes slow) broker read runs. */
+function UTADetailMainSkeleton() {
+  return (
+    <div className="space-y-5" aria-hidden="true">
+      <Skeleton className="h-[220px] w-full rounded-lg" />
+      <div className="rounded-lg border border-border overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-border bg-bg-secondary">
+          <Skeleton className="h-3 w-28" />
+        </div>
+        <div className="divide-y divide-border">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-4 px-4 py-3.5">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-4 w-12" />
+              <Skeleton className="h-4 w-16 ml-auto" />
+              <Skeleton className="h-4 w-20" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AccountPanel({ account, positions, delta24h, clock, connecting }: {
   account: AccountInfo | null
   positions: Position[]
   delta24h: Delta24h | null
   clock: MarketClockState
+  connecting?: boolean
 }) {
   if (!account) {
     return (
@@ -392,7 +421,21 @@ function AccountPanel({ account, positions, delta24h, clock }: {
         {clock != null && (
           <div className="text-[12px] mb-3"><MarketClockChip clock={clock} /></div>
         )}
-        <p className="text-[13px] text-text-muted">Loading account info…</p>
+        {/* During the initial broker connect, say so explicitly — "connecting"
+            reads as progress, where a bare "Loading…" that lingers 30s reads
+            as a stall. Skeleton rows below stand in for the metric list so the
+            panel has shape instead of a single line of text. */}
+        <p className={`text-[12px] mb-3.5 ${connecting ? 'text-accent' : 'text-text-muted'}`}>
+          {connecting ? 'Connecting to broker…' : 'Loading account info…'}
+        </p>
+        <div className="space-y-3.5" aria-hidden="true">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="flex items-center justify-between">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-3 w-14" />
+            </div>
+          ))}
+        </div>
       </div>
     )
   }

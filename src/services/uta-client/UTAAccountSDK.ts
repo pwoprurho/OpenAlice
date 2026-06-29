@@ -101,6 +101,7 @@ export class UTAAccountSDK {
       tier: 'trading',
       consecutiveFailures: 0,
       recovering: false,
+      connecting: false,
       disabled: false,
     }
   }

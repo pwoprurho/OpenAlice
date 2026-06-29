@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { formatRelativeTime, getIntlLocale } from '../lib/intl'
 import { ArrowRight, Bot, ChevronRight, ListChecks, MessageSquare, Terminal, Trash2 } from 'lucide-react'
 import { PageHeader } from '../components/PageHeader'
+import { Skeleton } from '../components/StateViews'
 import { MarkdownContent } from '../components/MarkdownContent'
 import { FileContentView } from '../components/FileContentView'
 import { api } from '../api'
@@ -96,7 +97,7 @@ export function InboxPage({ visible }: InboxPageProps) {
       />
       <div className="flex-1 overflow-y-auto min-h-0">
         {loading && entries.length === 0 ? (
-          <div className="px-6 py-8 text-text-muted text-sm">{t('common.loading')}</div>
+          <InboxLoadingSkeleton />
         ) : entries.length === 0 ? (
           <EmptyState />
         ) : !selected ? (
@@ -111,6 +112,19 @@ export function InboxPage({ visible }: InboxPageProps) {
           />
         )}
       </div>
+    </div>
+  )
+}
+
+function InboxLoadingSkeleton() {
+  return (
+    <div aria-hidden="true" className="px-6 py-4">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="py-3 border-b border-border/40">
+          <Skeleton className="h-4 w-2/3 rounded mb-2" />
+          <Skeleton className="h-3 w-2/5 rounded" />
+        </div>
+      ))}
     </div>
   )
 }

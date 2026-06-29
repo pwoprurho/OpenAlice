@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Field, inputClass } from '../components/form'
+import { Skeleton } from '../components/StateViews'
 import { SDKSelector } from '../components/SDKSelector'
 import type { SDKOption } from '../components/SDKSelector'
 import { useTradingConfig } from '../hooks/useTradingConfig'
@@ -145,7 +146,22 @@ export function TradingPage() {
     openOrFocus({ kind: 'uta-detail', params: { id } })
   }
 
-  if (tc.loading) return <PageShell subtitle="Loading..." />
+  if (tc.loading) return (
+    <PageShell subtitle="Configure your UTAs (Unified Trading Accounts).">
+      <div className="max-w-[820px] mx-auto space-y-2.5" aria-hidden="true">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 px-4 py-3.5 rounded-lg border border-border bg-bg-secondary">
+            <Skeleton className="h-9 w-9 rounded-lg" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-3.5 w-32" />
+              <Skeleton className="h-2.5 w-20" />
+            </div>
+            <Skeleton className="h-4 w-24" />
+          </div>
+        ))}
+      </div>
+    </PageShell>
+  )
   if (tc.error) {
     return (
       <PageShell subtitle="Failed to load trading configuration.">

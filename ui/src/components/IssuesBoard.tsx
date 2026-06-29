@@ -17,6 +17,7 @@ import type { IssueListItem, IssuePriority, IssueStatus, IssueWorkspace } from '
 import type { ScheduleWhen } from '../api/schedule'
 import { useIssues } from '../hooks/useIssues'
 import { useWorkspace } from '../tabs/store'
+import { CenteredLoading } from './StateViews'
 
 // ==================== Cadence pill (lifted from AutomationSchedulesSection) ====================
 
@@ -269,7 +270,7 @@ export function IssuesBoard() {
   // Keep showing any snapshot we have (incl. the warm cache) rather than
   // flipping to a loading/error screen on a transient refresh failure.
   if (!data) {
-    if (loading) return <div className="text-sm text-muted">Loading…</div>
+    if (loading) return <CenteredLoading />
     return <div className="text-sm text-red-400">Failed to load issues: {error}</div>
   }
 

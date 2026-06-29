@@ -289,6 +289,10 @@ export interface BrokerHealthInfo {
   lastSuccessAt?: string
   lastFailureAt?: string
   recovering: boolean
+  /** True while the account's initial broker connect is still in flight; the UI
+   *  renders a "connecting…" state off this (status is optimistically 'healthy'
+   *  during the window, so it can't be inferred from status/reach). */
+  connecting: boolean
   disabled: boolean
 }
 

@@ -11,7 +11,7 @@ import type { UTATier } from '@traderalice/uta-protocol'
 
 const summary = (id: string, tier: UTATier) => ({
   id, label: id, capabilities: {},
-  health: { status: 'healthy', reach: 'connected', tier, consecutiveFailures: 0, recovering: false },
+  health: { status: 'healthy', reach: 'connected', tier, consecutiveFailures: 0, recovering: false, connecting: false },
 })
 
 function fakeClient(utas: unknown[]) {

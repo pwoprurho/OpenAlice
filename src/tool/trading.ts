@@ -56,19 +56,29 @@ type AccountFailure = { source: string } & ReturnType<typeof handleBrokerError>
  * nothing instead of their real Binance/Bitget holdings (issue #390). Here a
  * failed account degrades to a `{ source, ...error }` marker while the healthy
  * ones still return.
+ *
+ * `connecting` is split out from `failed`: a CONNECTING marker means the
+ * account's broker connect is still in flight (or it's reconnecting) — data is
+ * PENDING, not failed. Keeping it out of `failed`/`degraded` is what stops the
+ * UI (and the agent) from reporting a cold-starting account as a broken one.
+ * The per-account read returns this fast instead of blocking on the slow
+ * connect, so the aggregate resolves immediately with whatever is ready.
  */
 async function settlePerAccount<U extends { id: string }, T>(
   targets: readonly U[],
   fn: (uta: U) => Promise<T>,
-): Promise<{ ok: T[]; failed: AccountFailure[] }> {
+): Promise<{ ok: T[]; failed: AccountFailure[]; connecting: AccountFailure[] }> {
   const settled = await Promise.allSettled(targets.map((u) => fn(u)))
   const ok: T[] = []
   const failed: AccountFailure[] = []
+  const connecting: AccountFailure[] = []
   settled.forEach((r, i) => {
-    if (r.status === 'fulfilled') ok.push(r.value)
-    else failed.push({ source: targets[i].id, ...handleBrokerError(r.reason) })
+    if (r.status === 'fulfilled') { ok.push(r.value); return }
+    const marker = { source: targets[i].id, ...handleBrokerError(r.reason) }
+    if (marker.code === 'CONNECTING') connecting.push(marker)
+    else failed.push(marker)
   })
-  return { ok, failed }
+  return { ok, failed, connecting }
 }
 
 /**
@@ -274,7 +284,7 @@ hitting the broker, which otherwise expects the bare base ticker.`,
     getAccount: tool({
       description: `Query trading account info (netLiquidation, totalCashValue, buyingPower, unrealizedPnL, realizedPnL).
 If this tool returns an error with transient=true, wait a few seconds and retry once before reporting to the user.
-When multiple accounts are queried, a healthy account appears with its balances and a failed one appears as an entry with an \`error\` field (and \`source\`). ALWAYS surface failed accounts to the user — an entry with transient=false is a permanent (credentials/config) failure they must fix, not retry.`,
+When multiple accounts are queried, a healthy account appears with its balances and a failed one appears as an entry with an \`error\` field (and \`source\`). ALWAYS surface failed accounts to the user — an entry with transient=false is a permanent (credentials/config) failure they must fix, not retry. An entry with code="CONNECTING" is NOT a failure: that account is still establishing its broker connection and its data will populate on a later read — don't report it as broken.`,
       inputSchema: z.object({
         source: z.string().optional().describe(sourceDesc(false)),
         subAccountId: z.string().optional().describe('For multi-wallet venues (e.g. Binance: "spot" / "derivatives"), scope to one wallet. Omit for the aggregate across all wallets. Most brokers have a single wallet and ignore this.'),
@@ -282,20 +292,21 @@ When multiple accounts are queried, a healthy account appears with its balances 
       execute: async ({ source, subAccountId }) => {
         const targets = await manager.resolve(source, { tradingOnly: true })
         if (targets.length === 0) return await noAccountsError(manager, source)
-        const { ok, failed } = await settlePerAccount(targets, async (uta) => ({ source: uta.id, ...compactAccountInfo(await uta.getAccount(subAccountId)) }))
+        const { ok, failed, connecting } = await settlePerAccount(targets, async (uta) => ({ source: uta.id, ...compactAccountInfo(await uta.getAccount(subAccountId)) }))
         // Single explicit account: keep the original shape (the account
-        // object, or the error directly).
-        if (targets.length === 1) return ok[0] ?? failed[0]
-        // Multi-account: healthy accounts + per-account error markers, so one
-        // offline broker can't blank the rest (issue #390).
-        return [...ok, ...failed]
+        // object, or the error / connecting marker directly).
+        if (targets.length === 1) return ok[0] ?? failed[0] ?? connecting[0]
+        // Multi-account: healthy accounts + per-account error / connecting
+        // markers, so one offline (or cold-starting) broker can't blank the
+        // rest (issue #390 + the cold-start non-blocking fix).
+        return [...ok, ...failed, ...connecting]
       },
     }),
 
     getPortfolio: tool({
       description: `Query current portfolio holdings. IMPORTANT: If result is an empty array [], you have no holdings.
 If this tool returns an error with transient=true, wait a few seconds and retry once before reporting to the user.
-If the result is an object with a \`degraded\` array, one or more accounts could not be read — the \`positions\` are only from the healthy accounts. ALWAYS tell the user which \`source\`(s) are degraded; an entry with transient=false is a permanent (credentials/config) failure they must fix, not retry.`,
+If the result is an object with a \`degraded\` array, one or more accounts could not be read — the \`positions\` are only from the healthy accounts. ALWAYS tell the user which \`source\`(s) are degraded; an entry with transient=false is a permanent (credentials/config) failure they must fix, not retry. A \`connecting\` array (separate from \`degraded\`) lists accounts still establishing their broker connection — their positions are pending, not missing; mention them as "connecting" and re-query shortly rather than reporting a problem.`,
       inputSchema: z.object({
         source: z.string().optional().describe(sourceDesc(false)),
         symbol: z.string().optional().describe('Filter by ticker, or omit for all'),
@@ -326,7 +337,7 @@ If the result is an object with a \`degraded\` array, one or more accounts could
         }
         // Per-account so one offline/region-blocked account degrades to a
         // marker instead of zeroing every healthy account's holdings (#390).
-        const { ok, failed } = await settlePerAccount(targets, async (uta) => {
+        const { ok, failed, connecting } = await settlePerAccount(targets, async (uta) => {
           const positions = await uta.getPositions(subAccountId)
           const accountInfo = await uta.getAccount(subAccountId)
 
@@ -372,16 +383,18 @@ If the result is an object with a \`degraded\` array, one or more accounts could
 
         const allPositions = ok.flat()
         const allWarnings = [...new Set(fxWarningsFromRates)]
-        // Clean empty result only when nothing failed — don't report "no
-        // positions" when an account was actually unreachable.
-        if (allPositions.length === 0 && failed.length === 0 && allWarnings.length === 0) {
+        // Clean empty result only when nothing failed AND nothing is still
+        // connecting — don't report "no positions" when an account was actually
+        // unreachable or just hasn't finished its initial connect.
+        if (allPositions.length === 0 && failed.length === 0 && connecting.length === 0 && allWarnings.length === 0) {
           return { positions: [], message: 'No open positions.' }
         }
-        if (failed.length > 0 || allWarnings.length > 0) {
+        if (failed.length > 0 || connecting.length > 0 || allWarnings.length > 0) {
           return {
             positions: allPositions,
             ...(allWarnings.length > 0 && { fxWarnings: allWarnings }),
             ...(failed.length > 0 && { degraded: failed }),
+            ...(connecting.length > 0 && { connecting }),
           }
         }
         return allPositions
@@ -392,7 +405,7 @@ If the result is an object with a \`degraded\` array, one or more accounts could
       description: `Query orders by ID. If no orderIds provided, queries all pending (submitted) orders.
 Use groupBy: "contract" to group orders by contract/aliceId (useful with many positions + TPSL).
 If this tool returns an error with transient=true, wait a few seconds and retry once before reporting to the user.
-If the result is an object with a \`degraded\` array, one or more accounts could not be read — the orders are only from the healthy accounts. ALWAYS tell the user which \`source\`(s) are degraded; an entry with transient=false is a permanent (credentials/config) failure they must fix, not retry.`,
+If the result is an object with a \`degraded\` array, one or more accounts could not be read — the orders are only from the healthy accounts. ALWAYS tell the user which \`source\`(s) are degraded; an entry with transient=false is a permanent (credentials/config) failure they must fix, not retry. A \`connecting\` array lists accounts still establishing their broker connection — their orders are pending, not missing; re-query shortly rather than reporting a problem.`,
       inputSchema: z.object({
         source: z.string().optional().describe(sourceDesc(false)),
         orderIds: z.array(z.string()).optional().describe('Order IDs to query. If omitted, queries all pending orders.'),
@@ -402,7 +415,7 @@ If the result is an object with a \`degraded\` array, one or more accounts could
         const targets = await manager.resolve(source, { tradingOnly: true })
         if (targets.length === 0) return []
         // Per-account so one offline account doesn't blank everyone's orders (#390).
-        const { ok, failed } = await settlePerAccount(targets, async (uta) => {
+        const { ok, failed, connecting } = await settlePerAccount(targets, async (uta) => {
           // SDK's getPendingOrderIds is a no-op returning []; the real
           // UnifiedTradingAccount returns the actual pending list. Both
           // satisfy the same call site so this works for Phase A's
@@ -412,6 +425,11 @@ If the result is an object with a \`degraded\` array, one or more accounts could
           return orders.map((o, i) => summarizeOrder(o, uta.id, ids[i]))
         })
         const summaries = ok.flat()
+        const markers = {
+          ...(failed.length > 0 && { degraded: failed }),
+          ...(connecting.length > 0 && { connecting }),
+        }
+        const hasMarkers = failed.length > 0 || connecting.length > 0
 
         if (groupBy === 'contract') {
           const grouped: Record<string, { symbol: string; orders: ReturnType<typeof summarizeOrder>[] }> = {}
@@ -420,9 +438,9 @@ If the result is an object with a \`degraded\` array, one or more accounts could
             if (!grouped[key]) grouped[key] = { symbol: s.symbol, orders: [] }
             grouped[key].orders.push(s)
           }
-          return failed.length > 0 ? { grouped, degraded: failed } : grouped
+          return hasMarkers ? { grouped, ...markers } : grouped
         }
-        return failed.length > 0 ? { orders: summaries, degraded: failed } : summaries
+        return hasMarkers ? { orders: summaries, ...markers } : summaries
       },
     }),
 
