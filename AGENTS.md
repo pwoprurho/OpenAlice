@@ -605,9 +605,13 @@ it saves. Hand parallel tracks off to cloud Claude sessions.
   `allow_force_pushes: false`). `local` is conventionally permanent too.
 - When merging PRs, **NEVER use `--delete-branch`** — destroys source
   branch history. The branch can stay; future tooling needs the SHAs.
-- **Prefer `--merge` over `--squash`** — squash flattens individual
-  commits. Squash only when the history is genuinely messy and even
-  then never combined with `--delete-branch`.
+- **Default PR merge command is `gh pr merge <N> --merge`**. Prefer merge
+  commits over squash commits because the original commit log is often
+  the best fine-grained index for later archaeology: detailed commit
+  messages make it much easier to trace why a dependency, workflow, or
+  subsystem changed. Squash only when the user explicitly asks for it or
+  the branch history is genuinely messy, and even then never combine it
+  with `--delete-branch`.
 - `archive/dev-pre-beta6` is a historical snapshot — do not modify or
   delete.
 - **After merging a PR**, always `git fetch origin && git pull origin master`
@@ -716,5 +720,4 @@ checklist already pulled origin and merged master).
 When `local` is ready to ship — either piecewise (one PR per coherent
 chunk, base `master`) or as a batch — that's a director decision, not a
 default. Ask the user before opening the PR.
-
 
