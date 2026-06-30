@@ -24,12 +24,8 @@ import { useWorkspaces } from '../contexts/WorkspacesContext'
 import { useWorkspace } from '../tabs/store'
 import { WorkspaceView } from '../components/workspace/WorkspaceView'
 import { WorkspaceFilesToggle } from '../components/workspace/WorkspaceFilesToggle'
-import type { KeyMap } from '../components/workspace/Terminal'
+import { keyMapForAgent } from '../components/workspace/terminalInput'
 import type { ViewSpec } from '../tabs/types'
-
-const APP_KEY_MAP: KeyMap = {
-  'shift+enter': '\x1b\r',
-}
 
 interface Props {
   spec: Extract<ViewSpec, { kind: 'workspace' }>
@@ -47,6 +43,7 @@ export function WorkspacePage({ spec, visible }: Props) {
   const activeRecord = sessionId
     ? sessions.find((s) => s.id === sessionId) ?? null
     : null
+  const keyMap = keyMapForAgent(activeRecord?.agent)
   const [spawnMenuOpen, setSpawnMenuOpen] = useState(false)
   const spawnMenuRef = useRef<HTMLDivElement | null>(null)
   const runtimeAgents = useMemo(() => {
@@ -197,7 +194,7 @@ export function WorkspacePage({ spec, visible }: Props) {
           activeRecord={activeRecord}
           sessions={workspace.sessions}
           label={workspace.tag}
-          keyMap={APP_KEY_MAP}
+          keyMap={keyMap}
           onSpawnFresh={spawnDefault}
           onResume={(id) => void ctx.resumeSession(wsId, id)}
           onSelectSession={(id) => {

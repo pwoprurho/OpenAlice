@@ -152,4 +152,20 @@ describe('PersistentSession backpressure / socket-drop deadlock', () => {
 
     session.dispose('test');
   });
+
+  it('writes browser stdin binary frames to the PTY byte-for-byte', () => {
+    const session = new PersistentSession(makeOptions());
+    const ws = new FakeWs();
+    session.attach(ws as never, 80, 24, undefined);
+
+    const input = Buffer.from('，。\n', 'utf8');
+    ws.emit('message', input, true);
+
+    expect(term.write).toHaveBeenCalledTimes(1);
+    const written = term.write.mock.calls[0]?.[0];
+    expect(Buffer.isBuffer(written)).toBe(true);
+    expect(Buffer.compare(written as Buffer, input)).toBe(0);
+
+    session.dispose('test');
+  });
 });

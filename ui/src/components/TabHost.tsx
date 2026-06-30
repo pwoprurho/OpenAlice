@@ -9,7 +9,7 @@ import { EmptyEditor } from './EmptyEditor'
  * The main editor area — replaces the old `<Routes>` block.
  *
  * Renders every open tab in the focused group concurrently, hiding all but
- * the active one via CSS `display: none`. Reasoning:
+ * the active one with `visibility: hidden`. Reasoning:
  *
  * - Tabs that hold long-lived state (ChatPage's SSE / message buffers,
  *   in-progress charts) survive switching without re-fetch or re-mount.
@@ -53,7 +53,7 @@ export function TabHost() {
   )
 }
 
-/** One mounted tab. Hidden frames are kept in the DOM but `display: none`. */
+/** One mounted tab. Hidden frames keep layout so size-sensitive children survive. */
 function TabFrame({ tab, visible }: { tab: Tab; visible: boolean }) {
   const view = getView(tab.spec.kind)
   // Cast: each ViewModule has a Component constrained to its spec kind. The
@@ -62,7 +62,11 @@ function TabFrame({ tab, visible }: { tab: Tab; visible: boolean }) {
   return (
     <div
       className="absolute inset-0 flex flex-col min-h-0"
-      style={{ display: visible ? 'flex' : 'none' }}
+      style={{
+        visibility: visible ? 'visible' : 'hidden',
+        pointerEvents: visible ? 'auto' : 'none',
+        zIndex: visible ? 1 : 0,
+      }}
       aria-hidden={!visible}
       // `inert` keeps focusable elements in hidden frames out of tab order.
       // React 19 supports it as a JSX attribute.
