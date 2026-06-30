@@ -455,7 +455,10 @@ export class PersistentSession {
       const buf = toBuffer(raw);
       if (!buf) return;
       try {
-        this.term.write(buf.toString('utf8'));
+        // Browser stdin arrives as UTF-8 bytes. Keep this edge byte-faithful:
+        // converting through string corrupts arbitrary terminal sequences and
+        // makes CJK/IME behavior depend on JS decoding instead of the PTY.
+        this.term.write(buf as unknown as string);
       } catch (err) {
         this.log.warn('session.write_error', { err });
       }

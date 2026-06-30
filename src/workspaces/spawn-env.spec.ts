@@ -41,4 +41,16 @@ describe('buildSpawnEnv', () => {
     const out = buildSpawnEnv({ PWD: '/somewhere/else' }, {}, '/ws/dir')
     expect(out['PWD']).toBe('/ws/dir')
   })
+
+  it('defaults terminal locale to UTF-8 without overriding explicit locale', () => {
+    expect(buildSpawnEnv({})['LANG']).toBe('en_US.UTF-8')
+    expect(buildSpawnEnv({})['LC_CTYPE']).toBe('en_US.UTF-8')
+
+    const explicit = buildSpawnEnv({ LANG: 'zh_CN.UTF-8', LC_CTYPE: 'zh_CN.UTF-8' })
+    expect(explicit['LANG']).toBe('zh_CN.UTF-8')
+    expect(explicit['LC_CTYPE']).toBe('zh_CN.UTF-8')
+
+    const lcAll = buildSpawnEnv({ LC_ALL: 'C.UTF-8' })
+    expect(lcAll['LC_CTYPE']).toBeUndefined()
+  })
 })

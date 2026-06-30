@@ -13,7 +13,8 @@ import { EmptyEditor } from './EmptyEditor'
  * their ViewSpec in the tab store but release component state, timers, charts,
  * terminals, and other DOM-owned resources. A view can opt into
  * `lifecycle: 'keep-mounted'` in tabs/registry when it genuinely needs a live
- * background DOM.
+ * background DOM. Those keep-mounted hidden frames use `visibility: hidden`
+ * so size-sensitive children keep a real layout box.
  */
 export function TabHost() {
   const tabIds = useWorkspace((state) =>
@@ -60,7 +61,11 @@ function TabFrame({ tab, visible }: { tab: Tab; visible: boolean }) {
       data-view-frame={tab.spec.kind}
       data-view-visible={visible ? 'true' : 'false'}
       className="absolute inset-0 flex flex-col min-h-0"
-      style={{ display: visible ? 'flex' : 'none' }}
+      style={{
+        visibility: visible ? 'visible' : 'hidden',
+        pointerEvents: visible ? 'auto' : 'none',
+        zIndex: visible ? 1 : 0,
+      }}
       aria-hidden={!visible}
       // `inert` keeps focusable elements in hidden frames out of tab order.
       // React 19 supports it as a JSX attribute.

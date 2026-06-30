@@ -49,6 +49,8 @@ export function buildSpawnEnv(
   out['COLORTERM'] = 'truecolor';
   out['TERM_PROGRAM'] = 'openalice-workspaces';
   out['TERM_PROGRAM_VERSION'] = SELF_VERSION;
+  if (!out['LANG']) out['LANG'] = 'en_US.UTF-8';
+  if (!out['LC_CTYPE'] && !out['LC_ALL']) out['LC_CTYPE'] = 'en_US.UTF-8';
   // Override PWD to match the spawn cwd. PTY spawn does chdir() to `cwd`,
   // but env PWD is just the parent's PWD passed verbatim. Claude Code CLI
   // selects its `~/.claude/projects/<projectKey>/` from $PWD (not from
