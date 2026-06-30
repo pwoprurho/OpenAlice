@@ -30,6 +30,10 @@ export interface WorkspacesContextValue {
   resumeSession(wsId: string, sessionId: string): Promise<void>
   requestDeleteSession(wsId: string, sessionId: string): void
   openAgentConfig(wsId: string): void
+  saveWorkspaceMetadata(
+    wsId: string,
+    metadata: { displayName?: string | null; description?: string | null },
+  ): Promise<void>
   renameWorkspace(wsId: string, displayName: string): Promise<void>
 }
 

@@ -446,7 +446,7 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
           <button
             type="button"
             className={`${rowAction()} opacity-0 group-hover:opacity-100 focus-visible:opacity-100`}
-            title="configure AI provider for this workspace"
+            title="Configure this workspace"
             onClick={() => props.onConfigureWorkspace?.(w.id)}
           >
             <SettingsIcon size={12} strokeWidth={2} />

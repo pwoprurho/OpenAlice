@@ -25,7 +25,7 @@ import { ConfirmDialog } from '../ConfirmDialog'
 import { deleteWorkspace, type SessionRecord, type Workspace } from './api'
 import { CreateWorkspaceDialog } from './CreateWorkspaceDialog'
 import { SessionRow } from './Sidebar'
-import { workspaceDisplayName, workspaceDisplayTitle } from './display'
+import { workspaceDisplayTitle } from './display'
 
 const CHAT_TEMPLATE = 'chat'
 
@@ -35,7 +35,6 @@ const DAILY_TAG_RE = /^chat-[a-z]{3}\d{1,2}$/
 /** Friendly label for a chat workspace: Today / Yesterday / "Jun 14" for daily
  *  buckets, the raw tag for user-named workspaces. */
 function chatLabel(w: Workspace, todayLabel: string, yesterdayLabel: string): string {
-  if (w.displayName?.trim()) return workspaceDisplayName(w)
   if (!DAILY_TAG_RE.test(w.tag)) return w.tag
   const created = new Date(w.createdAt)
   if (Number.isNaN(created.getTime())) return w.tag
@@ -253,6 +252,8 @@ function ChatWorkspaceRow(props: ChatWorkspaceRowProps): ReactElement {
   const hasRunning = w.sessions.some((s) => s.state === 'running')
   const [expanded, setExpanded] = useState(true)
   const isSelected = props.selection?.wsId === w.id && props.selection.sessionId === null
+  const displayName = w.displayName?.trim()
+  const subtitle = displayName && displayName !== props.label ? displayName : null
 
   const statusClass = hasRunning
     ? 'bg-green'
@@ -292,8 +293,15 @@ function ChatWorkspaceRow(props: ChatWorkspaceRowProps): ReactElement {
           className="flex-1 min-w-0 flex items-center gap-2 text-left"
         >
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusClass}`} aria-hidden="true" />
-          <span className="truncate font-medium" title={workspaceDisplayTitle(w)}>
-            {props.label}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium" title={workspaceDisplayTitle(w)}>
+              {props.label}
+            </span>
+            {subtitle && (
+              <span className="block truncate text-[11px] leading-3 text-text-muted/65" title={subtitle}>
+                {subtitle}
+              </span>
+            )}
           </span>
           {w.sessions.length > 0 && (
             <span className="text-[11px] text-text-muted/45 tabular-nums shrink-0">
@@ -323,8 +331,8 @@ function ChatWorkspaceRow(props: ChatWorkspaceRowProps): ReactElement {
               props.onConfigure()
             }}
             className="w-5 h-5 rounded flex items-center justify-center text-text-muted hover:text-text hover:bg-bg-secondary"
-            title={t('settings.category.aiProvider')}
-            aria-label={t('settings.category.aiProvider')}
+            title="Workspace settings"
+            aria-label="Workspace settings"
           >
             <SettingsIcon size={12} strokeWidth={2} />
           </button>

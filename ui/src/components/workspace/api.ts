@@ -367,9 +367,11 @@ export async function deleteWorkspace(id: string): Promise<boolean> {
   return res.ok;
 }
 
+export type WorkspaceMetadataPatch = { displayName?: string | null; description?: string | null };
+
 export async function updateWorkspaceMetadata(
   id: string,
-  metadata: { displayName?: string; description?: string },
+  metadata: WorkspaceMetadataPatch,
 ): Promise<Workspace> {
   const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}/metadata`, {
     method: 'PATCH',

@@ -239,13 +239,23 @@ export function WorkspacesProvider({ children }: { children: ReactNode }) {
     [refresh, openOrFocus],
   )
 
-  const renameWorkspace = useCallback(
-    async (wsId: string, displayName: string): Promise<void> => {
-      const updated = await updateWorkspaceMetadata(wsId, { displayName })
+  const saveWorkspaceMetadata = useCallback(
+    async (
+      wsId: string,
+      metadata: { displayName?: string | null; description?: string | null },
+    ): Promise<void> => {
+      const updated = await updateWorkspaceMetadata(wsId, metadata)
       setWorkspaces((prev) => prev.map((w) => (w.id === wsId ? updated : w)))
       void refresh()
     },
     [refresh],
+  )
+
+  const renameWorkspace = useCallback(
+    async (wsId: string, displayName: string): Promise<void> => {
+      await saveWorkspaceMetadata(wsId, { displayName })
+    },
+    [saveWorkspaceMetadata],
   )
 
   const deleteSession = useCallback(
@@ -302,6 +312,7 @@ export function WorkspacesProvider({ children }: { children: ReactNode }) {
         resumeSession,
         requestDeleteSession,
         openAgentConfig: (wsId: string) => setConfiguringWsId(wsId),
+        saveWorkspaceMetadata,
         renameWorkspace,
       }}
     >
