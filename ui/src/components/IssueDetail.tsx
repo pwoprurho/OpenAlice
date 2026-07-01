@@ -512,7 +512,21 @@ function WikilinkPicker({
  * server-returned detail — authoritative, refetch-free). Scheduling/agent/firing
  * markers stay read-only (they're driven by frontmatter the agent owns).
  */
-export function IssueDetail({ wsId, id }: { wsId: string; id: string }) {
+interface IssueDetailProps {
+  wsId: string
+  id: string
+  backLabel?: string
+  onBack?: () => void
+  onOpenIssue?: (ref: WikilinkIssueRef) => void
+}
+
+export function IssueDetail({
+  wsId,
+  id,
+  backLabel = 'Issues',
+  onBack,
+  onOpenIssue,
+}: IssueDetailProps) {
   const { data, error, loading, mutate } = useIssueDetail(wsId, id)
   const { data: board } = useIssues()
   const openOrFocus = useWorkspace((s) => s.openOrFocus)
@@ -531,9 +545,14 @@ export function IssueDetail({ wsId, id }: { wsId: string; id: string }) {
 
   const gotoIssue = useCallback(
     (ref: WikilinkIssueRef) => {
+      if (onOpenIssue) {
+        onOpenIssue(ref)
+        return
+      }
+      setSidebar('issue')
       openOrFocus({ kind: 'issue-detail', params: { wsId: ref.wsId, id: ref.id } })
     },
-    [openOrFocus],
+    [onOpenIssue, openOrFocus, setSidebar],
   )
 
   // Open the Inbox at a specific entry (the issue→inbox cross-link). Mirrors the
@@ -601,10 +620,17 @@ export function IssueDetail({ wsId, id }: { wsId: string; id: string }) {
   const backToBoard = (
     <button
       type="button"
-      onClick={() => openOrFocus({ kind: 'issue', params: {} })}
+      onClick={() => {
+        if (onBack) {
+          onBack()
+          return
+        }
+        setSidebar('issue')
+        openOrFocus({ kind: 'issue', params: {} })
+      }}
       className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-text"
     >
-      <ArrowLeft size={13} /> Issues
+      <ArrowLeft size={13} /> {backLabel}
     </button>
   )
 

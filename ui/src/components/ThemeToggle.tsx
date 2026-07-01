@@ -39,7 +39,7 @@ export function ThemeToggle() {
       onClick={cycle}
       title={t('theme.switchTo', { mode: t(`theme.mode.${NEXT[theme]}`) })}
       aria-label={t('theme.switchTo', { mode: t(`theme.mode.${NEXT[theme]}`) })}
-      className="relative flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-left text-[13px] text-text-muted transition-colors hover:bg-overlay hover:text-text"
+      className="relative flex min-h-[34px] w-full items-center gap-3 rounded-md px-3 py-1.5 text-left text-[13px] text-text-muted transition-colors hover:bg-overlay hover:text-text"
     >
       <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
         <Icon size={16} strokeWidth={1.75} />

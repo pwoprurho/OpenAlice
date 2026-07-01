@@ -234,10 +234,13 @@ function InvalidWorkspaces({ workspaces }: { workspaces: IssueWorkspace[] }) {
 export function IssuesBoard() {
   const { data, error, loading } = useIssues()
   const openOrFocus = useWorkspace((s) => s.openOrFocus)
+  const setSidebar = useWorkspace((s) => s.setSidebar)
   const [collapsed, setCollapsed] = useState<Set<IssueStatus>>(new Set())
 
-  const openRow = (row: BoardRow) =>
+  const openRow = (row: BoardRow) => {
+    setSidebar('issue')
     openOrFocus({ kind: 'issue-detail', params: { wsId: row.wsId, id: row.issue.id } })
+  }
 
   const toggle = (status: IssueStatus) =>
     setCollapsed((prev) => {

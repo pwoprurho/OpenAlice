@@ -36,7 +36,7 @@ export function MarketPage() {
             <div className="text-[12px] text-text-muted/70 border border-border rounded-md px-3 py-2">{stripError}</div>
           )}
           {!strip && !stripError && (
-            <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" aria-hidden="true">
+            <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(210px,1fr))]" aria-hidden="true">
               {Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="border border-border rounded-md bg-bg-secondary/40 px-3 py-2.5 flex flex-col gap-1.5">
                   <Skeleton className="h-3 w-20 rounded" />
@@ -46,7 +46,7 @@ export function MarketPage() {
             </div>
           )}
           {strip && (
-            <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(210px,1fr))]">
               {strip.cards.map((c) => (
                 <SeriesCard key={c.id} card={c} label={valuationLabel(c.id, t) ?? c.label} emptyText={t('market.noMatches')} />
               ))}

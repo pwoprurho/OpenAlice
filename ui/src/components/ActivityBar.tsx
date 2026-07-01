@@ -160,10 +160,8 @@ const NAV_SECTIONS: NavSection[] = [
 // ==================== ActivityBar ====================
 
 /**
- * Linear-style left nav. 200px wide on desktop; on mobile (<md) it
- * slides in over the page from the left as a 280px drawer (matching
- * the secondary drawer so a drill-in doesn't jump width), on desktop
- * it's a static column. The recessed-rail look comes from bg-tertiary
+ * Linear-style left nav. Mobile uses a drawer; desktop keeps a compact
+ * text rail. The recessed-rail look comes from bg-tertiary
  * (one elevation step up from the secondary Sidebar and the base main
  * pane) — rail → sidebar → main read as three distinct tiers. Top
  * section (no header) is the pinned-nav block — Chat, Inbox,
@@ -200,7 +198,7 @@ export function ActivityBar({ open, onClose, onItemActivated, sidebarVisible = t
        *  page with backdrop. Desktop: static column flush left. */}
       <aside
         className={`
-          w-[280px] md:w-[200px] h-full flex flex-col shrink-0
+          w-[280px] md:w-[188px] h-full flex flex-col shrink-0
           bg-bg-tertiary
           border-r border-border/80
           fixed z-50 top-0 left-0 transition-transform duration-200
@@ -292,7 +290,7 @@ export function ActivityBar({ open, onClose, onItemActivated, sidebarVisible = t
                           type="button"
                           onClick={handleClick}
                           title={t(item.labelKey)}
-                          className={`relative flex items-center gap-3 px-3 py-1.5 rounded-md text-[13px] transition-colors text-left ${
+                          className={`relative flex min-h-[34px] items-center gap-3 rounded-md px-3 py-1.5 text-[13px] transition-colors text-left ${
                             isActive
                               ? 'bg-accent-dim text-text'
                               : 'text-text-muted hover:text-text hover:bg-overlay'
@@ -385,9 +383,10 @@ function SectionHeader({
         <button
           type="button"
           onClick={onToggleCollapse}
-          className="flex-1 flex items-center gap-1.5 py-1 text-[12px] font-semibold text-text-muted/75 hover:text-text-muted transition-colors text-left"
+          className="flex-1 flex min-h-7 items-center gap-1.5 py-1 text-[12px] font-semibold text-text-muted/75 hover:text-text-muted transition-colors text-left"
           aria-expanded={!isCollapsed}
           aria-controls={controlsId}
+          title={label}
         >
           <ChevronDown
             size={12}
@@ -403,7 +402,7 @@ function SectionHeader({
           <button
             type="button"
             onClick={() => setHintOpen((o) => !o)}
-            className={`flex items-center justify-center p-0.5 transition-colors ${
+            className={`flex min-h-7 min-w-7 items-center justify-center p-0.5 transition-colors ${
               hintOpen ? 'text-text-muted' : 'text-text-muted/50 hover:text-text-muted'
             }`}
             aria-label={t('nav.about', { label })}

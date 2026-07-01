@@ -4,9 +4,9 @@ import { TrendingUp, Hash } from 'lucide-react'
 import { entitiesLive } from '../live/entities'
 import { useTrackedSelection } from '../live/tracked-selection'
 import { useWorkspace } from '../tabs/store'
-import { SidebarRow } from './SidebarRow'
 import { SidebarSectionHeader } from './SidebarSectionHeader'
 import { SidebarRowsSkeleton } from './StateViews'
+import type { EntityListItem } from '../api/entities'
 
 /**
  * Tracked sidebar — the watchlist. A flat list of entities (assets + topics),
@@ -21,6 +21,7 @@ export function TrackedSidebar() {
   const selected = useTrackedSelection((s) => s.selectedName)
   const select = useTrackedSelection((s) => s.select)
   const openOrFocus = useWorkspace((s) => s.openOrFocus)
+  const setSidebar = useWorkspace((s) => s.setSidebar)
 
   // Default-select the first entity once, on first non-empty load. Latch so
   // the user's later picks are never overridden.
@@ -31,6 +32,13 @@ export function TrackedSidebar() {
     if (!selected) select(entities[0]!.name)
     everSelectedRef.current = true
   }, [entities, selected, select])
+
+  useEffect(() => {
+    if (!selected) return
+    const selectedRow = [...document.querySelectorAll<HTMLElement>('[data-tracked-entity]')]
+      .find((el) => el.dataset.trackedEntity === selected)
+    selectedRow?.scrollIntoView({ block: 'center' })
+  }, [selected, entities])
 
   if (loading && entities.length === 0) {
     return (
@@ -53,33 +61,18 @@ export function TrackedSidebar() {
     )
   }
 
-  const renderRow = (e: (typeof entities)[number]) => {
-    const Icon = e.type === 'asset' ? TrendingUp : Hash
-    const openEntity = () => {
-      select(e.name)
-      openOrFocus({ kind: 'tracked', params: {} })
-    }
-    return (
-      <SidebarRow
-        key={e.name}
-        active={e.name === selected}
-        onClick={openEntity}
-        title={e.description}
-        icon={<Icon size={13} strokeWidth={1.75} className="text-text-muted/70" aria-hidden />}
-        label={<span className="font-mono text-[12px]">{e.name}</span>}
-        trail={
-          e.backlinkCount > 0 ? (
-            <span
-              className="text-[10px] text-text-muted/60 tabular-nums"
-              title={t('tracked.backlinksTooltip', { count: e.backlinkCount })}
-            >
-              {e.backlinkCount}
-            </span>
-          ) : undefined
-        }
-      />
-    )
-  }
+  const renderRow = (entity: EntityListItem) => (
+    <TrackedEntityRow
+      key={entity.name}
+      entity={entity}
+      active={entity.name === selected}
+      onClick={() => {
+        select(entity.name)
+        setSidebar('tracked')
+        openOrFocus({ kind: 'tracked', params: {} })
+      }}
+    />
+  )
 
   // Partition into Assets / Topics so the watchlist reads as a grouped
   // navigator, not one undifferentiated run (newest-first within each).
@@ -87,19 +80,116 @@ export function TrackedSidebar() {
   const topics = entities.filter((e) => e.type !== 'asset')
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto py-1">
+    <div className="flex flex-col h-full overflow-y-auto py-2">
       {assets.length > 0 && (
-        <>
-          <SidebarSectionHeader>{t('tracked.assets')}</SidebarSectionHeader>
-          {assets.map(renderRow)}
-        </>
+        <div className="mb-2">
+          <SidebarSectionHeader trailing={<SectionCount count={assets.length} />}>
+            {t('tracked.assets')}
+          </SidebarSectionHeader>
+          <div className="px-2">
+            {assets.map(renderRow)}
+          </div>
+        </div>
       )}
       {topics.length > 0 && (
-        <>
-          <SidebarSectionHeader>{t('tracked.topics')}</SidebarSectionHeader>
-          {topics.map(renderRow)}
-        </>
+        <div className="mb-2">
+          <SidebarSectionHeader trailing={<SectionCount count={topics.length} />}>
+            {t('tracked.topics')}
+          </SidebarSectionHeader>
+          <div className="px-2">
+            {topics.map(renderRow)}
+          </div>
+        </div>
       )}
     </div>
   )
+}
+
+function SectionCount({ count }: { count: number }) {
+  return (
+    <span className="rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-text-muted/65">
+      {count}
+    </span>
+  )
+}
+
+function TrackedEntityRow({
+  entity,
+  active,
+  onClick,
+}: {
+  entity: EntityListItem
+  active: boolean
+  onClick: () => void
+}) {
+  const { t } = useTranslation()
+  const Icon = entity.type === 'asset' ? TrendingUp : Hash
+  const display = displayName(entity)
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      data-tracked-entity={entity.name}
+      onClick={onClick}
+      title={entity.description}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick()
+        }
+      }}
+      className={`group relative mb-0.5 grid min-h-[38px] grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2.5 py-1.5 outline-none transition-colors ${
+        active
+          ? 'bg-accent-dim text-text shadow-[inset_2px_0_0_var(--color-accent)]'
+          : 'text-text-muted hover:bg-overlay hover:text-text focus-visible:bg-overlay'
+      }`}
+    >
+      <span
+        className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors ${
+          active ? 'bg-bg/60 text-accent' : 'bg-bg-tertiary/55 text-text-muted/70 group-hover:text-text-muted'
+        }`}
+        aria-hidden
+      >
+        <Icon size={13} strokeWidth={1.8} />
+      </span>
+
+      <span className="min-w-0">
+        {display.prefix ? (
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-text-muted/55">
+              {display.prefix}
+            </span>
+            <span className={`truncate text-[12.5px] ${active ? 'font-semibold text-text' : 'font-medium'}`}>
+              {display.rest}
+            </span>
+          </span>
+        ) : (
+          <span className={`block truncate text-[12.5px] ${active ? 'font-semibold text-text' : 'font-medium'}`}>
+            {display.rest}
+          </span>
+        )}
+      </span>
+
+      {entity.backlinkCount > 0 && (
+        <span
+          className={`min-w-[20px] rounded-full px-1.5 py-0.5 text-center text-[10px] font-medium tabular-nums ${
+            active ? 'bg-bg/75 text-text-muted' : 'bg-bg-tertiary/70 text-text-muted/65'
+          }`}
+          title={t('tracked.backlinksTooltip', { count: entity.backlinkCount })}
+        >
+          {entity.backlinkCount}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function displayName(entity: EntityListItem): { prefix: string | null; rest: string } {
+  if (entity.type !== 'asset') return { prefix: null, rest: entity.name }
+  const dash = entity.name.indexOf('-')
+  if (dash <= 0 || dash === entity.name.length - 1) return { prefix: null, rest: entity.name }
+  return {
+    prefix: entity.name.slice(0, dash),
+    rest: entity.name.slice(dash + 1),
+  }
 }

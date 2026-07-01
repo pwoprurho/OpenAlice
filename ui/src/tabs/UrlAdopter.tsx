@@ -75,6 +75,7 @@ export function UrlAdopter() {
 
         {/* Tracked (entity index) */}
         <Route path="/tracked" element={<AdoptStatic spec={{ kind: 'tracked', params: {} }} />} />
+        <Route path="/tracked/issues/:wsId/:id" element={<AdoptTrackedIssueDetail />} />
 
         {/* Workspaces */}
         <Route path="/workspaces" element={<AdoptStatic spec={{ kind: 'workspace-list', params: {} }} />} />
@@ -165,6 +166,12 @@ function AdoptIssueDetail() {
   return <AdoptStatic spec={{ kind: 'issue-detail', params: { wsId, id } }} />
 }
 
+function AdoptTrackedIssueDetail() {
+  const { wsId, id } = useParams<{ wsId: string; id: string }>()
+  if (!wsId || !id) return <Navigate to="/tracked" replace />
+  return <AdoptStatic spec={{ kind: 'tracked-issue-detail', params: { wsId, id } }} />
+}
+
 function AdoptUtaDetail() {
   const { id } = useParams<{ id: string }>()
   if (!id) return <Navigate to="/settings/trading" replace />
@@ -253,6 +260,7 @@ function specToSection(spec: ViewSpec): ActivitySection {
   switch (spec.kind) {
     case 'inbox':              return 'inbox'
     case 'tracked':            return 'tracked'
+    case 'tracked-issue-detail': return 'tracked'
     case 'chat-landing':       return 'chat'
     case 'workspace':
     case 'workspace-list':

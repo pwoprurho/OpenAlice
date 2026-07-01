@@ -159,12 +159,15 @@ function issueIdFromPath(path: string): string | null {
 
 function BacklinkRow({ backlink }: { backlink: Backlink }) {
   const openOrFocus = useWorkspace((s) => s.openOrFocus)
+  const setSidebar = useWorkspace((s) => s.setSidebar)
   const issueId = issueIdFromPath(backlink.path)
   const open = () => {
     if (issueId) {
-      // Issue note → its wsId-precise board detail, not a raw file.
+      // Issue note opened from Tracked stays in the Tracked container: same
+      // detail component, but Back returns to the entity/backlink context.
+      setSidebar('tracked')
       openOrFocus({
-        kind: 'issue-detail',
+        kind: 'tracked-issue-detail',
         params: { wsId: backlink.workspaceId, id: issueId },
       })
       return

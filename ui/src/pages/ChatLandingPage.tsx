@@ -261,7 +261,7 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
   }
 
   return (
-    <div className="relative h-full w-full overflow-auto bg-bg flex flex-col items-center justify-center px-4 py-8 md:px-6 md:py-10">
+    <div className="relative h-full w-full overflow-auto bg-bg flex flex-col items-center justify-center px-4 py-6 md:px-6 md:py-10">
       {/* Ask-Alice backdrop — full-bleed, responsive-only layers (gradient wash
           + faint grid). The #302 mock's %-positioned circle / diagonal bars were
           dropped: they drift on portrait and read as pixel-placed art, not a
@@ -272,7 +272,7 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
         <div className="absolute inset-0 opacity-[0.06] [background-image:linear-gradient(to_right,var(--color-text)_1px,transparent_1px),linear-gradient(to_bottom,var(--color-text)_1px,transparent_1px)] [background-size:96px_96px]" />
       </div>
 
-      <div className="relative z-10 w-full max-w-2xl flex flex-col gap-5">
+      <div className="relative z-10 w-full max-w-2xl flex flex-col gap-4 md:gap-5">
         <div className="text-center space-y-1.5">
           {targetWs ? (
             <>
@@ -297,14 +297,14 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
             </>
           ) : (
             <>
-              <h1 className="text-xl md:text-2xl font-semibold text-text">{t('chatLanding.heading')}</h1>
-              <p className="text-sm text-text-muted">{t('chatLanding.subheading')}</p>
+              <h1 className="text-[19px] md:text-2xl font-semibold text-text leading-tight">{t('chatLanding.heading')}</h1>
+              <p className="text-[13px] md:text-sm text-text-muted leading-relaxed">{t('chatLanding.subheading')}</p>
             </>
           )}
         </div>
 
         <div
-          className={`rounded-2xl px-3 pt-3 pb-2 transition-colors ${
+          className={`rounded-xl md:rounded-2xl px-3 pt-3 pb-2 transition-colors ${
             targetWs
               ? 'bg-accent/[0.04] border border-accent/45 ring-1 ring-accent/15 focus-within:border-accent/70'
               : 'bg-bg-secondary/60 border border-border/60 focus-within:border-accent/50'
@@ -318,12 +318,12 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
             placeholder={t('chatLanding.placeholder')}
             rows={3}
             autoFocus
-            className="w-full bg-transparent resize-none outline-none text-text placeholder:text-text-muted/50 text-[15px] px-2 py-1.5 min-h-[72px] max-h-[40vh]"
+            className="w-full bg-transparent resize-none outline-none text-text placeholder:text-text-muted/50 text-[15px] px-2 py-1.5 min-h-[92px] md:min-h-[72px] max-h-[40vh]"
           />
-          <div className="flex items-center justify-between px-1 pt-1">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 px-1 pt-1 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               {/* Workspace type (Chat). Static — quick-chat always targets the chat template. */}
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-text-muted bg-bg-tertiary px-2 py-1 rounded-md">
+              <span className="inline-flex min-h-8 items-center gap-1.5 text-[11px] text-text-muted bg-bg-tertiary px-2.5 py-1 rounded-md">
                 <MessageSquare className="w-3 h-3" />
                 {t('chatLanding.workspaceType')}
               </span>
@@ -337,10 +337,10 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
                   aria-haspopup="menu"
                   aria-expanded={agentMenuOpen}
                   aria-label={t('chatLanding.selectAgent')}
-                  className="inline-flex items-center gap-1.5 text-[11px] text-text-muted bg-bg-tertiary px-2 py-1 rounded-md transition-colors hover:text-text disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex min-h-8 max-w-[190px] items-center gap-1.5 text-[11px] text-text-muted bg-bg-tertiary px-2.5 py-1 rounded-md transition-colors hover:text-text disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {SelectedIcon ? <SelectedIcon className="w-3 h-3" /> : null}
-                  {selectedInfo?.displayName ?? t('chatLanding.selectAgent')}
+                  <span className="truncate">{selectedInfo?.displayName ?? t('chatLanding.selectAgent')}</span>
                   <ChevronDown className="w-3 h-3 opacity-60" />
                 </button>
                 {agentMenuOpen && targetCliAgents.length > 0 && (
@@ -386,7 +386,7 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
                 <button
                   type="button"
                   onClick={goConfigureProvider}
-                  className="inline-flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-1 rounded-md transition-colors hover:bg-amber-500/20"
+                  className="inline-flex min-h-8 items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-md transition-colors hover:bg-amber-500/20"
                 >
                   <KeyRound className="w-3 h-3" />
                   {t('chatLanding.configureProvider')}
@@ -400,10 +400,10 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
                     aria-haspopup="menu"
                     aria-expanded={credMenuOpen}
                     aria-label={t('chatLanding.selectCredential')}
-                    className="inline-flex items-center gap-1.5 text-[11px] text-text-muted bg-bg-tertiary px-2 py-1 rounded-md transition-colors hover:text-text"
+                    className="inline-flex min-h-8 max-w-[190px] items-center gap-1.5 text-[11px] text-text-muted bg-bg-tertiary px-2.5 py-1 rounded-md transition-colors hover:text-text"
                   >
                     <KeyRound className="w-3 h-3" />
-                    {credInfo?.slug ?? t('chatLanding.selectCredential')}
+                    <span className="truncate">{credInfo?.slug ?? t('chatLanding.selectCredential')}</span>
                     <ChevronDown className="w-3 h-3 opacity-60" />
                   </button>
                   {credMenuOpen && (
@@ -435,13 +435,13 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
                 </div>
               )}
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center justify-end gap-1.5">
               <button
                 type="button"
                 disabled
                 title={t('chatLanding.attachSoon')}
                 aria-label={t('chatLanding.attach')}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-text-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Paperclip className="w-4 h-4" />
               </button>
@@ -451,7 +451,7 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
                 disabled={!canSend}
                 title={t('chatLanding.send')}
                 aria-label={t('chatLanding.send')}
-                className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent text-white transition-colors hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center bg-accent text-white transition-colors hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {launching ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
               </button>
@@ -526,15 +526,15 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2 px-1">
-          <span className="text-[11px] text-text-muted/70">{t('chatLanding.examplesLabel')}</span>
+        <div className="scrollbar-hide -mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-1 md:pb-0">
+          <span className="shrink-0 text-[11px] text-text-muted/70">{t('chatLanding.examplesLabel')}</span>
           {[t('chatLanding.ex1'), t('chatLanding.ex2'), t('chatLanding.ex3')].map((ex) => (
             <button
               key={ex}
               type="button"
               onClick={() => useExample(ex)}
               disabled={launching}
-              className="text-[12px] text-text-muted bg-bg-secondary/60 border border-border/50 rounded-full px-3 py-1 transition-colors hover:border-accent/40 hover:text-text disabled:opacity-40"
+              className="shrink-0 min-h-8 text-[12px] text-text-muted bg-bg-secondary/60 border border-border/50 rounded-full px-3 py-1 transition-colors hover:border-accent/40 hover:text-text disabled:opacity-40"
             >
               {ex}
             </button>

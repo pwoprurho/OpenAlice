@@ -161,7 +161,7 @@ function ToggleBtn({
       title={title}
       aria-label={title}
       aria-pressed={active}
-      className={`flex items-center justify-center w-6 h-6 transition-colors ${
+      className={`flex items-center justify-center w-8 h-8 transition-colors ${
         active ? 'bg-bg-tertiary text-text' : 'text-text-muted/60 hover:text-text hover:bg-bg-tertiary/50'
       }`}
     >
@@ -241,7 +241,7 @@ function ClusterRow({
           onClick()
         }
       }}
-      className={`group relative flex items-center gap-1.5 pl-3 pr-3 py-1.5 cursor-pointer transition-colors outline-none focus-visible:bg-bg-tertiary/70 ${
+      className={`group relative grid min-h-11 grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 gap-y-0.5 pl-3 pr-3 py-1.5 cursor-pointer transition-colors outline-none focus-visible:bg-bg-tertiary/70 ${
         active ? 'bg-bg-tertiary' : 'hover:bg-bg-tertiary/50'
       }`}
     >
@@ -250,12 +250,12 @@ function ClusterRow({
       )}
       <span
         aria-hidden
-        className={`shrink-0 w-1.5 h-1.5 rounded-full ${unread ? 'bg-accent' : 'bg-transparent'}`}
+        className={`mt-[7px] shrink-0 w-1.5 h-1.5 rounded-full ${unread ? 'bg-accent' : 'bg-transparent'}`}
       />
-      <span className={`flex-1 truncate text-[11px] ${unread ? 'text-text-muted' : 'text-text-muted/70'}`}>
+      <span className={`min-w-0 truncate text-[11px] leading-5 ${unread ? 'text-text-muted' : 'text-text-muted/70'}`}>
         {previewForEntry(entry)}
       </span>
-      <span className="shrink-0 text-[10px] text-text-muted/50 tabular-nums">
+      <span className="col-start-2 text-[10px] text-text-muted/50 tabular-nums">
         {formatRelativeTime(entry.ts)}
       </span>
     </div>
@@ -320,7 +320,7 @@ function TimeRow({
           onClick()
         }
       }}
-      className={`group relative flex flex-col gap-0.5 px-3 py-2 cursor-pointer transition-colors outline-none focus-visible:bg-bg-tertiary/70 ${
+      className={`group relative flex min-h-14 flex-col gap-0.5 px-3 py-2 cursor-pointer transition-colors outline-none focus-visible:bg-bg-tertiary/70 ${
         active ? 'bg-bg-tertiary' : 'hover:bg-bg-tertiary/50'
       }`}
     >
