@@ -1,6 +1,6 @@
 {
   "name": "open-alice",
-  "version": "0.70.0-beta.8",
+  "version": "0.70.0-beta.9",
   "description": "File-based trading agent engine",
   "type": "module",
   "main": "dist/electron/main.js",
@@ -92,6 +92,7 @@
         "zip"
       ],
       "category": "public.app-category.finance",
+      "icon": "apps/desktop/build/icon.icns",
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
@@ -101,7 +102,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "apps/desktop/build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
