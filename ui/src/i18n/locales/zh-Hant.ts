@@ -34,6 +34,8 @@ export const zhHant: Resources = {
     unread: '{{count}} 則未讀',
     pendingPush: '{{count}} 筆待推送',
     about: '關於{{label}}',
+    collapseRail: '收合活動列',
+    expandRail: '展開活動列',
   },
   settings: {
     title: '設定',

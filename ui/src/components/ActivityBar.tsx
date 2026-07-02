@@ -1,4 +1,4 @@
-import { type LucideIcon, MessageSquare, Inbox, Telescope, LineChart, GitBranch, BarChart3, Newspaper, Zap, Settings, Code2, TerminalSquare, ChevronDown, Info, ListChecks } from 'lucide-react'
+import { type LucideIcon, MessageSquare, Inbox, Telescope, LineChart, GitBranch, BarChart3, Newspaper, Zap, Settings, Code2, TerminalSquare, ChevronDown, Info, ListChecks, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useState } from 'react'
 import { type Page } from '../App'
 import { findSectionForActivity } from '../sections'
@@ -34,6 +34,8 @@ function activitySectionFor(page: Page): ActivitySection {
 interface ActivityBarProps {
   open: boolean
   onClose: () => void
+  /** True once the rail is static (>= md). The compact rail is desktop-only. */
+  desktopStatic?: boolean
   /**
    * Whether the secondary sidebar is actually on screen right now (a static
    * panel on wide, or the open drawer on narrow). Re-clicking the active
@@ -174,7 +176,7 @@ const NAV_SECTIONS: NavSection[] = [
  * lifecycle stages and the section labels are how we'll later
  * communicate that. Mostly-icon view would hide the differentiation.
  */
-export function ActivityBar({ open, onClose, onItemActivated, sidebarVisible = true }: ActivityBarProps) {
+export function ActivityBar({ open, onClose, onItemActivated, sidebarVisible = true, desktopStatic = true }: ActivityBarProps) {
   const { t } = useTranslation()
   const selectedSidebar = useWorkspace((state) => state.selectedSidebar)
   const setSidebar = useWorkspace((state) => state.setSidebar)
@@ -183,6 +185,9 @@ export function ActivityBar({ open, onClose, onItemActivated, sidebarVisible = t
   const pendingPush = usePendingPushCount()
   const collapsedSections = useActivityBarCollapse((s) => s.collapsedSections)
   const setCollapsed = useActivityBarCollapse((s) => s.setCollapsed)
+  const railCollapsed = useActivityBarCollapse((s) => s.railCollapsed)
+  const setRailCollapsed = useActivityBarCollapse((s) => s.setRailCollapsed)
+  const compactRail = railCollapsed && desktopStatic
 
   return (
     <>
@@ -198,28 +203,28 @@ export function ActivityBar({ open, onClose, onItemActivated, sidebarVisible = t
        *  page with backdrop. Desktop: static column flush left. */}
       <aside
         className={`
-          w-[280px] md:w-[188px] h-full flex flex-col shrink-0
+          w-[280px] ${railCollapsed ? 'md:w-[60px]' : 'md:w-[188px]'} h-full flex flex-col shrink-0
           bg-bg-tertiary
           border-r border-border/80
-          fixed z-50 top-0 left-0 transition-transform duration-200
+          fixed z-50 top-0 left-0 transition-[transform,width] duration-200
           ${open ? 'translate-x-0' : '-translate-x-full'}
-          md:static md:translate-x-0 md:z-auto md:transition-none
+          md:static md:translate-x-0 md:z-auto
         `}
       >
         {/* Branding — h-10 to line up with the Sidebar header + TabStrip
             (all three top surfaces share the 40px header rhythm). */}
-        <div className="h-10 px-4 flex items-center gap-2.5 shrink-0">
+        <div className={`h-10 mb-2 flex items-center shrink-0 ${compactRail ? 'pl-[22px] pr-4 gap-2.5 md:gap-0 md:pr-0' : 'pl-[22px] pr-4 gap-2.5'}`}>
           <img
             src="/alice.ico"
             alt="Alice"
-            className="w-6 h-6 rounded-full ring-1 ring-border shadow-[0_0_14px_var(--color-accent-dim)]"
+            className="w-6 h-6 shrink-0 rounded-full ring-1 ring-border shadow-[0_0_14px_var(--color-accent-dim)]"
             draggable={false}
           />
-          <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-text">OpenAlice</h1>
+          <h1 className={`min-w-0 flex-1 truncate text-[15px] font-semibold text-text ${compactRail ? 'md:hidden' : ''}`}>OpenAlice</h1>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 flex flex-col px-3 overflow-y-auto pb-3">
+        <nav className={`flex-1 flex flex-col overflow-x-hidden overflow-y-auto pb-3 ${compactRail ? 'px-3 md:items-start' : 'px-3'}`}>
           {NAV_SECTIONS.map((section, si) => {
             const labeled = section.sectionLabel.length > 0
             // User toggle wins over default. The collapse store stores
@@ -230,10 +235,21 @@ export function ActivityBar({ open, onClose, onItemActivated, sidebarVisible = t
             const isCollapsed = labeled && (
               stored !== undefined ? stored : Boolean(section.defaultCollapsed)
             )
-            const showItems = !isCollapsed
+            const showItems = compactRail ? true : !isCollapsed
             return (
-              <div key={si} className={si > 0 ? 'mt-4' : ''}>
-                {labeled && (
+              <div
+                key={si}
+                className={
+                  compactRail && si > 0
+                    ? 'mt-3 border-t border-border/70 pt-3 md:w-11'
+                    : si > 0
+                      ? 'mt-4'
+                      : compactRail
+                        ? 'md:w-11'
+                        : ''
+                }
+              >
+                {labeled && !compactRail && (
                   <SectionHeader
                     label={section.labelKey ? t(section.labelKey) : section.sectionLabel}
                     description={section.descriptionKey ? t(section.descriptionKey) : undefined}
@@ -290,7 +306,11 @@ export function ActivityBar({ open, onClose, onItemActivated, sidebarVisible = t
                           type="button"
                           onClick={handleClick}
                           title={t(item.labelKey)}
-                          className={`relative flex min-h-[34px] items-center gap-3 rounded-md px-3 py-1.5 text-[13px] transition-colors text-left ${
+                          className={`relative flex min-h-[34px] items-center rounded-md text-[13px] transition-colors text-left ${
+                            compactRail
+                              ? 'md:h-9 md:w-11 md:min-h-9 md:justify-center md:gap-0 md:px-0 md:py-0'
+                              : 'gap-3 px-3 py-1.5'
+                          } ${
                             isActive
                               ? 'bg-accent-dim text-text'
                               : 'text-text-muted hover:text-text hover:bg-overlay'
@@ -306,11 +326,13 @@ export function ActivityBar({ open, onClose, onItemActivated, sidebarVisible = t
                           <span className="relative flex items-center justify-center w-5 h-5 shrink-0">
                             <Icon size={16} strokeWidth={1.75} />
                           </span>
-                          <span className="flex-1 truncate">{t(item.labelKey)}</span>
+                          <span className={`flex-1 truncate ${compactRail ? 'md:hidden' : ''}`}>{t(item.labelKey)}</span>
                           {item.page === 'inbox' && unreadInbox > 0 && (
                             <span
                               aria-label={t('nav.unread', { count: unreadInbox })}
-                              className="shrink-0 min-w-[18px] h-[18px] px-1.5 rounded-full bg-red text-[10px] font-semibold text-white tabular-nums flex items-center justify-center"
+                              className={`shrink-0 min-w-[18px] h-[18px] px-1.5 rounded-full bg-red text-[10px] font-semibold text-white tabular-nums flex items-center justify-center ${
+                                compactRail ? 'md:absolute md:-right-1 md:-top-1 md:h-4 md:min-w-4 md:px-1 md:text-[9px]' : ''
+                              }`}
                             >
                               {unreadInbox > 99 ? '99+' : unreadInbox}
                             </span>
@@ -318,7 +340,9 @@ export function ActivityBar({ open, onClose, onItemActivated, sidebarVisible = t
                           {item.page === 'trading-as-git' && pendingPush > 0 && (
                             <span
                               aria-label={t('nav.pendingPush', { count: pendingPush })}
-                              className="shrink-0 min-w-[18px] h-[18px] px-1.5 rounded-full bg-red text-[10px] font-semibold text-white tabular-nums flex items-center justify-center"
+                              className={`shrink-0 min-w-[18px] h-[18px] px-1.5 rounded-full bg-red text-[10px] font-semibold text-white tabular-nums flex items-center justify-center ${
+                                compactRail ? 'md:absolute md:-right-1 md:-top-1 md:h-4 md:min-w-4 md:px-1 md:text-[9px]' : ''
+                              }`}
                             >
                               {pendingPush > 99 ? '99+' : pendingPush}
                             </span>
@@ -333,11 +357,20 @@ export function ActivityBar({ open, onClose, onItemActivated, sidebarVisible = t
           })}
         </nav>
 
-        {/* Footer — global toggles pinned to the bottom of the rail.
-            py-1.5 matches the nav-item rhythm above (the top border
-            already provides the separation). */}
-        <div className="shrink-0 border-t border-border px-3 py-1.5">
+        {/* Footer — global icon controls pinned to the bottom of the rail. */}
+        <div className={`shrink-0 px-4 flex items-center ${compactRail ? 'py-2 md:flex-col md:items-start md:px-4 md:gap-1' : 'border-t border-border py-1.5 justify-between gap-2'}`}>
           <ThemeToggle />
+          <button
+            type="button"
+            onClick={() => setRailCollapsed(!railCollapsed)}
+            title={t(railCollapsed ? 'nav.expandRail' : 'nav.collapseRail')}
+            aria-label={t(railCollapsed ? 'nav.expandRail' : 'nav.collapseRail')}
+            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-overlay hover:text-text md:flex"
+          >
+            {railCollapsed
+              ? <PanelLeftOpen size={17} strokeWidth={1.75} aria-hidden />
+              : <PanelLeftClose size={17} strokeWidth={1.75} aria-hidden />}
+          </button>
         </div>
       </aside>
     </>

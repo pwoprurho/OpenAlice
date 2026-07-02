@@ -37,6 +37,8 @@ export const en = {
     unread: '{{count}} unread',
     pendingPush: '{{count}} pending to push',
     about: 'About {{label}}',
+    collapseRail: 'Collapse activity bar',
+    expandRail: 'Expand activity bar',
   },
   settings: {
     title: 'Settings',

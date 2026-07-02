@@ -26,6 +26,8 @@ export const ja: Resources = {
     unread: '未読 {{count}} 件',
     pendingPush: 'プッシュ待ち {{count}} 件',
     about: '{{label}}について',
+    collapseRail: 'アクティビティバーを折りたたむ',
+    expandRail: 'アクティビティバーを展開',
   },
   settings: {
     title: '設定',

@@ -26,6 +26,7 @@ reloadOnHotUpdate('live/activity-bar-collapse')
 
 interface ActivityBarCollapseState {
   collapsedSections: Record<string, boolean>
+  railCollapsed: boolean
 }
 
 interface ActivityBarCollapseActions {
@@ -33,12 +34,14 @@ interface ActivityBarCollapseActions {
    *  `defaultCollapsed` so the store can prune the key when the user's
    *  preference now matches the default — keeps localStorage tight. */
   setCollapsed: (name: string, collapsed: boolean, defaultCollapsed?: boolean) => void
+  setRailCollapsed: (collapsed: boolean) => void
 }
 
 export const useActivityBarCollapse = create<ActivityBarCollapseState & ActivityBarCollapseActions>()(
   persist(
     (set) => ({
       collapsedSections: {},
+      railCollapsed: false,
       setCollapsed: (name, collapsed, defaultCollapsed) =>
         set((s) => {
           const next = { ...s.collapsedSections }
@@ -49,7 +52,8 @@ export const useActivityBarCollapse = create<ActivityBarCollapseState & Activity
           }
           return { collapsedSections: next }
         }),
+      setRailCollapsed: (collapsed) => set({ railCollapsed: collapsed }),
     }),
-    { name: 'openalice.activitybar-sections.v1', version: 1 },
+    { name: 'openalice.activitybar-sections.v1', version: 2 },
   ),
 )

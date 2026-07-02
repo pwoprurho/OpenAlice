@@ -182,6 +182,7 @@ function AppShell() {
         <ActivityBar
           open={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
+          desktopStatic={isDesktop}
           sidebarVisible={showSidebarPanel || secondaryOpen}
           onItemActivated={(landedOn) => {
             // Drill-down for any viewport without a static sidebar (<1024):
@@ -312,4 +313,3 @@ function MobileSecondaryDrawer({ open, section, onClose, onBack }: MobileSeconda
     </>
   )
 }
-
