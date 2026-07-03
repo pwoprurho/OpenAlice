@@ -36,6 +36,8 @@ export interface InboxOrigin {
 export interface InboxEntry {
   id: string
   ts: number
+  /** Server-side read marker. Missing means unread. */
+  readAt?: number
   workspaceId: string
   workspaceLabel?: string
   /** Pointers to workspace files. Rendered live (no snapshot). */
@@ -88,5 +90,17 @@ export const inboxApi = {
     if (res.status === 204) return true
     if (res.status === 404) return false
     throw new Error(`inbox delete failed: ${res.status}`)
+  },
+
+  async markRead(id: string): Promise<{ ok: true; id: string; readAt: number }> {
+    return fetchJson(`/api/inbox/${encodeURIComponent(id)}/read`, {
+      method: 'PUT',
+    })
+  },
+
+  async markUnread(id: string): Promise<{ ok: true; id: string }> {
+    return fetchJson(`/api/inbox/${encodeURIComponent(id)}/read`, {
+      method: 'DELETE',
+    })
   },
 }

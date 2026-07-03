@@ -29,11 +29,17 @@ export function InboxSidebar() {
   const loading = inboxLive.useStore((s) => s.loading)
   const selectedId = useInboxSelection((s) => s.selectedEntryId)
   const select = useInboxSelection((s) => s.select)
-  const readIds = useInboxRead((s) => s.readIds)
   const markRead = useInboxRead((s) => s.markRead)
   const mode = useInboxViewMode((s) => s.mode)
 
   const threads = useMemo(() => groupThreads(entries), [entries])
+  const readIds = useMemo(() => {
+    const ids: Record<string, true> = {}
+    for (const entry of entries) {
+      if (entry.readAt) ids[entry.id] = true
+    }
+    return ids
+  }, [entries])
 
   // The visible order j/k and default-select walk: clustered order in
   // workspace mode, plain newest-first in time mode.

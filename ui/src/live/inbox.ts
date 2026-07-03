@@ -82,3 +82,20 @@ export function removeInboxOptimistically(id: string): void {
     entries: prev.entries.filter((e) => e.id !== id),
   }))
 }
+
+/** Optimistically mirror server-side read-state writes in the loaded feed.
+ *  The next /history poll remains authoritative and will reconcile drift. */
+export function setInboxReadAtOptimistically(id: string, readAt: number | null): void {
+  applyState?.((prev) => ({
+    ...prev,
+    entries: prev.entries.map((entry) => {
+      if (entry.id !== id) return entry
+      if (readAt == null) {
+        const next = { ...entry }
+        delete next.readAt
+        return next
+      }
+      return { ...entry, readAt }
+    }),
+  }))
+}
