@@ -234,8 +234,9 @@ describe('opencodeAdapter AI-config', () => {
     expect(cfg.mcp['openalice-workspace'].headers).toEqual({ 'x-openalice-run': 'run-7' });
   });
 
-  it('composeEnv throws loud when MCP url is missing from spawn env', () => {
-    expect(() => opencodeAdapter.composeEnv!({ cwd: dir, env: {} })).toThrow(/OPENALICE_MCP_URL/);
+  it('composeEnv skips MCP injection when MCP is disabled', () => {
+    const env = opencodeAdapter.composeEnv!({ cwd: dir, env: {} });
+    expect(env['OPENCODE_CONFIG_CONTENT']).toBeUndefined();
   });
 
   it('composeCommand: fresh is the bare binary; resume uses top-level flags', () => {

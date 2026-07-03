@@ -130,14 +130,12 @@ export const opencodeAdapter: CliAdapter = {
       OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
     };
 
-    // Inject OpenAlice's MCP servers per-spawn via inline config. Read from the
-    // spawn-bound env (service.ts populates the real MCP port per spawn), NOT
-    // process.env — mirrors codexAdapter.composeCommand. Fail loud if missing:
-    // a workspace silently spawned without trading context is worse than a hard
-    // error (matches the codebase's loud-failure stance).
+    // Inject OpenAlice's MCP servers only when the optional MCP server is
+    // enabled. CLI-mode (`alice*` shell commands) is the default tool path, so a
+    // missing MCP URL is fine and should not block workspace spawn.
     const mcpUrl = ctx.env['OPENALICE_MCP_URL'];
     if (!mcpUrl) {
-      throw new Error('opencode adapter: OPENALICE_MCP_URL missing from spawn env');
+      return env;
     }
     const workspaceId = ctx.env['AQ_WS_ID'];
     if (!workspaceId) {
