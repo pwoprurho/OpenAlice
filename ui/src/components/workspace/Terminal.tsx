@@ -4,6 +4,7 @@ import type { ReactElement } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal as Xterm } from '@xterm/xterm';
+import { Monitor, Moon, Sun, type LucideIcon } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 
 import {
@@ -11,14 +12,18 @@ import {
   type ClientControlMessage,
 } from './protocol';
 import { attachWebglRenderer } from './renderer';
-import { darkTheme, lightTheme } from './theme';
+import { TerminalOutputThemeRewriter } from './terminalAnsiTheme';
 import {
   describeTerminalInput,
   keySignature,
   TERMINAL_FONT_FAMILY,
   type KeyMap,
 } from './terminalInput';
-import { useEffectiveTheme } from '../../theme/useEffectiveTheme';
+import {
+  useResolvedTerminalTheme,
+  useTerminalThemeStore,
+  type TerminalThemePreference,
+} from './terminalTheme';
 // Lazy-import so the demo subtree (transcripts, fixtures, handlers) is
 // dynamic-imported only when demo mode is actually on. With a static import,
 // Rollup is conservative about module side-effects (the transcript file
@@ -219,13 +224,15 @@ export function TerminalView(props: TerminalViewProps): ReactElement {
   const onSessionLostRef = useRef<TerminalViewProps['onSessionLost']>(props.onSessionLost);
   onSessionLostRef.current = props.onSessionLost;
 
-  // Terminal palette follows the app theme (auto resolves via the OS). Read the
-  // current value through a ref so the connect effect doesn't recreate the
+  // Terminal palette is its own preference, not just the app chrome theme. Read
+  // the current value through a ref so the connect effect doesn't recreate the
   // terminal on a theme flip — a separate effect re-skins the live instance.
-  const effectiveTheme = useEffectiveTheme();
-  const xtermTheme = effectiveTheme === 'light' ? lightTheme : darkTheme;
+  const { variant: terminalThemeVariant, xtermTheme } = useResolvedTerminalTheme();
   const themeRef = useRef(xtermTheme);
   themeRef.current = xtermTheme;
+  const themeVariantRef = useRef(terminalThemeVariant);
+  themeVariantRef.current = terminalThemeVariant;
+  const outputThemeRewriterRef = useRef(new TerminalOutputThemeRewriter());
   const termRef = useRef<Xterm | null>(null);
 
   useEffect(() => {
@@ -330,15 +337,16 @@ export function TerminalView(props: TerminalViewProps): ReactElement {
     };
 
     const writeToTerm = (data: Uint8Array): void => {
+      const themedData = outputThemeRewriterRef.current.rewrite(data, themeVariantRef.current);
       try {
-        term.write(data);
+        term.write(themedData);
       } catch (err) {
         if (teardown || pendingWriteFrame !== undefined) return;
         pendingWriteFrame = requestAnimationFrame(() => {
           pendingWriteFrame = undefined;
           if (teardown) return;
           try {
-            term.write(data);
+            term.write(themedData);
           } catch (retryErr) {
             console.warn('[openalice:terminal] dropped terminal frame after xterm write failure', retryErr ?? err);
           }
@@ -597,8 +605,40 @@ export function TerminalView(props: TerminalViewProps): ReactElement {
             take over
           </button>
         )}
+        <TerminalThemeControl />
       </header>
       <div ref={containerRef} className="terminal-host" />
+    </div>
+  );
+}
+
+function TerminalThemeControl(): ReactElement {
+  const { preference, variant } = useResolvedTerminalTheme();
+  const setPreference = useTerminalThemeStore((s) => s.setPreference);
+  const options: Array<{
+    preference: TerminalThemePreference;
+    label: string;
+    icon: LucideIcon;
+  }> = [
+    { preference: 'follow', label: `Follow app (${variant})`, icon: Monitor },
+    { preference: 'dark', label: 'Dark terminal', icon: Moon },
+    { preference: 'light', label: 'Light terminal', icon: Sun },
+  ];
+  return (
+    <div className="terminal-theme-switch" role="group" aria-label="Terminal theme">
+      {options.map(({ preference: value, label, icon: Icon }) => (
+        <button
+          key={value}
+          type="button"
+          className={`terminal-theme-option ${preference === value ? 'active' : ''}`}
+          aria-label={label}
+          aria-pressed={preference === value}
+          title={label}
+          onClick={() => setPreference(value)}
+        >
+          <Icon size={12} strokeWidth={2.2} aria-hidden="true" />
+        </button>
+      ))}
     </div>
   );
 }
