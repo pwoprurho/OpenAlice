@@ -13,6 +13,7 @@ import {
 } from '../api/tools'
 import { api, type UTASnapshotSummary } from '../api'
 import type { ViewSpec } from '../tabs/types'
+import { filterAccountTierUTAs } from '../lib/uta-account-filter'
 
 // ==================== Tab Types ====================
 
@@ -62,8 +63,8 @@ function SnapshotsTab() {
 
   // Load accounts list
   useEffect(() => {
-    api.trading.listUTAs().then(r => {
-      const list = r.utas.map(a => ({ id: a.id, label: a.label }))
+    api.trading.listUTASummaries().then(r => {
+      const list = filterAccountTierUTAs(r.utas).map(a => ({ id: a.id, label: a.label }))
       setAccounts(list)
       if (list.length > 0 && !selectedAccount) setSelectedAccount(list[0].id)
     }).catch(() => {})

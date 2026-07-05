@@ -45,7 +45,7 @@ function utaId(params: { id?: string | readonly string[] }): string {
 
 export const tradingHandlers = [
   http.get('/api/trading/uta', () =>
-    HttpResponse.json({ utas: demoTradingAccounts, summaries: demoUTASummaries }),
+    HttpResponse.json({ utas: demoUTASummaries, summaries: demoUTASummaries }),
   ),
   http.get('/api/trading/equity', () => HttpResponse.json(totals())),
   http.get('/api/trading/fx-rates', () =>

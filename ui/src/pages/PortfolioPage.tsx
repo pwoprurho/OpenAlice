@@ -12,6 +12,7 @@ import { Metric, signFromDelta } from '../components/Metric'
 import { Sparkline } from '../components/Sparkline'
 import { fmt, fmtPnl, fmtNum, fmtPctSigned } from '../lib/format'
 import { contractPrimary } from '../lib/contract-display'
+import { displayProviderForUTA, filterAccountTierUTAs } from '../lib/uta-account-filter'
 
 // ==================== Types ====================
 
@@ -310,12 +311,12 @@ async function fetchPortfolioData(): Promise<PortfolioData> {
   try {
     const [equityResult, utasResult, fxResult] = await Promise.allSettled([
       api.trading.equity(),
-      api.trading.listUTAs(),
+      api.trading.listUTASummaries(),
       api.trading.fxRates(),
     ])
 
     const equity = equityResult.status === 'fulfilled' ? equityResult.value : null
-    const utasList = utasResult.status === 'fulfilled' ? utasResult.value.utas : []
+    const utasList = utasResult.status === 'fulfilled' ? filterAccountTierUTAs(utasResult.value.utas) : []
     const fxRates = fxResult.status === 'fulfilled' ? fxResult.value.rates : []
 
     const accounts = await Promise.all(
@@ -325,9 +326,9 @@ async function fetchPortfolioData(): Promise<PortfolioData> {
             api.trading.utaPositions(acct.id),
             api.trading.walletLog(acct.id, 10),
           ])
-          return { ...acct, positions: posResp.positions, walletLog: logResp.commits }
+          return { ...acct, provider: displayProviderForUTA(acct), positions: posResp.positions, walletLog: logResp.commits }
         } catch {
-          return { ...acct, positions: [], walletLog: [], error: 'Not connected' }
+          return { ...acct, provider: displayProviderForUTA(acct), positions: [], walletLog: [], error: 'Not connected' }
         }
       }),
     )

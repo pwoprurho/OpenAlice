@@ -1,5 +1,5 @@
 import { fetchJson } from './client'
-import type { TradingAccount, UTASummary, AccountInfo, SubAccountRef, Position, WalletCommitLog, ReconnectResult, UTAConfig, WalletStatus, WalletPushResult, WalletRejectResult, TestConnectionResult, BrokerPreset, UTASnapshotSummary, EquityCurvePoint, PlaceOrderRequest, ClosePositionRequest, CancelOrderRequest, OrderErrorResponse, OrderHistoryEntry, TradeHistoryEntry } from './types'
+import type { UTASummary, AccountInfo, SubAccountRef, Position, WalletCommitLog, ReconnectResult, UTAConfig, WalletStatus, WalletPushResult, WalletRejectResult, TestConnectionResult, BrokerPreset, UTASnapshotSummary, EquityCurvePoint, PlaceOrderRequest, ClosePositionRequest, CancelOrderRequest, OrderErrorResponse, OrderHistoryEntry, TradeHistoryEntry } from './types'
 
 /** Thrown by the one-shot order endpoints when the server returns non-2xx. Carries the phase. */
 export class OrderEntryError extends Error {
@@ -51,7 +51,7 @@ export const tradingApi = {
 
   // ==================== UTAs (listing + per-UTA reads) ====================
 
-  async listUTAs(): Promise<{ utas: TradingAccount[] }> {
+  async listUTAs(): Promise<{ utas: UTASummary[] }> {
     return fetchJson('/api/trading/uta')
   },
 
