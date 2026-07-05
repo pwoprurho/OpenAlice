@@ -22,22 +22,52 @@ function getStagedPlaceOrder(uta: UnifiedTradingAccount) {
   return { contract: op.contract, order: op.order }
 }
 
-// ==================== Read-only / keyless write guard ====================
+// ==================== Read-only / keyless account-mutation guard ====================
 
-describe('UTA — read-only / keyless write guard', () => {
-  it('refuses stage operations on a read-only account', () => {
+describe('UTA — read-only / keyless account-mutation guard', () => {
+  it('allows a funded read-only account to stage and commit a local proposal', () => {
     const { uta } = createUTA(undefined, { readOnly: true })
     expect(uta.readOnly).toBe(true)
     expect(uta.keyless).toBe(false)
-    expect(() => uta.stageCancelOrder({ orderId: 'x' })).toThrow(/read-only/)
-    expect(() => uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 1 } as never)).toThrow(/read-only/)
+
+    expect(() => uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '1' })).not.toThrow()
+    const commit = uta.commit('proposal: buy AAPL')
+
+    expect(commit.operationCount).toBe(1)
+    expect(uta.status().pendingMessage).toBe('proposal: buy AAPL')
   })
 
-  it('keyless implies read-only and names keyless in the error', () => {
+  it('blocks push on a read-only account before any broker-side mutation', async () => {
+    const { uta, broker } = createUTA(undefined, { readOnly: true })
+    const placeSpy = vi.spyOn(broker, 'placeOrder')
+
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '1' })
+    uta.commit('proposal: buy AAPL')
+
+    await expect(uta.push()).rejects.toThrow(/read-only.*mutate the external account/)
+    expect(placeSpy).not.toHaveBeenCalled()
+    expect(uta.status().pendingMessage).toBe('proposal: buy AAPL')
+    expect(uta.status().staged).toHaveLength(1)
+  })
+
+  it('blocks broker dispatch even if internal TradingGit push is reached directly', async () => {
+    const { uta, broker } = createUTA(undefined, { readOnly: true })
+    const cancelSpy = vi.spyOn(broker, 'cancelOrder')
+
+    uta.git.add({ action: 'cancelOrder', orderId: 'ord-1' })
+    uta.git.commit('proposal: cancel stale order')
+    const result = await uta.git.push()
+
+    expect(cancelSpy).not.toHaveBeenCalled()
+    expect(result.submitted).toHaveLength(0)
+    expect(result.rejected[0].error).toMatch(/read-only.*mutate the external account/)
+  })
+
+  it('keyless implies read-only and refuses local trading proposals', () => {
     const { uta } = createUTA(undefined, { keyless: true })
     expect(uta.keyless).toBe(true)
     expect(uta.readOnly).toBe(true)
-    expect(() => uta.stageCancelOrder({ orderId: 'x' })).toThrow(/keyless/)
+    expect(() => uta.stageCancelOrder({ orderId: 'x' })).toThrow(/keyless public-data account/)
   })
 
   it('a normal account stages without complaint', () => {

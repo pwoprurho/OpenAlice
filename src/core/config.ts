@@ -220,7 +220,7 @@ const agentSchema = z.object({
    *  `tradingPush` only stages + asks the user to approve in the Web UI; when
    *  true, the AI may push committed operations straight to the broker. Gated
    *  in the UI behind a danger warning + double-confirm. Per-account `readOnly`
-   *  still wins (read-only accounts can't stage in the first place). */
+   *  still wins: proposals can exist, but push cannot mutate the account. */
   allowAiTrading: z.boolean().default(false),
   claudeCode: z.object({
     allowedTools: z.array(z.string()).optional(),
@@ -462,8 +462,9 @@ export const utaConfigSchema = z.object({
    *  market data (quote/bars/search) — it has no account/positions and is
    *  excluded from portfolio equity aggregation. keyless ⟹ readOnly. */
   keyless: z.boolean().default(false),
-  /** Read-only — write operations (stage/commit/push of orders) are refused.
-   *  Implied by keyless; can also be set on a keyed account for a watch-only view. */
+  /** Read-only — external account mutations are refused at push/dispatch time.
+   *  Funded read-only accounts may still stage/commit local trade proposals;
+   *  keyless data sources remain public-data-only and cannot create proposals. */
   readOnly: z.boolean().default(false),
   /** Whether this UTA can be edited/removed via the config UI. Optional
    *  keyless data UTAs (binance/okx/bybit-readonly) are non-editable. */
