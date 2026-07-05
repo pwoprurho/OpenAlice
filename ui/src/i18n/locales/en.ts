@@ -60,6 +60,7 @@ export const en = {
     category: {
       general: 'General',
       aiProvider: 'AI Provider',
+      agentPermissions: 'Agent Permissions',
       trading: 'Trading',
       issues: 'Issues',
       mcpServer: 'MCP Server',
@@ -76,6 +77,33 @@ export const en = {
       allowAiTradingConfirmTitle: 'Enable AI auto-trading?',
       allowAiTradingConfirmBody: 'This lets the AI send live orders to your broker without asking you each time. The UTA trading interface is still unstable and may have precision or parameter issues. Strongly discouraged on real-money accounts — use a paper / demo account.',
       allowAiTradingConfirmCta: 'Enable auto-trading',
+    },
+    agentPermissions: {
+      title: 'Agent Permissions',
+      mode: {
+        title: 'Trading mode',
+        description: 'Global broker capability for Alice and workspace agents.',
+        lite: {
+          label: 'Lite',
+          description: 'UTA stays disconnected. Alice can analyze without broker accounts.',
+        },
+        readonly: {
+          label: 'Readonly',
+          description: 'UTA can read accounts and positions. Broker writes are blocked.',
+        },
+        pro: {
+          label: 'Pro',
+          description: 'UTA is enabled. Per-account permissions and approval controls apply.',
+        },
+        saving: 'Switching',
+        envLocked: 'This install is locked by environment variables.',
+        source: 'Current source: {{source}}',
+      },
+      aiPush: {
+        title: 'AI trade push',
+        description: 'Whether agents may execute committed broker writes without manual approval.',
+        proOnly: 'Current trading mode still blocks broker writes. This switch only takes effect for execution in Pro mode.',
+      },
     },
     persona: {
       title: 'Persona',

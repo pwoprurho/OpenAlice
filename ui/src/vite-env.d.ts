@@ -27,7 +27,7 @@ interface Window {
       info(): Promise<{
         mode: 'electron-dev' | 'electron-packaged'
         transport: 'electron-ipc'
-        ports: { web: number | null; mcp: number | null; uta: number }
+        ports: { web: number | null; mcp: number | null; uta: number | null }
         userDataHome: string
         appHome: string
       }>

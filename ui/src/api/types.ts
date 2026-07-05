@@ -153,6 +153,9 @@ export type ChatHistoryItem =
 
 // ==================== Config ====================
 
+export type TradingMode = 'lite' | 'readonly' | 'pro'
+export type TradingModeSource = 'env' | 'config' | 'auto'
+
 export interface AIProviderConfig {
   apiKeys: { anthropic?: string; openai?: string; google?: string }
   profiles: Record<string, Profile>
@@ -164,6 +167,11 @@ export interface AppConfig {
   engine: Record<string, unknown>
   agent: { allowAiTrading: boolean; claudeCode: Record<string, unknown> }
   compaction: { maxContextTokens: number; maxOutputTokens: number }
+  trading: {
+    mode?: TradingMode
+    observeExternalOrdersEvery: string
+    keylessDataSources: Array<'binance' | 'okx' | 'bybit'>
+  }
   snapshot: {
     enabled: boolean
     every: string
@@ -300,6 +308,7 @@ export interface BrokerHealthInfo {
 export interface UTASummary {
   id: string
   label: string
+  asVendor: boolean
   capabilities: { supportedSecTypes: string[]; supportedOrderTypes: string[] }
   health: BrokerHealthInfo
 }
@@ -520,6 +529,10 @@ export interface UTAConfig {
   guards: GuardEntry[]
   /** User-filled form values for the preset's schema. */
   presetConfig: Record<string, unknown>
+  /** Whether broker-side account mutations are refused. */
+  readOnly: boolean
+  /** Whether this UTA participates in broker-backed market-data discovery. */
+  asVendor: boolean
 }
 
 // ==================== Broker Preset Metadata (from /broker-presets endpoint) ====================

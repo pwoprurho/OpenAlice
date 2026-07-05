@@ -49,6 +49,7 @@ export const zh: Resources = {
     category: {
       general: '通用',
       aiProvider: 'AI 提供商',
+      agentPermissions: '智能体权限',
       trading: '交易',
       issues: 'Issues',
       mcpServer: 'MCP 服务器',
@@ -65,6 +66,33 @@ export const zh: Resources = {
       allowAiTradingConfirmTitle: '开启 AI 自动交易？',
       allowAiTradingConfirmBody: '开启后，AI 可在不征求你同意的情况下向券商发送真实订单。UTA 交易接口目前仍不稳定，可能存在精度或参数问题。强烈不建议在实盘账户上使用——请使用模拟 / demo 账户。',
       allowAiTradingConfirmCta: '开启自动交易',
+    },
+    agentPermissions: {
+      title: '智能体权限',
+      mode: {
+        title: '交易模式',
+        description: 'Alice 和工作区智能体的全局券商能力。',
+        lite: {
+          label: 'Lite',
+          description: 'UTA 保持断开。Alice 只做分析，不读取券商账户。',
+        },
+        readonly: {
+          label: 'Readonly',
+          description: 'UTA 可读取账户和持仓，但禁止写入券商状态。',
+        },
+        pro: {
+          label: 'Pro',
+          description: 'UTA 开启，并应用每个账户自己的权限和审批控制。',
+        },
+        saving: '切换中',
+        envLocked: '当前安装被环境变量锁定，不能从界面切换。',
+        source: '当前来源：{{source}}',
+      },
+      aiPush: {
+        title: 'AI 交易推送',
+        description: '控制智能体是否可以绕过人工审批，直接执行已 commit 的券商写入。',
+        proOnly: '当前交易模式仍会阻止券商写入。这个开关只有在 Pro 模式执行时才会真正生效。',
+      },
     },
     persona: {
       title: '人设',

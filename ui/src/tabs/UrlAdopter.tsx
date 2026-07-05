@@ -57,6 +57,7 @@ export function UrlAdopter() {
         {/* Settings — one entry per category */}
         <Route path="/settings" element={<AdoptStatic spec={{ kind: 'settings', params: { category: 'general' } }} />} />
         <Route path="/settings/ai-provider" element={<AdoptStatic spec={{ kind: 'settings', params: { category: 'ai-provider' } }} />} />
+        <Route path="/settings/agent-permissions" element={<AdoptStatic spec={{ kind: 'settings', params: { category: 'agent-permissions' } }} />} />
         <Route path="/settings/trading" element={<AdoptStatic spec={{ kind: 'settings', params: { category: 'trading' } }} />} />
         <Route path="/settings/issues" element={<AdoptStatic spec={{ kind: 'settings', params: { category: 'issues' } }} />} />
         <Route path="/settings/mcp" element={<AdoptStatic spec={{ kind: 'settings', params: { category: 'mcp' } }} />} />

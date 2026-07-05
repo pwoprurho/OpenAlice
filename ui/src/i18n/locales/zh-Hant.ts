@@ -57,6 +57,7 @@ export const zhHant: Resources = {
     category: {
       general: '一般',
       aiProvider: 'AI 供應商',
+      agentPermissions: '智慧體權限',
       trading: '交易',
       issues: 'Issues',
       mcpServer: 'MCP 伺服器',
@@ -73,6 +74,33 @@ export const zhHant: Resources = {
       allowAiTradingConfirmTitle: '開啟 AI 自動交易？',
       allowAiTradingConfirmBody: '開啟後，AI 可在不徵求你同意的情況下向券商發送真實訂單。UTA 交易介面目前仍不穩定，可能存在精度或參數問題。強烈不建議在實盤帳戶上使用——請使用模擬 / demo 帳戶。',
       allowAiTradingConfirmCta: '開啟自動交易',
+    },
+    agentPermissions: {
+      title: '智慧體權限',
+      mode: {
+        title: '交易模式',
+        description: 'Alice 與工作區智慧體的全域券商能力。',
+        lite: {
+          label: 'Lite',
+          description: 'UTA 保持斷線。Alice 只做分析，不讀取券商帳戶。',
+        },
+        readonly: {
+          label: 'Readonly',
+          description: 'UTA 可讀取帳戶與持倉，但禁止寫入券商狀態。',
+        },
+        pro: {
+          label: 'Pro',
+          description: 'UTA 開啟，並套用每個帳戶自己的權限與核准控制。',
+        },
+        saving: '切換中',
+        envLocked: '目前安裝被環境變數鎖定，無法從介面切換。',
+        source: '目前來源：{{source}}',
+      },
+      aiPush: {
+        title: 'AI 交易推送',
+        description: '控制智慧體是否可以略過人工核准，直接執行已 commit 的券商寫入。',
+        proOnly: '目前交易模式仍會阻止券商寫入。這個開關只有在 Pro 模式執行時才會真正生效。',
+      },
     },
     persona: {
       title: '人設',

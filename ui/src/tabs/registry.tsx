@@ -16,6 +16,7 @@ import { MarketBoardPage } from '../pages/MarketBoardPage'
 import { MARKET_BOARD_TITLES } from '../pages/market-board-titles'
 import { MarketDetailPage } from '../pages/MarketDetailPage'
 import { SettingsPage } from '../pages/SettingsPage'
+import { AgentPermissionsPage } from '../pages/AgentPermissionsPage'
 import { AIProviderPage } from '../pages/AIProviderPage'
 import { TradingPage } from '../pages/TradingPage'
 import { MCPPage } from '../pages/MCPPage'
@@ -245,6 +246,7 @@ const settingsCategoryTitle: Record<
 > = {
   general: 'Settings',
   'ai-provider': 'AI Provider',
+  'agent-permissions': 'Agent Permissions',
   trading: 'Trading',
   issues: 'Issues',
   mcp: 'MCP Server',
@@ -256,6 +258,7 @@ function SettingsRouter({ spec }: ViewProps<'settings'>) {
   switch (spec.params.category) {
     case 'general': return <SettingsPage />
     case 'ai-provider': return <AIProviderPage />
+    case 'agent-permissions': return <AgentPermissionsPage />
     case 'trading': return <TradingPage />
     case 'issues': return <IssueSettingsPage />
     case 'mcp': return <MCPPage />

@@ -211,18 +211,18 @@ export function ActivityBar({
       >
         {/* Branding — h-10 to line up with the Sidebar header + TabStrip
             (all three top surfaces share the 40px header rhythm). */}
-        <div className={`${denseRail ? 'h-10 mb-2 md:h-7 md:mb-0.5' : 'h-10 mb-2'} flex items-center shrink-0 ${compactRail ? 'pl-[22px] pr-4 gap-2.5 md:gap-0 md:pr-0' : narrowRail ? 'pl-[18px] pr-3 gap-2' : 'pl-[22px] pr-4 gap-2.5'}`}>
+        <div className={`${denseRail ? 'h-10 mb-2 md:h-7 md:mb-0.5' : 'h-10 mb-2'} flex items-center shrink-0 ${compactRail ? 'justify-center px-0' : narrowRail ? 'pl-[18px] pr-3 gap-2' : 'pl-[22px] pr-4 gap-2.5'}`}>
           <img
             src="/alice.ico"
             alt="Alice"
-            className={`${denseRail ? 'w-6 h-6 md:w-5 md:h-5' : 'w-6 h-6'} shrink-0 rounded-full ring-1 ring-border shadow-[0_0_14px_var(--color-accent-dim)]`}
+            className={`${denseRail ? 'h-6 w-6 md:h-5 md:w-5' : 'h-6 w-6'} shrink-0 rounded-full ring-1 ring-border shadow-[0_0_14px_var(--color-accent-dim)]`}
             draggable={false}
           />
           <h1 className={`min-w-0 flex-1 truncate text-[15px] font-semibold text-text ${compactRail ? 'md:hidden' : ''}`}>OpenAlice</h1>
         </div>
 
         {/* Navigation */}
-        <nav className={`flex-1 flex flex-col overflow-x-hidden overflow-y-auto ${denseRail ? 'pb-3 md:pb-0.5' : 'pb-3'} ${compactRail ? 'px-3 md:items-start' : narrowRail ? 'px-2.5' : 'px-3'}`}>
+        <nav className={`flex-1 flex flex-col overflow-x-hidden overflow-y-auto ${denseRail ? 'pb-3 md:pb-0.5' : 'pb-3'} ${compactRail ? 'px-2 md:items-center' : narrowRail ? 'px-2.5' : 'px-3'}`}>
           {NAV_SECTIONS.map((section, si) => {
             const labeled = section.sectionLabel.length > 0
             // User toggle wins over default. The collapse store stores
@@ -334,7 +334,7 @@ export function ActivityBar({
         </nav>
 
         {/* Footer — global icon controls pinned to the bottom of the rail. */}
-        <div className={`shrink-0 flex items-center ${compactRail ? `${denseRail ? 'py-2 md:py-0.5 md:gap-px' : 'py-2 md:gap-1'} px-4 md:flex-col md:items-start md:px-4` : `${narrowRail ? 'px-3' : 'px-4'} border-t border-border py-1.5 justify-between gap-2`}`}>
+        <div className={`shrink-0 flex items-center ${compactRail ? `${denseRail ? 'py-2 md:py-0.5 md:gap-px' : 'py-2 md:gap-1'} px-4 md:flex-col md:items-center md:px-2` : `${narrowRail ? 'px-3' : 'px-4'} border-t border-border py-1.5 justify-between gap-2`}`}>
           <ThemeToggle compact={denseRail} />
           {!forcedCompactRail && (
             <button

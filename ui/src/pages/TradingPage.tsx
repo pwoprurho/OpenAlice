@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
+import { AlertTriangle } from 'lucide-react'
 import { Field, inputClass } from '../components/form'
 import { Skeleton } from '../components/StateViews'
 import { SDKSelector } from '../components/SDKSelector'
+import { Toggle } from '../components/Toggle'
 import type { SDKOption } from '../components/SDKSelector'
 import { useTradingConfig } from '../hooks/useTradingConfig'
 import { useAccountHealth } from '../hooks/useAccountHealth'
@@ -13,6 +15,7 @@ import { SchemaFormFields } from '../components/uta/SchemaFormFields'
 import { EditUTADialog } from '../components/uta/EditUTADialog'
 import { fmt } from '../lib/format'
 import { api } from '../api'
+import type { TradingServiceStatus } from '../api/trading'
 import { useWorkspace } from '../tabs/store'
 import type { UTAConfig, BrokerPreset, BrokerHealthInfo, TestConnectionResult, Position, AccountInfo } from '../api/types'
 
@@ -24,17 +27,61 @@ import type { UTAConfig, BrokerPreset, BrokerHealthInfo, TestConnectionResult, P
 // edits; the health badges show the brief reconnect.
 
 const OBSERVE_CADENCE_OPTIONS = ['off', '1m', '5m', '10m', '15m'] as const
+const KEYLESS_DATA_SOURCE_OPTIONS = [
+  { id: 'binance', label: 'Binance' },
+  { id: 'okx', label: 'OKX' },
+  { id: 'bybit', label: 'Bybit' },
+] as const
+
+type KeylessDataSource = typeof KEYLESS_DATA_SOURCE_OPTIONS[number]['id']
+
+interface TradingRuntimeConfig {
+  observeExternalOrdersEvery: string
+  keylessDataSources: KeylessDataSource[]
+  mode?: 'lite' | 'readonly' | 'pro'
+}
+
+async function loadTradingRuntimeConfig(): Promise<TradingRuntimeConfig> {
+  const cfg = await fetch('/api/config').then((r) => r.json())
+  return {
+    observeExternalOrdersEvery: cfg?.trading?.observeExternalOrdersEvery ?? '15m',
+    mode: cfg?.trading?.mode,
+    keylessDataSources: Array.isArray(cfg?.trading?.keylessDataSources)
+      ? cfg.trading.keylessDataSources.filter((v: unknown): v is KeylessDataSource =>
+        KEYLESS_DATA_SOURCE_OPTIONS.some((o) => o.id === v))
+      : [],
+  }
+}
+
+async function writeTradingRuntimeConfig(next: TradingRuntimeConfig): Promise<void> {
+  const res = await fetch('/api/config/trading', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(next),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+async function saveTradingRuntimeConfigPatch(patch: Partial<TradingRuntimeConfig>): Promise<TradingRuntimeConfig> {
+  const current = await loadTradingRuntimeConfig()
+  const next = { ...current, ...patch }
+  await writeTradingRuntimeConfig(next)
+  return next
+}
 
 function ExternalOrderMonitoringRow() {
   const [value, setValue] = useState<string | null>(null)
+  const [runtimeConfig, setRuntimeConfig] = useState<TradingRuntimeConfig | null>(null)
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
     let cancelled = false
-    fetch('/api/config')
-      .then((r) => r.json())
+    loadTradingRuntimeConfig()
       .then((cfg) => {
-        if (!cancelled) setValue(cfg?.trading?.observeExternalOrdersEvery ?? '15m')
+        if (!cancelled) {
+          setRuntimeConfig(cfg)
+          setValue(cfg.observeExternalOrdersEvery)
+        }
       })
       .catch(() => { if (!cancelled) setValue('15m') })
     return () => { cancelled = true }
@@ -42,19 +89,19 @@ function ExternalOrderMonitoringRow() {
 
   const save = async (next: string) => {
     const prev = value
+    const current = runtimeConfig ?? { observeExternalOrdersEvery: prev ?? '15m', keylessDataSources: [] }
+    const updated = { ...current, observeExternalOrdersEvery: next }
     setValue(next)
+    setRuntimeConfig(updated)
     setMsg('')
     try {
-      const res = await fetch('/api/config/trading', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ observeExternalOrdersEvery: next }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const saved = await saveTradingRuntimeConfigPatch({ observeExternalOrdersEvery: next })
+      setRuntimeConfig(saved)
       setMsg('Saved — restarting UTA to apply')
       setTimeout(() => setMsg(''), 4000)
     } catch (err) {
       setValue(prev)
+      setRuntimeConfig(current)
       setMsg(err instanceof Error ? err.message : 'Save failed')
     }
   }
@@ -81,6 +128,66 @@ function ExternalOrderMonitoringRow() {
             <option key={v} value={v}>{v === 'off' ? 'Off' : `Every ${v}`}</option>
           ))}
         </select>
+      </div>
+    </div>
+  )
+}
+
+function KeylessDataSourcesRow() {
+  const [runtimeConfig, setRuntimeConfig] = useState<TradingRuntimeConfig | null>(null)
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    loadTradingRuntimeConfig()
+      .then((cfg) => { if (!cancelled) setRuntimeConfig(cfg) })
+      .catch(() => { if (!cancelled) setRuntimeConfig({ observeExternalOrdersEvery: '15m', keylessDataSources: [] }) })
+    return () => { cancelled = true }
+  }, [])
+
+  const toggle = async (source: KeylessDataSource, enabled: boolean) => {
+    if (!runtimeConfig) return
+    const prev = runtimeConfig
+    const nextSources = enabled
+      ? [...new Set([...prev.keylessDataSources, source])]
+      : prev.keylessDataSources.filter((s) => s !== source)
+    const next = { ...prev, keylessDataSources: nextSources }
+    setRuntimeConfig(next)
+    setMsg('')
+    try {
+      const saved = await saveTradingRuntimeConfigPatch({ keylessDataSources: nextSources })
+      setRuntimeConfig(saved)
+      setMsg('Saved — restarting UTA to apply')
+      setTimeout(() => setMsg(''), 4000)
+    } catch (err) {
+      setRuntimeConfig(prev)
+      setMsg(err instanceof Error ? err.message : 'Save failed')
+    }
+  }
+
+  if (!runtimeConfig) return null
+
+  return (
+    <div className="px-4 py-3 border border-border rounded-lg">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[12px] font-medium text-text">Public crypto data sources</div>
+          <div className="text-[11px] text-text-muted leading-relaxed mt-0.5">
+            Optional keyless K-line feeds. Disabled by default; enabled sources appear as read-only broker-style bar IDs.
+          </div>
+        </div>
+        {msg && <span className="text-[11px] text-text-muted shrink-0">{msg}</span>}
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {KEYLESS_DATA_SOURCE_OPTIONS.map((source) => {
+          const checked = runtimeConfig.keylessDataSources.includes(source.id)
+          return (
+            <div key={source.id} className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg-secondary/40 px-3 py-2">
+              <span className="text-[12px] text-text">{source.label}</span>
+              <Toggle size="sm" checked={checked} onChange={(v) => { void toggle(source.id, v) }} />
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -113,9 +220,34 @@ export function TradingPage() {
   const [presets, setPresets] = useState<BrokerPreset[]>([])
   const [equity, setEquity] = useState<EquitySummary | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [serviceStatus, setServiceStatus] = useState<TradingServiceStatus | null>(null)
 
   useEffect(() => {
     api.trading.getBrokerPresets().then(r => setPresets(r.presets)).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const status = await api.trading.status()
+        if (!cancelled) setServiceStatus(status)
+      } catch {
+        if (!cancelled) setServiceStatus({
+          available: false,
+          state: 'unavailable',
+          mode: 'lite',
+          modeSource: 'auto',
+          envLocked: false,
+          hasUTAConfig: false,
+          reason: 'status_unreachable',
+          hint: 'Trading service status is not reachable. Alice is running in lite mode.',
+        })
+      }
+    }
+    void refresh()
+    const id = setInterval(refresh, 15_000)
+    return () => { cancelled = true; clearInterval(id) }
   }, [])
 
   // Per-card liveness signal — `equity()` lets each card show "this
@@ -181,6 +313,7 @@ export function TradingPage() {
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5">
         <div className="max-w-[820px] mx-auto space-y-4">
+          {serviceStatus?.available === false && <TradingServiceOfflineBanner status={serviceStatus} />}
           {tc.utas.length === 0 ? (
             <EmptyState onAdd={() => setShowAdd(true)} />
           ) : (
@@ -207,6 +340,7 @@ export function TradingPage() {
             </div>
           )}
 
+          <KeylessDataSourcesRow />
           {tc.utas.length > 0 && <ExternalOrderMonitoringRow />}
         </div>
       </div>
@@ -261,6 +395,21 @@ function PageShell({ subtitle, children }: { subtitle: string; children?: React.
     <div className="flex flex-col flex-1 min-h-0">
       <PageHeader title="Trading" description={subtitle} />
       <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5">{children}</div>
+    </div>
+  )
+}
+
+function TradingServiceOfflineBanner({ status }: { status: TradingServiceStatus }) {
+  return (
+    <div className="flex gap-3 rounded-lg border border-yellow-400/30 bg-yellow-400/5 px-4 py-3" role="status">
+      <AlertTriangle size={16} className="mt-0.5 shrink-0 text-yellow-400" aria-hidden />
+      <div className="min-w-0">
+        <div className="text-[12px] font-medium text-text">Trading service offline</div>
+        <div className="mt-0.5 text-[11px] text-text-muted leading-relaxed">
+          {status.hint ?? 'Alice is running in lite mode.'}
+          {status.reason ? <span className="ml-1 font-mono text-text-muted/70">{status.reason}</span> : null}
+        </div>
+      </div>
     </div>
   )
 }
@@ -405,6 +554,8 @@ function CreateWizard({ presets, onSave, onOpenExisting, onClose }: {
   const [presetId, setPresetId] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [showSecrets, setShowSecrets] = useState(false)
+  const [readOnly, setReadOnly] = useState(false)
+  const [asVendor, setAsVendor] = useState(true)
   const [testing, setTesting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -446,11 +597,15 @@ function CreateWizard({ presets, onSave, onOpenExisting, onClose }: {
       enabled: true,
       guards: [],
       presetConfig: getSubmitData(),
+      readOnly,
+      asVendor,
     }
   }
 
   const handlePick = (id: string) => {
     setPresetId(id)
+    setReadOnly(false)
+    setAsVendor(true)
     setError('')
     setStep('config')
   }
@@ -545,6 +700,24 @@ function CreateWizard({ presets, onSave, onOpenExisting, onClose }: {
               <Field label="Name" description="Display label for this account. The unique id is derived automatically from the credentials below.">
                 <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder={defaultName} />
               </Field>
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border px-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="text-[12px] font-medium text-text">Read-only account</div>
+                  <div className="text-[11px] text-text-muted leading-relaxed">
+                    Allow analysis reads; block broker-side order changes.
+                  </div>
+                </div>
+                <Toggle size="sm" checked={readOnly} onChange={setReadOnly} />
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border px-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="text-[12px] font-medium text-text">Use as data source</div>
+                  <div className="text-[11px] text-text-muted leading-relaxed">
+                    Include this UTA in K-line and contract discovery.
+                  </div>
+                </div>
+                <Toggle size="sm" checked={asVendor} onChange={setAsVendor} />
+              </div>
               <SchemaFormFields
                 fields={fields}
                 formData={formData}
