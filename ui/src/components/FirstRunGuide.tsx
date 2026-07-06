@@ -18,7 +18,8 @@ import {
 
 import { configApi, type CredentialSummary } from '../api/config'
 import { tradingApi, type TradingServiceStatus } from '../api/trading'
-import type { Preset, TradingMode, UTAConfig } from '../api/types'
+import type { BrokerPreset, Preset, TradingMode, UTAConfig } from '../api/types'
+import { CreateUTADialog } from './uta/CreateUTADialog'
 import { CredentialModal } from './credentials/CredentialModal'
 import {
   FIRST_RUN_STEP_KEYS,
@@ -111,7 +112,10 @@ export function FirstRunGuide() {
   const [direction, setDirection] = useState<StepDirection>('forward')
   const [modeChoiceError, setModeChoiceError] = useState<string | null>(null)
   const [showCredentialForm, setShowCredentialForm] = useState(false)
-  const [presets, setPresets] = useState<Preset[]>([])
+  const [showUTAForm, setShowUTAForm] = useState(false)
+  const [utaEscapeSaving, setUtaEscapeSaving] = useState(false)
+  const [aiPresets, setAiPresets] = useState<Preset[]>([])
+  const [brokerPresets, setBrokerPresets] = useState<BrokerPreset[]>([])
   const [sessionStarted, setSessionStarted] = useState(false)
   const [sessionClosed, setSessionClosed] = useState(false)
   const [dismissed, setDismissed] = useState(() => {
@@ -150,10 +154,24 @@ export function FirstRunGuide() {
     let live = true
     configApi.getPresets()
       .then(({ presets: next }) => {
-        if (live) setPresets(next)
+        if (live) setAiPresets(next)
       })
       .catch(() => {
-        if (live) setPresets([])
+        if (live) setAiPresets([])
+      })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let live = true
+    tradingApi.getBrokerPresets()
+      .then(({ presets: next }) => {
+        if (live) setBrokerPresets(next)
+      })
+      .catch(() => {
+        if (live) setBrokerPresets([])
       })
     return () => {
       live = false
@@ -171,11 +189,11 @@ export function FirstRunGuide() {
   const shouldStartGuide = loaded && (model.shouldShow || !!stepOverride)
   const shouldShowGuide = loaded && !sessionClosed && (sessionStarted || shouldStartGuide)
   const apiKeyPresets = useMemo(() => {
-    const base = presets.filter(isApiKeyPreset)
+    const base = aiPresets.filter(isApiKeyPreset)
     return ONBOARDING_TEST_MODE && MOCK_CREDENTIAL_TEST
       ? [ONBOARDING_TEST_PRESET, ...base]
       : base
-  }, [presets])
+  }, [aiPresets])
 
   useEffect(() => {
     if (shouldStartGuide && !sessionClosed) setSessionStarted(true)
@@ -216,9 +234,23 @@ export function FirstRunGuide() {
     }
   }, [model.mode, refreshGuideState, setTradingMode, state.tradingStatus?.envLocked])
 
+  const saveCreatedUTA = useCallback(async (uta: Omit<UTAConfig, 'id'>) => {
+    const created = await tradingApi.createUTA(uta)
+    void tradingApi.reconnectUTA(created.id).catch(() => {})
+    await refreshGuideState()
+    setShowUTAForm(false)
+    return created
+  }, [refreshGuideState])
+
   const steps = useMemo(() => {
     const canStartWorkspace = model.hasUsableAiChain
     const modeLabel = capitalize(model.mode)
+    const brokerPrimary = model.needsUTASetup ? 'Add UTA' : `Continue with ${modeLabel}`
+    const brokerSecondary = model.needsUTASetup
+      ? 'Continue in Lite'
+      : model.mode === 'lite'
+        ? 'Keep Lite'
+        : 'Skip UTA setup'
     const brokerWriteText = model.mode === 'pro'
       ? 'Controlled by account permissions.'
       : 'Blocked.'
@@ -276,10 +308,12 @@ export function FirstRunGuide() {
         eyebrow: 'Trading Mode',
         title: 'Choose how much broker access Alice gets.',
         body: 'Lite keeps UTA off. Readonly lets Alice include accounts and positions without allowing writes. Pro unlocks broker workflows with permission controls.',
-        primary: `Continue with ${modeLabel}`,
-        secondary: model.mode === 'lite' ? 'Keep Lite' : 'Skip UTA setup',
+        primary: brokerPrimary,
+        secondary: brokerSecondary,
         panelTitle: 'Pick one mode',
-        panelBody: 'Click a mode below. The selected mode is saved immediately and can be changed later.',
+        panelBody: model.needsUTASetup
+          ? 'Readonly and Pro need at least one UTA. Add one now, or continue in Lite if you want to skip broker setup.'
+          : 'Click a mode below. The selected mode is saved immediately and can be changed later.',
         rows: [
           { icon: <Compass className="h-4 w-4" />, label: 'Lite', value: 'No UTA connection.', tone: model.mode === 'lite' ? 'ready' as const : 'muted' as const },
           { icon: <Lock className="h-4 w-4" />, label: 'Readonly', value: 'Read accounts; block writes.', tone: model.mode === 'readonly' ? 'ready' as const : 'muted' as const },
@@ -319,6 +353,21 @@ export function FirstRunGuide() {
     setStepIndex(Math.max(0, Math.min(steps.length - 1, nextIndex)))
   }
 
+  const continueInLite = async () => {
+    setModeChoiceError(null)
+    setUtaEscapeSaving(true)
+    try {
+      await setTradingMode('lite')
+      await refreshGuideState()
+      setShowUTAForm(false)
+      goToStep(stepIndex + 1)
+    } catch (err) {
+      setModeChoiceError(err instanceof Error ? err.message : 'Failed to switch to Lite')
+    } finally {
+      setUtaEscapeSaving(false)
+    }
+  }
+
   const runPrimary = () => {
     if (activeStep.key === 'ai' && !model.hasAgentRuntime) {
       openChecklist()
@@ -329,6 +378,10 @@ export function FirstRunGuide() {
       return
     }
     if (activeStep.key === 'broker') {
+      if (model.needsUTASetup) {
+        setShowUTAForm(true)
+        return
+      }
       goToStep(stepIndex + 1)
       return
     }
@@ -346,6 +399,10 @@ export function FirstRunGuide() {
     }
     if (activeStep.key === 'lite' || activeStep.key === 'ai') {
       close()
+      return
+    }
+    if (activeStep.key === 'broker' && model.needsUTASetup) {
+      void continueInLite()
       return
     }
     goToStep(stepIndex + 1)
@@ -500,6 +557,32 @@ export function FirstRunGuide() {
             if (activeStep.key === 'ai' && nextModel.hasUsableAiChain) {
               goToStep(stepIndex + 1)
             }
+          }}
+        />
+      )}
+      {showUTAForm && (
+        <CreateUTADialog
+          presets={brokerPresets}
+          initialReadOnly={model.mode === 'readonly'}
+          onClose={() => setShowUTAForm(false)}
+          onOpenExisting={async () => {
+            await refreshGuideState()
+            setShowUTAForm(false)
+            if (activeStep.key === 'broker') {
+              goToStep(stepIndex + 1)
+            }
+          }}
+          onSave={async (uta) => {
+            const created = await saveCreatedUTA(uta)
+            if (activeStep.key === 'broker') {
+              goToStep(stepIndex + 1)
+            }
+            return created
+          }}
+          escapeAction={{
+            label: 'Continue in Lite',
+            onClick: continueInLite,
+            disabled: utaEscapeSaving,
           }}
         />
       )}

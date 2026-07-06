@@ -88,6 +88,36 @@ describe('buildFirstRunGuideModel', () => {
 
     expect(model.shouldShow).toBe(false)
   })
+
+  it('requires a UTA when onboarding upgrades to readonly or pro without accounts', () => {
+    const model = buildFirstRunGuideModel({
+      agents: [
+        { id: 'pi', displayName: 'Pi', kind: 'agent', installed: true },
+      ],
+      credentials: [{ wires: { 'openai-chat': '' } }],
+      tradingStatus: { ...liteStatus, mode: 'readonly', modeSource: 'config', available: true },
+      utas: [],
+      loaded: true,
+      dismissed: false,
+    })
+
+    expect(model.needsUTASetup).toBe(true)
+  })
+
+  it('does not require UTA setup in upgraded modes once one exists', () => {
+    const model = buildFirstRunGuideModel({
+      agents: [
+        { id: 'pi', displayName: 'Pi', kind: 'agent', installed: true },
+      ],
+      credentials: [{ wires: { 'openai-chat': '' } }],
+      tradingStatus: { ...liteStatus, mode: 'pro', modeSource: 'config', available: true, hasUTAConfig: true },
+      utas: [],
+      loaded: true,
+      dismissed: false,
+    })
+
+    expect(model.needsUTASetup).toBe(false)
+  })
 })
 
 describe('parseFirstRunStepOverride', () => {

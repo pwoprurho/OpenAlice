@@ -89,9 +89,10 @@ export function buildFirstRunGuideModel(input: {
   const mode = input.tradingStatus?.mode ?? 'lite'
   const modeSource = input.tradingStatus?.modeSource ?? 'auto'
   const hasUTA = input.utas.length > 0 || input.tradingStatus?.hasUTAConfig === true
+  const needsUTASetup = mode !== 'lite' && !hasUTA
   const freshLite = mode === 'lite' && modeSource === 'auto' && !hasUTA
   const shouldShow = input.loaded && agentsKnown && !input.dismissed && (
-    !hasAgentRuntime || !hasUsableAiChain || freshLite
+    !hasAgentRuntime || !hasUsableAiChain || freshLite || needsUTASetup
   )
   const runtimeLabel = hasAgentRuntime
     ? `${installedAgents.length} runtime${installedAgents.length === 1 ? '' : 's'} installed`
@@ -115,6 +116,7 @@ export function buildFirstRunGuideModel(input: {
     mode,
     modeSource,
     hasUTA,
+    needsUTASetup,
     freshLite,
     runtimeLabel,
     aiAccessLabel,
