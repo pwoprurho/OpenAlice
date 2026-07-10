@@ -8,7 +8,7 @@ import { buildDesktopPackagedSmokePlan } from './desktop-packaged-smoke-plan.mjs
 
 const repoRoot = resolve(import.meta.dirname, '..')
 const plan = buildDesktopPackagedSmokePlan(process.argv.slice(2), process.env)
-const { keep, onboarding, realData, signed, skipBuild, skipPack } = plan.options
+const { keep, onboarding, realData, signed, skipBuild, skipPack, tradingMode } = plan.options
 
 function printHelp() {
   console.log(`Usage: pnpm electron:smoke:packaged [options]
@@ -22,6 +22,8 @@ Options:
   --real-data    Use real data explicitly (default; kept for compatibility)
   --onboarding   Build with first-run guide enabled, use temp data, run an
                  automated renderer onboarding smoke, then exit
+  --trading-mode Use temp data, exercise lite -> readonly -> lite UTA lifecycle,
+                 then exit
   --signed       Allow local macOS code signing (default disables it)
   --keep         Keep the temporary smoke data directory after the app exits
   -h, --help     Show this help
@@ -120,7 +122,7 @@ const env = {
 
 for (const key of plan.unsetLaunchEnv) delete env[key]
 
-if (onboarding) {
+if (onboarding || tradingMode) {
   env.OPENALICE_UTA_PORT = String(await getAvailablePort())
 }
 
@@ -142,6 +144,9 @@ if (realData) {
 if (onboarding) {
   console.log('[desktop-smoke] onboarding smoke: enabled; app exits automatically after the renderer probe')
   console.log(`[desktop-smoke] onboarding UTA port: ${env.OPENALICE_UTA_PORT}`)
+} else if (tradingMode) {
+  console.log('[desktop-smoke] trading-mode smoke: lite -> readonly -> lite; app exits automatically')
+  console.log(`[desktop-smoke] trading-mode UTA port: ${env.OPENALICE_UTA_PORT}`)
 } else {
   console.log('[desktop-smoke] close the app window or press Ctrl-C here to stop')
 }

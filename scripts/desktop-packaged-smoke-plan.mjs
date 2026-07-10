@@ -8,6 +8,7 @@ export const DESKTOP_PACKAGED_SMOKE_ARGS = new Set([
   '--real-data',
   '--signed',
   '--onboarding',
+  '--trading-mode',
   '--help',
   '-h',
 ])
@@ -16,6 +17,7 @@ export function buildDesktopPackagedSmokePlan(argv, env = process.env, opts = {}
   const args = new Set(argv)
   const unknownArgs = [...args].filter((arg) => !DESKTOP_PACKAGED_SMOKE_ARGS.has(arg))
   const onboarding = args.has('--onboarding')
+  const tradingMode = args.has('--trading-mode')
   const realDataFlag = args.has('--real-data')
   const tempDataFlag = args.has('--temp-data')
   const errors = []
@@ -30,6 +32,12 @@ export function buildDesktopPackagedSmokePlan(argv, env = process.env, opts = {}
   if (onboarding && realDataFlag) {
     errors.push('[desktop-smoke] --onboarding always uses isolated temp data; drop --real-data')
   }
+  if (tradingMode && realDataFlag) {
+    errors.push('[desktop-smoke] --trading-mode always uses isolated temp data; drop --real-data')
+  }
+  if (onboarding && tradingMode) {
+    errors.push('[desktop-smoke] choose either --onboarding or --trading-mode, not both')
+  }
 
   const skipBuild = args.has('--skip-build')
   const skipPack = args.has('--skip-pack')
@@ -40,7 +48,7 @@ export function buildDesktopPackagedSmokePlan(argv, env = process.env, opts = {}
     warnings.push('[desktop-smoke] --onboarding with --skip-pack assumes the packaged app already contains that onboarding-enabled ui/dist')
   }
 
-  const tempData = onboarding || tempDataFlag
+  const tempData = onboarding || tradingMode || tempDataFlag
   const realData = !tempData
   const storageSuffix = env['VITE_OPENALICE_ONBOARDING_STORAGE_SUFFIX']?.trim() || opts.randomUUID?.() || randomUUID()
   const onboardingBuildEnv = onboarding ? {
@@ -58,7 +66,12 @@ export function buildDesktopPackagedSmokePlan(argv, env = process.env, opts = {}
     OPENALICE_ELECTRON_SMOKE_ONBOARDING: '1',
     OPENALICE_ELECTRON_SMOKE_EXIT: '1',
   } : {}
-  const unsetLaunchEnv = onboarding ? [
+  const tradingModeLaunchEnv = tradingMode ? {
+    OPENALICE_MCP_ENABLED: '0',
+    OPENALICE_ELECTRON_SMOKE_TRADING_MODE: '1',
+    OPENALICE_ELECTRON_SMOKE_EXIT: '1',
+  } : {}
+  const unsetLaunchEnv = onboarding || tradingMode ? [
     'OPENALICE_TRADING_MODE',
     'OPENALICE_LITE_MODE',
     'OPENALICE_UTA_DISABLED',
@@ -71,6 +84,7 @@ export function buildDesktopPackagedSmokePlan(argv, env = process.env, opts = {}
       help: args.has('--help') || args.has('-h'),
       keep: args.has('--keep'),
       onboarding,
+      tradingMode,
       realData,
       signed: args.has('--signed'),
       skipBuild,
@@ -78,7 +92,7 @@ export function buildDesktopPackagedSmokePlan(argv, env = process.env, opts = {}
       tempData,
     },
     buildEnv: onboardingBuildEnv,
-    launchEnv: onboardingLaunchEnv,
+    launchEnv: { ...onboardingLaunchEnv, ...tradingModeLaunchEnv },
     unsetLaunchEnv,
   }
 }

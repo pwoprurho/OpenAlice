@@ -21,11 +21,15 @@
  */
 
 import { app, BrowserWindow, dialog, Menu, protocol } from 'electron'
+import { runRendererTradingModeSmoke } from './trading-mode-smoke.js'
+import { planUTATransition } from './uta-lifecycle.js'
 import {
   acquireGuardianRuntime,
   currentProcessStartedAt,
   inspectOpenAliceInstance,
+  resolveGuardianTradingMode,
   takeoverRequested,
+  type GuardianTradingModePlan,
   type RuntimeProcessLock,
 } from '@traderalice/guardian-runtime'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
@@ -46,7 +50,9 @@ let uta: ChildProcess | null = null
 let alice: ChildProcess | null = null
 let appQuitting = false
 let restartingUTA = false
+let pendingUTAMode: GuardianTradingModePlan | null = null
 let rendererOnboardingSmokeStarted = false
+let rendererTradingModeSmokeStarted = false
 let guardianRuntimeLock: RuntimeProcessLock | null = null
 
 const DEFAULT_WEB_PORT_START = 47331
@@ -146,6 +152,21 @@ async function readMcpConfigFile(userDataHome: string): Promise<{ enabled: boole
     enabled: rec['enabled'] === true,
     ...(rec['port'] !== undefined ? { port: parsePort(rec['port'], `${filePath} ("port")`) } : {}),
   }
+}
+
+function selectPort(
+  envKey: string,
+  fileValue: number | undefined,
+  fallback: number,
+): { value: number; explicitOrigin: string | null } {
+  const envRaw = process.env[envKey]
+  if (envRaw !== undefined && envRaw !== '') {
+    return { value: parsePort(envRaw, envKey), explicitOrigin: envKey }
+  }
+  if (fileValue !== undefined) {
+    return { value: fileValue, explicitOrigin: 'data/config/ports.json' }
+  }
+  return { value: fallback, explicitOrigin: null }
 }
 
 function parseEnabledEnv(raw: string | undefined): boolean | null {
@@ -255,19 +276,13 @@ async function claimPort(
   fileValue: number | undefined,
   probeStart: number,
 ): Promise<number> {
-  const envRaw = process.env[envKey]
-  const explicit =
-    envRaw !== undefined && envRaw !== ''
-      ? { value: parsePort(envRaw, envKey), origin: envKey }
-      : fileValue !== undefined
-        ? { value: fileValue, origin: 'data/config/ports.json' }
-        : null
-  if (explicit === null) return probeFreePort(probeStart)
+  const selected = selectPort(envKey, fileValue, probeStart)
+  if (selected.explicitOrigin === null) return probeFreePort(selected.value)
   try {
-    return await probeFreePort(explicit.value, explicit.value)
+    return await probeFreePort(selected.value, selected.value)
   } catch {
     throw new Error(
-      `[guardian] port ${explicit.value} (${name}, from ${explicit.origin}) is already in use — free it or configure another port`,
+      `[guardian] port ${selected.value} (${name}, from ${selected.explicitOrigin}) is already in use — free it or configure another port`,
     )
   }
 }
@@ -575,14 +590,15 @@ app.whenReady().then(async () => {
   const portsFile = await readPortsFile(homeEnv.OPENALICE_HOME)
   const mcpFile = await readMcpConfigFile(homeEnv.OPENALICE_HOME)
   const mcpEnabled = parseEnabledEnv(process.env['OPENALICE_MCP_ENABLED']) ?? mcpFile.enabled
-  const liteMode = isLiteModeEnv(process.env)
+  let tradingMode = await resolveGuardianTradingMode(process.env, homeEnv.OPENALICE_HOME)
   const mcpPort = mcpEnabled
     ? await claimPort('mcp', 'OPENALICE_MCP_PORT', portsFile.mcp ?? mcpFile.port, DEFAULT_WEB_PORT_START + 1)
     : null
-  const utaPort = liteMode
-    ? null
-    : await claimPort('uta', 'OPENALICE_UTA_PORT', portsFile.uta, mcpPort !== null ? mcpPort + 1 : DEFAULT_WEB_PORT_START + 1)
-  const utaUrl = utaPort !== null ? `http://127.0.0.1:${utaPort}` : null
+  const utaPortFallback = mcpPort !== null ? mcpPort + 1 : DEFAULT_WEB_PORT_START + 1
+  const utaPort = tradingMode.mode === 'lite'
+    ? selectPort('OPENALICE_UTA_PORT', portsFile.uta, utaPortFallback).value
+    : await claimPort('uta', 'OPENALICE_UTA_PORT', portsFile.uta, utaPortFallback)
+  const utaUrl = `http://127.0.0.1:${utaPort}`
   const launcherMode = app.isPackaged ? 'electron-packaged' : 'electron-dev'
   const runtimeEnv = resolveManagedRuntimeEnv({
     appHome: homeEnv.OPENALICE_APP_HOME,
@@ -604,7 +620,6 @@ app.whenReady().then(async () => {
   // Node runtime mode. Without it each spawn would open a new app window.
 
   const spawnUTA = (): ChildProcess => {
-    if (utaPort === null) throw new Error('spawnUTA called while OPENALICE_LITE_MODE disables UTA')
     const child = spawn(process.execPath, [utaEntry], {
       env: {
         ...process.env,
@@ -638,7 +653,7 @@ app.whenReady().then(async () => {
         OPENALICE_LOCAL_CLI_ON_WEB: '1',
         OPENALICE_TOOL_BASE_URL: toolBaseUrl,
         OPENALICE_TOOL_SOCKET: toolSocketPath,
-        ...(liteMode ? { OPENALICE_LITE_MODE: '1' } : { OPENALICE_UTA_URL: utaUrl ?? '' }),
+        OPENALICE_UTA_URL: utaUrl,
         OPENALICE_LAUNCHER: 'electron',
         OPENALICE_GUARDIAN_PID: String(process.pid),
         OPENALICE_GUARDIAN_STARTED_AT: String(guardianStartedAt),
@@ -672,11 +687,11 @@ app.whenReady().then(async () => {
   // sees when debugging startup, and "Electron app loading local HTTP" looks
   // deceptively similar to Docker/prod unless the launcher mode is named.
   console.log('')
-  console.log(`[guardian] mode     →  ${launcherMode}`)
+  console.log(`[guardian] mode     →  ${launcherMode}; trading=${tradingMode.mode} (${tradingMode.source}${tradingMode.envLocked ? ', env-locked' : ''})`)
   console.log(`[guardian] data     →  ${homeEnv.OPENALICE_HOME}`)
   console.log(`[guardian] app      →  ${homeEnv.OPENALICE_APP_HOME}`)
   console.log(`[guardian] runtime  →  ${piRuntime}`)
-  console.log(`[guardian] UTA      →  ${utaUrl ?? 'disabled (OPENALICE_LITE_MODE)'}`)
+  console.log(`[guardian] UTA      →  ${tradingMode.mode === 'lite' ? 'disabled (trading mode lite)' : utaUrl}`)
   console.log(`[guardian] Alice    →  app://openalice (Electron IPC)`)
   console.log(`[guardian] Tools    →  ${toolSocketPath}`)
   console.log(`[guardian] MCP      →  ${mcpPort !== null ? `http://127.0.0.1:${mcpPort}/mcp` : 'disabled'}`)
@@ -697,7 +712,7 @@ app.whenReady().then(async () => {
       return new Response(err instanceof Error ? err.message : String(err), { status: 503 })
     }
   })
-  if (utaUrl !== null) {
+  if (tradingMode.mode !== 'lite') {
     uta = spawnUTA()
     void waitForUTA(utaUrl).then((ready) => {
       if (ready) console.log(`[guardian] UTA ready pid=${uta?.pid ?? ''}`)
@@ -711,9 +726,12 @@ app.whenReady().then(async () => {
 
   // ── Restart-flag watcher: broker config changes touch the flag; SIGTERM
   // + respawn UTA without restarting Alice (mirrors prod.mjs). ────────────
-  if (utaUrl !== null) {
-    void startFlagWatcher(homeEnv.OPENALICE_HOME, utaUrl, spawnUTA)
-  }
+  void startFlagWatcher(homeEnv.OPENALICE_HOME, () => {
+    void (async () => {
+      tradingMode = await resolveGuardianTradingMode(process.env, homeEnv.OPENALICE_HOME)
+      await reconcileUTA(tradingMode, utaUrl, spawnUTA)
+    })().catch((err) => console.error('[guardian] UTA mode reconcile failed:', err))
+  })
 
   // No in-window menu bar on Windows/Linux — Electron's default
   // File/Edit/View/Window/Help renders *inside* the window there and is
@@ -781,6 +799,23 @@ app.whenReady().then(async () => {
               }
             })
         }
+        if (ready && process.env['OPENALICE_ELECTRON_SMOKE_TRADING_MODE'] === '1' && !rendererTradingModeSmokeStarted) {
+          rendererTradingModeSmokeStarted = true
+          void runRendererTradingModeSmoke(win)
+            .then((result) => {
+              console.log(
+                `[guardian] electron smoke trading mode → ok ${result.initialMode} -> ${result.activeMode} -> ${result.finalMode}`,
+              )
+              if (process.env['OPENALICE_ELECTRON_SMOKE_EXIT'] === '1') shutdown()
+            })
+            .catch((err) => {
+              console.error(`[guardian] electron smoke trading mode → failed: ${err instanceof Error ? err.message : String(err)}`)
+              if (process.env['OPENALICE_ELECTRON_SMOKE_EXIT'] === '1') {
+                process.exitCode = 1
+                shutdown()
+              }
+            })
+        }
       })
       .catch((err) => {
         console.error(`[guardian] renderer bridge probe failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -791,24 +826,54 @@ app.whenReady().then(async () => {
   configureAutoUpdate(win, { beforeInstall: stopChildren })
 })
 
-async function restartUTA(utaUrl: string, spawnUTA: () => ChildProcess): Promise<void> {
-  if (restartingUTA || appQuitting) return
+async function stopUTAProcess(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null) return
+  const exited = new Promise<void>((resolveExit) => child.once('exit', () => resolveExit()))
+  killTree(child, 'SIGTERM')
+  await Promise.race([exited, new Promise((resolveWait) => setTimeout(resolveWait, UTA_RESTART_GRACE_MS))])
+  if (child.exitCode === null) {
+    killTree(child, 'SIGKILL')
+    await exited
+  }
+}
+
+async function reconcileUTA(
+  mode: GuardianTradingModePlan,
+  utaUrl: string,
+  spawnUTA: () => ChildProcess,
+): Promise<void> {
+  if (appQuitting) return
+  pendingUTAMode = mode
+  if (restartingUTA) return
+
   restartingUTA = true
   try {
-    console.log('[guardian] restart-uta.flag triggered — restarting UTA')
-    const old = uta
-    if (old && old.exitCode === null) {
-      const exited = new Promise<void>((r) => old.once('exit', () => r()))
-      killTree(old, 'SIGTERM')
-      await Promise.race([exited, new Promise((r) => setTimeout(r, UTA_RESTART_GRACE_MS))])
-      if (old.exitCode === null) {
-        killTree(old, 'SIGKILL')
-        await exited
+    while (pendingUTAMode && !appQuitting) {
+      const targetMode = pendingUTAMode
+      pendingUTAMode = null
+      const running = uta !== null && uta.exitCode === null
+      const action = planUTATransition(targetMode.mode, running)
+      if (action === 'none') {
+        if (uta?.exitCode !== null) uta = null
+        continue
+      }
+
+      if (action === 'stop' || action === 'restart') {
+        console.log(action === 'stop'
+          ? '[guardian] trading mode lite — stopping UTA'
+          : `[guardian] trading mode ${targetMode.mode} — restarting UTA`)
+        const old = uta
+        if (old) await stopUTAProcess(old)
+        if (uta === old) uta = null
+      }
+
+      if (action === 'start' || action === 'restart') {
+        if (action === 'start') console.log(`[guardian] trading mode ${targetMode.mode} — starting UTA`)
+        uta = spawnUTA()
+        const ready = await waitForUTA(utaUrl)
+        console.log(ready ? '[guardian] UTA online' : '[guardian] UTA did not become ready')
       }
     }
-    uta = spawnUTA()
-    const ready = await waitForUTA(utaUrl)
-    console.log(ready ? '[guardian] UTA back online' : '[guardian] UTA did not come back up after restart')
   } finally {
     restartingUTA = false
   }
@@ -816,8 +881,7 @@ async function restartUTA(utaUrl: string, spawnUTA: () => ChildProcess): Promise
 
 async function startFlagWatcher(
   dataHome: string,
-  utaUrl: string,
-  spawnUTA: () => ChildProcess,
+  onTrigger: () => void,
 ): Promise<void> {
   const flagPath = resolve(dataHome, 'data', 'control', 'restart-uta.flag')
   const flagDir = dirname(flagPath)
@@ -828,7 +892,7 @@ async function startFlagWatcher(
     if (pending) clearTimeout(pending)
     pending = setTimeout(() => {
       pending = undefined
-      restartUTA(utaUrl, spawnUTA).catch((err) => console.error('[guardian] restartUTA threw:', err))
+      onTrigger()
     }, 100)
   }
   try {
