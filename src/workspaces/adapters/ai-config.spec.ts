@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { claudeAdapter } from './claude.js';
 import { codexAdapter } from './codex.js';
 import { opencodeAdapter } from './opencode.js';
-import { piAdapter } from './pi.js';
+import { piAdapter, syncPiWindowsShellPath } from './pi.js';
 
 let dir: string;
 
@@ -428,10 +428,11 @@ describe('piAdapter AI-config', () => {
         },
       },
     });
-    expect(JSON.parse(await read('.pi-agent/settings.json'))).toEqual({
-      defaultProvider: 'workspace',
-      defaultModel: 'deepseek-chat',
-    });
+    const settings = JSON.parse(await read('.pi-agent/settings.json'));
+    expect(settings.defaultProvider).toBe('workspace');
+    expect(settings.defaultModel).toBe('deepseek-chat');
+    if (process.platform === 'win32') expect(settings.shellPath).toMatch(/bash\.exe$/i);
+    else expect(settings.shellPath).toBeUndefined();
   });
 
   it('writes managed shellPath into Pi settings when the runtime profile provides one', async () => {
@@ -451,6 +452,28 @@ describe('piAdapter AI-config', () => {
     } finally {
       if (before === undefined) delete process.env['OPENALICE_MANAGED_SHELL_PATH'];
       else process.env['OPENALICE_MANAGED_SHELL_PATH'] = before;
+    }
+  });
+
+  it('backfills the Windows shell path without overwriting Pi-owned settings', async () => {
+    await mkdir(join(dir, '.pi-agent'), { recursive: true });
+    await writeFile(join(dir, '.pi-agent', 'settings.json'), JSON.stringify({
+      defaultProvider: 'workspace',
+      theme: 'light',
+    }));
+    const customPath = 'D:\\PortableGit\\bin\\bash.exe';
+    const before = process.env['OPENALICE_WORKSPACE_SHELL_PATH'];
+    process.env['OPENALICE_WORKSPACE_SHELL_PATH'] = customPath;
+    try {
+      await syncPiWindowsShellPath(dir, 'win32');
+      expect(JSON.parse(await read('.pi-agent/settings.json'))).toEqual({
+        defaultProvider: 'workspace',
+        theme: 'light',
+        shellPath: customPath,
+      });
+    } finally {
+      if (before === undefined) delete process.env['OPENALICE_WORKSPACE_SHELL_PATH'];
+      else process.env['OPENALICE_WORKSPACE_SHELL_PATH'] = before;
     }
   });
 

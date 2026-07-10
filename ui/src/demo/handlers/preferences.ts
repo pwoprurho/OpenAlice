@@ -22,4 +22,9 @@ export const preferencesHandlers = [
     else lastCredentialByAgent[body.agent] = body.credentialSlug
     return HttpResponse.json({ lastCredentialByAgent: { ...lastCredentialByAgent } })
   }),
+  // Vercel demo is not a Windows host, so the machine-local shell setting is
+  // intentionally absent from General Settings.
+  http.get('/api/preferences/workspace-shell', () =>
+    HttpResponse.json({ supported: false }),
+  ),
 ]

@@ -13,6 +13,13 @@ export function resolveBashPath(
   env: EnvLike = process.env,
   platform: NodeJS.Platform = process.platform,
 ): string | null {
+  // User-selected workspace shell is a Windows-only machine preference. Keep
+  // it ahead of the packaged runtime so an explicit override actually wins,
+  // while leaving the existing macOS/Linux resolution path untouched.
+  if (platform === 'win32') {
+    const preferred = clean(env['OPENALICE_WORKSPACE_SHELL_PATH']);
+    if (preferred) return preferred;
+  }
   const managed = clean(env['OPENALICE_MANAGED_SHELL_PATH']);
   if (managed) return managed;
   if (platform !== 'win32') return null;

@@ -3,6 +3,7 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { runtimeProfileFromEnv } from '@/core/runtime-profile.js';
+import { resolveBashPath } from '@/core/shell-resolver.js';
 
 import type { CliAdapter, SpawnContext, WorkspaceAiCred } from '../cli-adapter.js';
 import { readWorkspaceFile, writeWorkspaceFile } from '../file-service.js';
@@ -29,6 +30,36 @@ function piCommandHead(env: Readonly<Record<string, string | undefined>>): reado
   if (!profile.managedPiPath) return ['pi'];
   if (profile.managedPiNodePath) return [profile.managedPiNodePath, profile.managedPiPath];
   return [profile.managedPiPath];
+}
+
+export async function syncPiWindowsShellPath(
+  cwd: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+  if (platform !== 'win32') return;
+  const agentDir = join(cwd, PI_AGENT_DIR);
+  if (!existsSync(agentDir)) return;
+  const shellPath = resolveBashPath(process.env, 'win32');
+  if (!shellPath) return;
+
+  const raw = await readWorkspaceFile(cwd, PI_SETTINGS_PATH);
+  let settings: Record<string, unknown> = {};
+  if (raw !== null) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return;
+      settings = parsed as Record<string, unknown>;
+    } catch {
+      // Pi owns this file too; do not overwrite a malformed/user-edited file.
+      return;
+    }
+  }
+  if (settings['shellPath'] === shellPath) return;
+  await writeWorkspaceFile(
+    cwd,
+    PI_SETTINGS_PATH,
+    JSON.stringify({ ...settings, shellPath }, null, 2) + '\n',
+  );
 }
 
 function piHeadlessApproveArgs(env: Readonly<Record<string, string | undefined>>): readonly string[] {
@@ -87,6 +118,13 @@ export const piAdapter: CliAdapter = {
     // immune to pi's lazy transcript write + the PI_CODING_AGENT_DIR redirect.
     assignsSessionId: true,
     headless: true,
+  },
+
+  // Reconcile the derived Pi cache on every Windows launch so workspaces made
+  // before the global shell setting existed pick it up without requiring a
+  // credential rewrite. The helper returns before I/O on every other OS.
+  async bootstrap({ cwd }): Promise<void> {
+    await syncPiWindowsShellPath(cwd);
   },
 
   composeCommand(_base: readonly string[], ctx: SpawnContext): readonly string[] {
@@ -203,7 +241,13 @@ export const piAdapter: CliAdapter = {
     // (rm .pi-agent) tears both down together.
     const settings: Record<string, unknown> = { defaultProvider: PI_PROVIDER_NAME };
     if (cred.model) settings['defaultModel'] = cred.model;
-    const shellPath = runtimeProfileFromEnv().managedShellPath;
+    // Windows has one installation-wide workspace-shell decision (managed Git
+    // Bash, auto-detected Git for Windows, or an explicit user override). Pi's
+    // settings file is a derived cache, refreshed whenever its workspace AI
+    // config is reconciled. Non-Windows behavior stays exactly as before.
+    const shellPath = process.platform === 'win32'
+      ? resolveBashPath(process.env, 'win32')
+      : runtimeProfileFromEnv().managedShellPath;
     if (shellPath) settings['shellPath'] = shellPath;
     await writeWorkspaceFile(cwd, PI_SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');
   },

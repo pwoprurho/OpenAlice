@@ -70,6 +70,36 @@ The Windows package currently retains dugite's embedded Git payload as well as
 PortableGit. This duplication is intentional until all Workspace Git call
 sites have moved behind an OpenAlice-owned wrapper.
 
+### Windows workspace shell preference
+
+Windows has one machine-local Workspace shell preference in **Settings →
+General**. It is intentionally not a cross-platform setting: macOS and Linux
+return before reading or writing the preference file and keep their existing
+shell behavior.
+
+The preference is stored at
+`~/.openalice/state/workspace-shell.json`, outside a portable install's
+`data/` directory. Its modes and precedence are:
+
+1. **Custom** stores an absolute path to `bash.exe` and exposes it to Workspace
+   processes as `OPENALICE_WORKSPACE_SHELL_PATH`. This explicit user choice
+   wins over the packaged managed shell.
+2. **Auto** clears that override. A packaged app then uses
+   `OPENALICE_MANAGED_SHELL_PATH` (the bundled PortableGit Bash); a source/dev
+   install discovers Git Bash from `SHELL`, `PATH`, standard Git for Windows
+   installation directories, or a per-user Git installation.
+
+`OPENALICE_WORKSPACE_SHELL_PATH` is OpenAlice's resolved internal override,
+not a second independent user setting. If a custom executable is later moved
+or deleted, the setting is reported as invalid and process launch fails
+explicitly; OpenAlice does not silently fall back to Auto.
+
+During Windows Pi bootstrap, OpenAlice mirrors the resolved global shell into
+the Workspace's `.pi-agent/settings.json`. This also backfills existing
+Workspaces created before the global preference existed, while preserving all
+other Pi-owned settings. The Pi file is a derived compatibility cache; the
+machine-local preference remains the source of truth.
+
 ## Packaging and Runtime Flow
 
 ### 1. Vendor pinned payloads
@@ -125,8 +155,7 @@ remain at the OpenAlice/UTA boundary.
   canonicalizes `Path`/`PATH` so Pi's nested shell keeps the injected entries.
 - `src/workspaces/adapters/pi.ts` launches the npm runtime as
   `[managedPiNodePath, managedPiPath, ...args]` and writes the managed shell
-  path into `.pi-agent/settings.json` when a Workspace credential override is
-  present.
+  path into `.pi-agent/settings.json` during Windows Workspace bootstrap.
 
 The managed npm runtime is not added to `PATH` as a fake `pi` binary; the Pi
 adapter owns its explicit launch command. User-installed standalone Pi still
@@ -211,6 +240,11 @@ pnpm electron:assert-package
 pnpm electron:smoke-toolchain
 ```
 
+On Windows, the standard `electron-builder` step rebuilds native dependencies
+such as `node-pty` and therefore requires Visual Studio Build Tools with the
+C++ desktop workload. This is a source-build prerequisite only; users running
+the produced OpenAlice installer do not need Visual Studio.
+
 The `Desktop Package Smoke` workflow runs the macOS and Windows package
 matrix. A release-facing change should also verify a clean-machine flow:
 
@@ -218,7 +252,11 @@ matrix. A release-facing change should also verify a clean-machine flow:
 2. add one compatible AI credential;
 3. create a Chat Workspace using Pi;
 4. run `alice --help`, edit a file, and inspect `git status`;
-5. verify paths containing spaces and non-ASCII characters.
+5. verify paths containing spaces and non-ASCII characters;
+6. switch Windows between Auto and Custom, restart the backend, and confirm
+   the Workspace terminal and Pi use the same persisted `bash.exe`;
+7. move a configured custom `bash.exe` and confirm the invalid setting is
+   reported instead of silently falling back to Auto.
 
 ## Known Follow-up
 
