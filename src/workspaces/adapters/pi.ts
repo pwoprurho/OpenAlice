@@ -185,6 +185,29 @@ export const piAdapter: CliAdapter = {
     }
   },
 
+  extractHeadlessAssistantText(line: string): string | null {
+    try {
+      const evt = JSON.parse(line) as Record<string, unknown>;
+      if (evt['type'] !== 'message_end') return null;
+      const message = evt['message'];
+      if (!message || typeof message !== 'object') return null;
+      const record = message as Record<string, unknown>;
+      if (record['role'] !== 'assistant' || !Array.isArray(record['content'])) return null;
+      const text = record['content']
+        .flatMap((part) => {
+          if (!part || typeof part !== 'object') return [];
+          const content = part as Record<string, unknown>;
+          return content['type'] === 'text' && typeof content['text'] === 'string'
+            ? [content['text']]
+            : [];
+        })
+        .join('\n');
+      return text || null;
+    } catch {
+      return null;
+    }
+  },
+
   composeEnv(ctx: SpawnContext): Record<string, string> {
     // Do not force PI_OFFLINE. OpenAlice is a networked product and Pi may
     // download missing runtime tools during startup. A user or launcher can

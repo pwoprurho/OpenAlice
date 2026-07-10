@@ -107,6 +107,32 @@ describe('runHeadlessTask', () => {
     expect(r.agentSessionId).toBeNull();
   });
 
+  it('decodes the latest completed assistant reply from structured stdout', async () => {
+    const first = JSON.stringify({ type: 'assistant', text: 'Hello' });
+    const second = JSON.stringify({ type: 'assistant', text: 'Hello 👋' });
+    const script =
+      `process.stdout.write(${JSON.stringify(first + '\n')});` +
+      `process.stdout.write(${JSON.stringify(second)});`;
+    const r = await runHeadlessTask({
+      command: ['node', '-e', script],
+      cwd: process.cwd(),
+      env: baseEnv,
+      timeoutMs: 5_000,
+      logger: noopLogger,
+      extractAssistantText: (line) => {
+        try {
+          const evt = JSON.parse(line) as Record<string, unknown>;
+          return evt['type'] === 'assistant' && typeof evt['text'] === 'string'
+            ? evt['text']
+            : null;
+        } catch {
+          return null;
+        }
+      },
+    });
+    expect(r.assistantText).toBe('Hello 👋');
+  });
+
   it('streams the FULL stdout/stderr to log files (beyond the 16KB tails)', async () => {
     const { mkdtemp, readFile, rm } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');

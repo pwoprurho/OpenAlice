@@ -43,6 +43,7 @@ import {
   rememberRecentChatWorkspace,
   type QuickChatPreferences,
 } from '../../core/preferences.js';
+import { CHAT_WORKSPACE_TEMPLATE } from '../../workspaces/chat-workspace-resolver.js';
 
 // The spawn body's `resume` value is an AGENT-side session id, whose shape is
 // adapter-native: uuid for claude/codex/pi, `ses_<base62>` for opencode. This
@@ -62,8 +63,6 @@ const MAX_SEED_PROMPT = 16000;
 const resumeInFlight = new Map<string, Promise<unknown>>();
 
 /** The template quick-chat reuses-or-creates its workspace from. */
-const QUICK_CHAT_TEMPLATE = 'chat';
-
 interface QuickChatWorkspacePreferenceDeps {
   readQuickChatPreferences(): Promise<QuickChatPreferences>;
   rememberRecentChatWorkspace(workspaceId: string | null): Promise<QuickChatPreferences>;
@@ -266,106 +265,12 @@ export function createWorkspaceRoutes(
   }
 
   const rememberRecentChat = async (meta: WorkspaceMeta): Promise<void> => {
-    if (meta.template !== QUICK_CHAT_TEMPLATE) return;
+    if (meta.template !== CHAT_WORKSPACE_TEMPLATE) return;
     try {
       await quickChatPreferences.rememberRecentChatWorkspace(meta.id);
     } catch (err) {
       launcherLogger.warn('quick_chat.preference_write_failed', { id: meta.id, err });
     }
-  };
-
-  const workspaceActivityMs = async (meta: WorkspaceMeta): Promise<number> => {
-    await svc.sessionRegistry.ensureLoaded(meta.id);
-    const active = svc.sessionRegistry
-      .listFor(meta.id)
-      .map((session) => Date.parse(session.lastActiveAt))
-      .filter(Number.isFinite);
-    const created = Date.parse(meta.createdAt);
-    return active.length > 0
-      ? Math.max(...active)
-      : Number.isFinite(created) ? created : 0;
-  };
-
-  const mostRecentlyActiveChat = async (): Promise<WorkspaceMeta | undefined> => {
-    const chats = svc.registry.list().filter((w) => w.template === QUICK_CHAT_TEMPLATE);
-    if (chats.length <= 1) return chats[0];
-    const ranked = await Promise.all(chats.map(async (meta) => ({
-      meta,
-      activity: await workspaceActivityMs(meta),
-    })));
-    ranked.sort((a, b) => b.activity - a.activity);
-    return ranked[0]?.meta;
-  };
-
-  const starterChatTag = (): string => {
-    const tags = new Set(svc.registry.list().map((workspace) => workspace.tag));
-    if (!tags.has(QUICK_CHAT_TEMPLATE)) return QUICK_CHAT_TEMPLATE;
-    let suffix = 2;
-    while (tags.has(`${QUICK_CHAT_TEMPLATE}-${suffix}`)) suffix += 1;
-    return `${QUICK_CHAT_TEMPLATE}-${suffix}`;
-  };
-
-  // Serializes quick-chat's resolve-or-create path so concurrent first launches
-  // don't both bootstrap a starter workspace. The preference is a stable wsId;
-  // if it is absent/stale, reuse the most recently active Chat workspace before
-  // creating one. This keeps Workspace context durable across days.
-  // In-process chain (quick-chat is low-frequency, single-process); the `.catch`
-  // keeps a failed run from poisoning the gate forever.
-  let chatWsGate: Promise<unknown> = Promise.resolve();
-
-  const resolveOrCreateChatWorkspace = async (): Promise<
-    { ok: true; meta: WorkspaceMeta } | { ok: false; status: number; body: { error: string; message?: string } }
-  > => {
-    const preference = await quickChatPreferences.readQuickChatPreferences().catch((err) => {
-      launcherLogger.warn('quick_chat.preference_read_failed', { err });
-      return null;
-    });
-    const preferred = preference?.recentChatWorkspaceId
-      ? svc.registry.get(preference.recentChatWorkspaceId)
-      : undefined;
-    if (preferred?.template === QUICK_CHAT_TEMPLATE) {
-      return { ok: true, meta: preferred };
-    }
-
-    const existing = await mostRecentlyActiveChat();
-    if (existing) {
-      await rememberRecentChat(existing);
-      return { ok: true, meta: existing };
-    }
-
-    let created: Awaited<ReturnType<typeof svc.creator.create>>;
-    try {
-      created = await svc.creator.create(starterChatTag(), QUICK_CHAT_TEMPLATE);
-    } catch (err) {
-      // A concurrent creator may have committed a Chat workspace first.
-      const after = await mostRecentlyActiveChat();
-      if (after) {
-        await rememberRecentChat(after);
-        return { ok: true, meta: after };
-      }
-      launcherLogger.error('quick_chat.create_threw', { err });
-      return { ok: false, status: 500, body: { error: 'create_failed', message: (err as Error).message } };
-    }
-    if (!created.ok) {
-      // tag_in_use can mean another first launch won the create race — re-find it.
-      if (created.code === 'tag_in_use') {
-        const after = await mostRecentlyActiveChat();
-        if (after) {
-          await rememberRecentChat(after);
-          return { ok: true, meta: after };
-        }
-      }
-      const status =
-        created.code === 'tag_in_use' ? 409
-        : created.code === 'unknown_template' ? 400
-        : created.code === 'invalid_tag' ? 400
-        : created.code === 'unknown_agent' ? 400
-        : 500;
-      launcherLogger.error('quick_chat.create_failed', { code: created.code, message: created.message });
-      return { ok: false, status, body: { error: created.code, message: created.message } };
-    }
-    await rememberRecentChat(created.workspace);
-    return { ok: true, meta: created.workspace };
   };
 
   // Detect which vault credential a workspace's loginless agent is currently
@@ -767,11 +672,31 @@ export function createWorkspaceRoutes(
       meta = found;
       await rememberRecentChat(meta);
     } else {
-      const run = chatWsGate.catch(() => undefined).then(() => resolveOrCreateChatWorkspace());
-      chatWsGate = run;
-      const target = await run;
-      if (!target.ok) return c.json(target.body, target.status as 400 | 409 | 500);
-      meta = target.meta;
+      const preference = await quickChatPreferences.readQuickChatPreferences().catch((err) => {
+        launcherLogger.warn('quick_chat.preference_read_failed', { err });
+        return null;
+      });
+      const target = await svc.resolveOrCreateChatWorkspace(
+        preference?.recentChatWorkspaceId,
+      );
+      if (!target.ok) {
+        const status =
+          target.code === 'tag_in_use' ? 409
+          : target.code === 'unknown_template' ? 400
+          : target.code === 'invalid_tag' ? 400
+          : target.code === 'unknown_agent' ? 400
+          : 500;
+        launcherLogger.error('quick_chat.create_failed', {
+          code: target.code,
+          message: target.message,
+        });
+        return c.json(
+          { error: target.code, message: target.message },
+          status as 400 | 409 | 500,
+        );
+      }
+      meta = target.workspace;
+      await rememberRecentChat(meta);
     }
 
     const spawn = await spawnInteractiveSession(meta, {

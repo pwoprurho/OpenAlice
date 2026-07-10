@@ -115,6 +115,16 @@ export const workspacesHandlers = [
   http.post('/api/workspaces/agent-runtime-readiness/probe', () =>
     HttpResponse.json(demoAgentRuntimeReadiness),
   ),
+  http.get('/api/agent-runtimes/readiness', () =>
+    HttpResponse.json(demoAgentRuntimeReadiness),
+  ),
+  http.post('/api/agent-runtimes/readiness/probe', () =>
+    HttpResponse.json({
+      probeId: 'demo-runtime-probe',
+      agents: Object.keys(demoAgentRuntimeReadiness.agents),
+      snapshot: demoAgentRuntimeReadiness,
+    }, { status: 202 }),
+  ),
   // Two sample vault credentials let the quick-chat demo show that a remembered
   // provider can win over the first compatible option. Both speak openai-chat,
   // which every loginless runtime accepts.

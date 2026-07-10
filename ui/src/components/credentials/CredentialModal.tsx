@@ -373,6 +373,7 @@ export function CredentialModal({ mode, cred, presets, initialPresetId, initialA
             <div className="flex items-center gap-2">
               <button onClick={onClose} className="text-[12px] px-3 py-1.5 rounded-md text-text-muted hover:text-text">Cancel</button>
               <button
+                data-testid="credential-modal-primary"
                 onClick={handlePrimaryAction}
                 disabled={primaryDisabled}
                 title={needsConnectionTest && !canTest ? 'Fill the API key + model first' : undefined}

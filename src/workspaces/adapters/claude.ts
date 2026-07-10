@@ -109,6 +109,32 @@ export const claudeAdapter: CliAdapter = {
     }
   },
 
+  extractHeadlessAssistantText(line: string): string | null {
+    try {
+      const evt = JSON.parse(line) as Record<string, unknown>;
+      if (evt['type'] === 'result' && evt['subtype'] === 'success') {
+        return typeof evt['result'] === 'string' ? evt['result'] : null;
+      }
+      if (evt['type'] !== 'assistant') return null;
+      const message = evt['message'];
+      if (!message || typeof message !== 'object') return null;
+      const content = (message as Record<string, unknown>)['content'];
+      if (!Array.isArray(content)) return null;
+      const text = content
+        .flatMap((part) => {
+          if (!part || typeof part !== 'object') return [];
+          const record = part as Record<string, unknown>;
+          return record['type'] === 'text' && typeof record['text'] === 'string'
+            ? [record['text']]
+            : [];
+        })
+        .join('\n');
+      return text || null;
+    } catch {
+      return null;
+    }
+  },
+
   async writeAiConfig(cwd: string, cred: WorkspaceAiCred): Promise<void> {
     const hasAny = cred.baseUrl || cred.apiKey || cred.model;
     if (!hasAny) {

@@ -13,6 +13,7 @@ import { createWorkspaceRoutes } from './workspaces.js';
 import { readCredentials, readWorkspaceDefaultAgent, setCredentialLastModel, type Credential } from '../../core/config.js';
 import type { WorkspaceService } from '../../workspaces/service.js';
 import type { WorkspaceAiCred } from '../../workspaces/cli-adapter.js';
+import { ChatWorkspaceResolver } from '../../workspaces/chat-workspace-resolver.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -61,25 +62,34 @@ function build(opts: {
     agentSessionId: null,
     startedAt: 1,
   }));
-  const creator = { create: vi.fn(async () => ({ ok: true, workspace: META })) };
+  const creator = { create: vi.fn(async () => ({ ok: true as const, workspace: META })) };
+  const registry = {
+    list: () => opts.workspaces ?? [],
+    get: (id: string) => (opts.workspaces ?? []).find((w) => w.id === id) ?? (id === META.id ? META : undefined),
+  };
+  const sessionRegistry = {
+    ensureLoaded: vi.fn(async () => {}),
+    listFor: vi.fn((wsId: string) => opts.sessionsByWorkspace?.[wsId] ?? []),
+    findById: vi.fn(() => undefined),
+    nextName: () => 'o1',
+    create: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
+  };
+  const chatWorkspaceResolver = new ChatWorkspaceResolver({
+    registry: registry as any,
+    sessionRegistry: sessionRegistry as any,
+    creator,
+  });
   const svc = {
     // Default []: today's tag never matches → creator.create path. Tests that
     // exercise targetWsId pass the workspace in so registry resolves it by id.
-    registry: {
-      list: () => opts.workspaces ?? [],
-      get: (id: string) => (opts.workspaces ?? []).find((w) => w.id === id) ?? (id === META.id ? META : undefined),
-    },
+    registry,
     creator,
+    resolveOrCreateChatWorkspace: (preferredWorkspaceId?: string | null) =>
+      chatWorkspaceResolver.resolveOrCreate(preferredWorkspaceId),
     resolveAdapter: (_m: any, agentId?: string) => adapters[agentId ?? 'claude'] ?? claude,
     adapters: { get: (id: string) => adapters[id] },
-    sessionRegistry: {
-      ensureLoaded: vi.fn(async () => {}),
-      listFor: vi.fn((wsId: string) => opts.sessionsByWorkspace?.[wsId] ?? []),
-      findById: vi.fn(() => undefined),
-      nextName: () => 'o1',
-      create: vi.fn(async () => {}),
-      remove: vi.fn(async () => {}),
-    },
+    sessionRegistry,
     pool: { spawn, get: vi.fn(() => undefined) },
     publicMeta: vi.fn(async () => META),
     config: { launcherRepoRoot: '/repo' },

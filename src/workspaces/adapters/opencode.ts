@@ -122,6 +122,21 @@ export const opencodeAdapter: CliAdapter = {
     }
   },
 
+  extractHeadlessAssistantText(line: string): string | null {
+    try {
+      const evt = JSON.parse(line) as Record<string, unknown>;
+      if (evt['type'] !== 'text') return null;
+      const part = evt['part'];
+      if (!part || typeof part !== 'object') return null;
+      const record = part as Record<string, unknown>;
+      return record['type'] === 'text' && typeof record['text'] === 'string'
+        ? record['text']
+        : null;
+    } catch {
+      return null;
+    }
+  },
+
   composeEnv(ctx: SpawnContext): Record<string, string> {
     const env: Record<string, string> = {
       OPENCODE_DISABLE_MODELS_FETCH: '1',

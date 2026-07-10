@@ -160,7 +160,9 @@ export function FirstRunGuide() {
     setRuntimeProbeAttempted(true)
     setRuntimeProbeError(null)
     try {
-      const runtimeReadiness = await probeAgentRuntimeReadiness(agent)
+      const runtimeReadiness = await probeAgentRuntimeReadiness(agent, (snapshot) => {
+        setState((prev) => ({ ...prev, runtimeReadiness: snapshot }))
+      })
       setState((prev) => ({ ...prev, runtimeReadiness }))
       return runtimeReadiness
     } catch (err) {
@@ -343,12 +345,12 @@ export function FirstRunGuide() {
       ? t('firstRunGuide.ai.runtimeReady')
       : runtimeProbeError
         ? t('firstRunGuide.ai.probeFailed')
-        : model.runtimeProbeChecking || runtimeProbeRunning
-          ? t('firstRunGuide.ai.checkingRuntime')
-          : model.aiRepairTarget === 'cli-login'
+        : model.aiRepairTarget === 'ai-provider'
+          ? t('firstRunGuide.ai.providerNeeded')
+          : model.runtimeProbeChecking || runtimeProbeRunning
+            ? t('firstRunGuide.ai.checkingRuntime')
+            : model.aiRepairTarget === 'cli-login'
             ? t('firstRunGuide.ai.cliLoginNeeded')
-            : model.aiRepairTarget === 'ai-provider'
-              ? t('firstRunGuide.ai.providerNeeded')
               : model.aiRepairTarget === 'runtime-install'
                 ? t('firstRunGuide.ai.runtimeMissing')
                 : credentialText
@@ -360,23 +362,23 @@ export function FirstRunGuide() {
     const aiBody = model.hasAgentRuntime
       ? model.hasUsableAiChain
         ? t('firstRunGuide.ai.bodyReady')
-        : model.runtimeProbeChecking || runtimeProbeRunning
-          ? t('firstRunGuide.ai.bodyChecking')
-          : model.aiRepairTarget === 'cli-login'
+        : model.aiRepairTarget === 'ai-provider'
+          ? t('firstRunGuide.ai.bodyAddKey')
+          : model.runtimeProbeChecking || runtimeProbeRunning
+            ? t('firstRunGuide.ai.bodyChecking')
+            : model.aiRepairTarget === 'cli-login'
             ? t('firstRunGuide.ai.bodyCliLogin')
-            : model.aiRepairTarget === 'ai-provider'
-              ? t('firstRunGuide.ai.bodyAddKey')
               : model.hasManagedPi
                 ? t('firstRunGuide.ai.bodyPiInstalled')
                 : t('firstRunGuide.ai.bodyRetry')
       : t('firstRunGuide.ai.bodyMissingRuntime')
     const aiPrimary = model.hasUsableAiChain
       ? t('firstRunGuide.common.continue')
-      : model.runtimeProbeChecking || runtimeProbeRunning
-        ? t('firstRunGuide.common.checking')
-        : model.aiRepairTarget === 'ai-provider'
+      : model.aiRepairTarget === 'ai-provider'
           ? t('firstRunGuide.action.addCredential')
-          : model.aiRepairTarget === 'retry'
+          : model.runtimeProbeChecking || runtimeProbeRunning
+            ? t('firstRunGuide.common.checking')
+            : model.aiRepairTarget === 'retry'
             ? t('firstRunGuide.action.testRuntime')
             : t('firstRunGuide.action.openChecklist')
 
@@ -482,7 +484,23 @@ export function FirstRunGuide() {
 
   const activeStepIndex = Math.max(0, Math.min(stepIndex, maxReachableStepIndex, steps.length - 1))
   const activeStep = steps[activeStepIndex]
-  const primaryDisabled = activeStep.key === 'ai' && (runtimeProbeRunning || model.runtimeProbeChecking)
+  const primaryDisabled = activeStep.key === 'ai' &&
+    !model.hasUsableAiChain &&
+    model.aiRepairTarget !== 'ai-provider' &&
+    (runtimeProbeRunning || model.runtimeProbeChecking)
+  const primaryAction = activeStep.key !== 'ai'
+    ? activeStep.key
+    : model.hasUsableAiChain
+      ? 'continue'
+      : model.aiRepairTarget === 'ai-provider'
+        ? 'add-credential'
+        : primaryDisabled
+          ? 'checking'
+          : !model.hasAgentRuntime ||
+              model.aiRepairTarget === 'runtime-install' ||
+              model.aiRepairTarget === 'cli-login'
+            ? 'checklist'
+            : 'probe'
 
   const goToStep = (nextIndex: number) => {
     const targetIndex = Math.max(0, Math.min(steps.length - 1, maxReachableStepIndex, nextIndex))
@@ -507,7 +525,10 @@ export function FirstRunGuide() {
 
   const runPrimary = () => {
     if (activeStep.key === 'ai' && !model.hasUsableAiChain) {
-      if (runtimeProbeRunning || model.runtimeProbeChecking) return
+      if (
+        (runtimeProbeRunning || model.runtimeProbeChecking) &&
+        model.aiRepairTarget !== 'ai-provider'
+      ) return
       if (!model.hasAgentRuntime || model.aiRepairTarget === 'runtime-install' || model.aiRepairTarget === 'cli-login') {
         openChecklist()
         return
@@ -686,6 +707,7 @@ export function FirstRunGuide() {
                   onClick={runPrimary}
                   disabled={primaryDisabled}
                   data-testid="first-run-guide-primary"
+                  data-onboarding-action={primaryAction}
                   className="flex min-w-0 items-center justify-center gap-2 rounded-md bg-accent px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-accent/90 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-accent"
                 >
                   <span className="min-w-0 truncate">{activeStep.primary}</span>
@@ -715,8 +737,12 @@ export function FirstRunGuide() {
           onClose={() => setShowCredentialForm(false)}
           onSaved={async () => {
             const nextState = await refreshGuideState()
-            const runtimeReadiness = await runRuntimeReadinessProbe()
+            // The credential is durable now; release the modal immediately.
+            // Runtime probes continue in the onboarding surface and update rows
+            // incrementally, so a slow unrelated CLI cannot trap the user in a
+            // saving dialog after another runtime is already usable.
             setShowCredentialForm(false)
+            const runtimeReadiness = await runRuntimeReadinessProbe()
             const nextModel = buildFirstRunGuideModel({
               agents,
               runtimeReadiness: runtimeReadiness ?? nextState.runtimeReadiness,

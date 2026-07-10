@@ -440,6 +440,7 @@ async function runRendererOnboardingSmoke(win: BrowserWindow): Promise<void> {
       if (!button) throw new Error('first-run primary button missing')
       button.click()
     }
+    const credentialPrimary = () => document.querySelector('[data-testid="credential-modal-primary"]')
 
     await waitFor('Electron preload bridge', () => Boolean(window.openAlice?.runtime && window.openAlice?.pty))
 
@@ -459,8 +460,34 @@ async function runRendererOnboardingSmoke(win: BrowserWindow): Promise<void> {
     clickPrimary()
     await waitFor('AI access step', () => activeStep() === 'ai' ? true : false)
 
+    const initialReadiness = await waitFor('initial Pi runtime readiness', async () => {
+      const snapshot = await json(await fetch('/api/agent-runtimes/readiness'))
+      const row = snapshot.agents?.pi
+      return row && row.status !== 'unknown' && row.status !== 'checking' ? snapshot : null
+    }, 60000)
+
+    if (!initialReadiness.agents.pi?.ready) {
+      await waitFor('AI credential action', () => {
+        const button = document.querySelector('[data-testid="first-run-guide-primary"]')
+        return button &&
+          !button.disabled &&
+          button.getAttribute('data-onboarding-action') === 'add-credential'
+          ? true
+          : false
+      })
+      clickPrimary()
+      await waitFor('credential modal', () => credentialPrimary())
+      credentialPrimary().click()
+      await waitFor('verified credential', () => {
+        const button = credentialPrimary()
+        return button && !button.disabled && button.textContent?.trim() === 'Save' ? true : false
+      })
+      credentialPrimary().click()
+      await waitFor('credential modal close', () => credentialPrimary() ? false : true)
+    }
+
     const readiness = await waitFor('Pi runtime readiness', async () => {
-      const snapshot = await json(await fetch('/api/workspaces/agent-runtime-readiness'))
+      const snapshot = await json(await fetch('/api/agent-runtimes/readiness'))
       const row = snapshot.agents?.pi
       if (row?.ready && row.status === 'ready') return snapshot
       if (row && row.status !== 'unknown' && row.status !== 'checking') {
@@ -471,10 +498,14 @@ async function runRendererOnboardingSmoke(win: BrowserWindow): Promise<void> {
     const piReady = readiness.agents.pi
 
     await waitFor('AI ready primary button', async () => {
-      const snapshot = await json(await fetch('/api/workspaces/agent-runtime-readiness'))
+      const snapshot = await json(await fetch('/api/agent-runtimes/readiness'))
       const row = snapshot.agents?.pi
       const button = document.querySelector('[data-testid="first-run-guide-primary"]')
-      return activeStep() === 'ai' && row?.ready === true && button && !button.disabled
+      return activeStep() === 'ai' &&
+        row?.ready === true &&
+        button &&
+        !button.disabled &&
+        button.getAttribute('data-onboarding-action') === 'continue'
     }, 60000)
     clickPrimary()
     await waitFor('broker step', () => activeStep() === 'broker' ? true : false)

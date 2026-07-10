@@ -132,6 +132,21 @@ export const codexAdapter: CliAdapter = {
     }
   },
 
+  extractHeadlessAssistantText(line: string): string | null {
+    try {
+      const evt = JSON.parse(line) as Record<string, unknown>;
+      if (evt['type'] !== 'item.completed') return null;
+      const item = evt['item'];
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      return record['type'] === 'agent_message' && typeof record['text'] === 'string'
+        ? record['text']
+        : null;
+    } catch {
+      return null;
+    }
+  },
+
   async writeAiConfig(cwd: string, cred: WorkspaceAiCred): Promise<void> {
     const hasProvider = !!(cred.baseUrl || cred.model);
 

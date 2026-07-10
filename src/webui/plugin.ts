@@ -46,6 +46,7 @@ export function createWorkspaceServiceRef(): WorkspaceServiceRef {
   return { current: null }
 }
 import { createWorkspaceRoutes } from './routes/workspaces.js'
+import { createAgentRuntimeRoutes } from './routes/agent-runtimes.js'
 import { createHeadlessRoutes } from './routes/headless.js'
 import { attachWorkspacesWS, type AttachedWS } from './workspaces-ws.js'
 import { attachWorkspacesIpc, type AttachedWorkspaceIpc } from './workspaces-ipc.js'
@@ -251,6 +252,7 @@ export class WebPlugin implements Plugin {
     this.workspacesIpc = attachWorkspacesIpc(this.workspaceService)
     if (this.workspaceServiceRef) this.workspaceServiceRef.current = this.workspaceService
     app.route('/api/workspaces', createWorkspaceRoutes(this.workspaceService))
+    app.route('/api/agent-runtimes', createAgentRuntimeRoutes(this.workspaceService))
     app.route('/api/headless', createHeadlessRoutes(this.workspaceService))
     app.route('/api/schedule', createScheduleRoutes(this.workspaceService))
     app.route('/api/issues', createIssuesRoutes(this.workspaceService))

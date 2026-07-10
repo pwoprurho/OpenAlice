@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
-import { createServer } from 'node:net'
+import { createServer as createHttpServer } from 'node:http'
+import { createServer as createNetServer } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { buildDesktopPackagedSmokePlan } from './desktop-packaged-smoke-plan.mjs'
@@ -64,7 +65,7 @@ function findPackagedApp() {
 
 function getAvailablePort() {
   return new Promise((resolve, reject) => {
-    const server = createServer()
+    const server = createNetServer()
     server.unref()
     server.on('error', reject)
     server.listen(0, '127.0.0.1', () => {
@@ -79,9 +80,82 @@ function getAvailablePort() {
   })
 }
 
+function completionStream(text) {
+  const id = 'chatcmpl-openalice-onboarding'
+  const created = Math.floor(Date.now() / 1000)
+  const chunk = (choices, usage) => JSON.stringify({
+    id,
+    object: 'chat.completion.chunk',
+    created,
+    model: 'openalice-onboarding-test',
+    choices,
+    ...(usage ? { usage } : {}),
+  })
+  return [
+    `data: ${chunk([{ index: 0, delta: { role: 'assistant' }, finish_reason: null }])}`,
+    `data: ${chunk([{ index: 0, delta: { content: text }, finish_reason: null }])}`,
+    `data: ${chunk([{ index: 0, delta: {}, finish_reason: 'stop' }], {
+      prompt_tokens: 8,
+      completion_tokens: 8,
+      total_tokens: 16,
+    })}`,
+    'data: [DONE]',
+    '',
+  ].join('\n\n')
+}
+
+async function startPackagedOnboardingAiMock() {
+  const server = createHttpServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/healthz') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: true }))
+      return
+    }
+    if (req.method !== 'POST' || req.url !== '/v1/chat/completions') {
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: { message: 'Not found' } }))
+      return
+    }
+    if (req.headers.authorization !== 'Bearer oa_test_ok') {
+      res.writeHead(401, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: { message: 'Invalid onboarding test key' } }))
+      return
+    }
+    req.resume()
+    req.on('end', () => {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      })
+      res.end(completionStream('OpenAlice packaged onboarding is ready.'))
+    })
+  })
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
+  return server
+}
+
 if (process.platform !== 'darwin') {
   console.error('[desktop-smoke] packaged .app smoke currently runs on macOS only')
   process.exit(1)
+}
+
+const onboardingAiMock = onboarding ? await startPackagedOnboardingAiMock() : null
+if (onboardingAiMock) {
+  const address = onboardingAiMock.address()
+  if (!address || typeof address === 'string') {
+    throw new Error('packaged onboarding AI mock did not bind a TCP port')
+  }
+  const baseUrl = `http://127.0.0.1:${address.port}/v1`
+  plan.buildEnv.VITE_OPENALICE_ONBOARDING_AI_BASE_URL = baseUrl
+  plan.launchEnv.OPENALICE_ONBOARDING_AI_BASE_URL = baseUrl
+  console.log(`[desktop-smoke] onboarding AI mock: ${baseUrl}`)
 }
 
 if (!skipBuild) run('build desktop bundle', 'pnpm', ['electron:build'], plan.buildEnv)
@@ -158,6 +232,7 @@ const child = spawn(join(appPath, 'Contents', 'MacOS', 'OpenAlice'), [], {
 })
 
 const cleanup = () => {
+  onboardingAiMock?.close()
   if (keep || realData || !smokeRoot) return
   rmSync(smokeRoot, { recursive: true, force: true })
 }
