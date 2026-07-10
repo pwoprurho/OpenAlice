@@ -302,7 +302,7 @@ const marketDataSchema = z.object({
    *  (e.g. 'eastmoney' for CN A-share Chinese-name search + 前复权 K-line).
    *  yfinance stays the always-on global default; these are purely additive,
    *  surfaced as extra searchBars candidates in their own namespace, never a
-   *  replacement. Each name must be a registered OpenTypeBB provider. */
+   *  replacement. Each name must be registered by the embedded provider layer. */
   extraVendors: z.array(z.string()).default([]),
   providerKeys: z.object({
     fred: z.string().optional(),
@@ -399,23 +399,6 @@ export const toolsSchema = z.object({
   disabled: z.array(z.string()).default([]),
 })
 
-const webhookTokenSchema = z.object({
-  /** Human-readable label (used in logs / admin UI; not a secret). */
-  id: z.string().min(1),
-  /** The bearer secret. Opaque string — treat as high-entropy. */
-  token: z.string().min(1),
-  /** Epoch ms when created. Metadata only, used for rotation. */
-  createdAt: z.number().int().nonnegative().default(() => Date.now()),
-})
-
-export const webhookSchema = z.object({
-  /** List of accepted bearer tokens for POST /api/events/ingest. Empty = endpoint rejects everything (503). */
-  tokens: z.array(webhookTokenSchema).default([]),
-})
-
-export type WebhookToken = z.infer<typeof webhookTokenSchema>
-export type WebhookConfig = z.infer<typeof webhookSchema>
-
 export const webSubchannelSchema = z.object({
   /** URL-safe identifier. Used as session path segment: data/sessions/web/{id}.jsonl */
   id: z.string().regex(/^[a-z0-9-_]+$/, 'id must be lowercase alphanumeric with hyphens/underscores'),
@@ -503,7 +486,6 @@ export type Config = {
   connectors: z.infer<typeof connectorsSchema>
   news: z.infer<typeof newsCollectorSchema>
   tools: z.infer<typeof toolsSchema>
-  webhook: z.infer<typeof webhookSchema>
 }
 
 // ==================== Loader ====================
@@ -541,7 +523,7 @@ export async function loadConfig(): Promise<Config> {
   // is pending. See src/migrations/INDEX.md for the full list.
   await runMigrations()
 
-  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'snapshot.json', 'mcp.json', 'connectors.json', 'news.json', 'tools.json', 'webhook.json', 'trading.json'] as const
+  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'snapshot.json', 'mcp.json', 'connectors.json', 'news.json', 'tools.json', 'trading.json'] as const
   const raws = await Promise.all(files.map((f) => loadJsonFile(f)))
 
   const config: Config = {
@@ -557,8 +539,7 @@ export async function loadConfig(): Promise<Config> {
     connectors:    await parseAndSeed(files[9], connectorsSchema, raws[9]),
     news:          await parseAndSeed(files[10], newsCollectorSchema, raws[10]),
     tools:         await parseAndSeed(files[11], toolsSchema, raws[11]),
-    webhook:       await parseAndSeed(files[12], webhookSchema, raws[12]),
-    trading:       await parseAndSeed(files[13], tradingSchema, raws[13]),
+    trading:       await parseAndSeed(files[12], tradingSchema, raws[12]),
   }
 
   // Spawn-time-fixed channel: when guardian (Electron main) spawns the
@@ -855,7 +836,7 @@ export async function readMarketDataConfig() {
  * into the local section (which would defeat the global-wins-on-update intent;
  * see [[project_global_data_root_sealed_creds]]). Writes directly, bypassing
  * `writeConfigSection`'s providerKeys→global mirror, which is irrelevant to a
- * vendor-list edit. Because the opentypebb resolver re-reads market-data.json
+ * vendor-list edit. Because the embedded provider resolver re-reads market-data.json
  * per request, the change takes effect on the next search with no restart.
  */
 export async function updateExtraVendors(
@@ -887,17 +868,6 @@ export async function readConnectorsConfig() {
     return connectorsSchema.parse(raw)
   } catch {
     return connectorsSchema.parse({})
-  }
-}
-
-/** Read webhook config from disk (called per-request so token rotation
- *  takes effect without restart). */
-export async function readWebhookConfig() {
-  try {
-    const raw = JSON.parse(await readFile(resolve(CONFIG_DIR, 'webhook.json'), 'utf-8'))
-    return webhookSchema.parse(raw)
-  } catch {
-    return webhookSchema.parse({})
   }
 }
 
@@ -1065,7 +1035,6 @@ const sectionSchemas: Record<ConfigSection, z.ZodTypeAny> = {
   connectors: connectorsSchema,
   news: newsCollectorSchema,
   tools: toolsSchema,
-  webhook: webhookSchema,
 }
 
 const sectionFiles: Record<ConfigSection, string> = {
@@ -1082,7 +1051,6 @@ const sectionFiles: Record<ConfigSection, string> = {
   connectors: 'connectors.json',
   news: 'news.json',
   tools: 'tools.json',
-  webhook: 'webhook.json',
 }
 
 /** All valid config section names (derived from sectionSchemas). */

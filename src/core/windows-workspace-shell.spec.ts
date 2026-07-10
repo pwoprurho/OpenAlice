@@ -32,6 +32,11 @@ describe('Windows workspace shell preference', () => {
       .toThrow('does not exist')
   })
 
+  it('accepts custom paths containing spaces and non-ASCII characters', () => {
+    const customPath = 'C:\\工具\\Git Suite\\bin\\bash.exe'
+    expect(validateWindowsWorkspaceShellPath(customPath, () => true)).toBe(customPath)
+  })
+
   it('persists and immediately applies a custom machine-local path', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'alice-shell-'))
     const path = join(dir, 'workspace-shell.json')
@@ -77,5 +82,28 @@ describe('Windows workspace shell preference', () => {
     }
     expect(resolveBashPath(env, 'win32')).toBe('D:\\Git\\bin\\bash.exe')
     expect(resolveBashPath(env, 'darwin')).toBe('/bin/bash')
+  })
+
+  it('reports a deleted custom shell and does not silently fall back to Auto', () => {
+    const customPath = 'D:\\Moved Git\\bin\\bash.exe'
+    const env: NodeJS.ProcessEnv = {
+      OPENALICE_MANAGED_SHELL_PATH: 'C:\\OpenAlice\\vendor\\git\\bin\\bash.exe',
+    }
+    const preference = { version: 1, mode: 'custom', customPath } as const
+
+    applyWindowsWorkspaceShellPreference(preference, env, 'win32')
+
+    expect(resolveWindowsWorkspaceShellStatus(
+      preference,
+      env,
+      'win32',
+      () => false,
+    )).toMatchObject({
+      source: 'custom',
+      resolvedPath: customPath,
+      valid: false,
+      message: 'The configured bash.exe no longer exists.',
+    })
+    expect(resolveBashPath(env, 'win32')).toBe(customPath)
   })
 })
