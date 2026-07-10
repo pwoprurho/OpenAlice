@@ -1,312 +1,156 @@
-# Running OpenTypeBB with OpenAlice
+# OpenTypeBB Integration
 
-OpenTypeBB is a TypeScript-native port of the [OpenBB Platform](https://github.com/OpenBB-finance/OpenBB) — the open-source financial data infrastructure. It ships as an internal package (`@traderalice/opentypebb`) inside OpenAlice, giving you access to equity, crypto, currency, commodity, economy, and news data without spinning up a Python sidecar or messing with `uv`.
+This guide owns OpenAlice's integration with `@traderalice/opentypebb`: the
+in-process market-data SDK, provider configuration, HTTP mount, and standalone
+package development.
 
-This tutorial walks you through getting OpenAlice up and running with OpenTypeBB as the data backend.
+Related route: [[docs/project-structure.md]].
 
----
+## Current Topology
 
-## Prerequisites
+OpenTypeBB is a first-class workspace package under `packages/opentypebb/`.
+Alice creates one in-process `QueryExecutor` and builds typed equity, crypto,
+currency, commodity, ETF, index, derivatives, and economy clients around it.
+There is no Python sidecar and no `backend: openbb-api` switch in the current
+configuration.
 
-| Requirement | Version |
-|-------------|---------|
-| [Node.js](https://nodejs.org/) | 22+ |
-| [pnpm](https://pnpm.io/) | 10+ |
-| [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) | latest (installed & authenticated) |
+The same executor is mounted into Alice's Hono app at:
 
-That's it. No Python, no `uv`, no Docker.
-
----
-
-## 1. Clone & Install
-
-```bash
-git clone https://github.com/TraderAlice/OpenAlice.git
-cd OpenAlice
-pnpm install
-pnpm build
+```text
+/api/market-data-v1
 ```
 
-`pnpm install` resolves the monorepo workspace — the `@traderalice/opentypebb` package under `packages/opentypebb/` is linked automatically.
+In `pnpm dev`, Vite normally serves the UI on `http://localhost:5173` and
+proxies API requests to Alice (normally port 47331). The package can also run a
+standalone OpenBB-compatible server on port 6901 for package development or
+external consumers.
 
-## 2. Start the Dev Server
+## Start and Verify the Integrated Path
 
 ```bash
+pnpm install
 pnpm dev
 ```
 
-Open [http://localhost:3002](http://localhost:3002) and start chatting. No API keys or extra config required — the default setup uses Claude Code as the AI backend with your existing login, and OpenTypeBB as the data engine via in-process SDK mode.
+Useful checks:
 
-> For frontend hot-reload during development, run `pnpm dev:ui` (port 5173) in a separate terminal.
+```bash
+curl http://127.0.0.1:47331/api/market-data-v1/widgets.json
+curl "http://127.0.0.1:47331/api/market-data-v1/equity/price/quote?symbol=AAPL&provider=yfinance"
+```
 
-## 3. Verify OpenTypeBB Is Active
+The configured web port may differ; `data/config/ports.json` and Guardian's
+startup log are authoritative. The integrated market-data routes share Alice's
+normal web/auth boundary.
 
-OpenTypeBB is the **default** data backend. You don't need to configure anything — it's already on.
+## Configuration
 
-Under the hood, OpenAlice reads `data/config/market-data.json`. If that file doesn't exist yet, it falls back to these defaults:
+Market-data configuration lives in
+`<OPENALICE_HOME>/data/config/market-data.json`. Defaults are applied by
+`src/core/config.ts`:
 
 ```json
 {
   "enabled": true,
-  "backend": "typebb-sdk",
   "providers": {
     "equity": "yfinance",
     "crypto": "yfinance",
-    "currency": "yfinance"
+    "currency": "yfinance",
+    "commodity": "yfinance"
   },
+  "extraVendors": [],
   "providerKeys": {},
-  "apiServer": {
-    "enabled": false,
-    "port": 6901
-  }
-}
-```
-
-Key settings:
-
-- **`backend: "typebb-sdk"`** — This is the in-process mode. OpenTypeBB's `QueryExecutor` runs directly inside the Node.js process — no HTTP, no sidecar. This is the default.
-- **`backend: "openbb-api"`** — Switches to making HTTP requests to an external OpenBB-compatible API server. You probably don't want this.
-- **`providers`** — Which data provider to use per asset class. `yfinance` works out of the box with no API key.
-
-## 4. Available Data Providers
-
-OpenTypeBB ships with 14 providers:
-
-| Provider | Covers | API Key? |
-|----------|--------|----------|
-| **yfinance** | Equity, crypto, currency, news | No |
-| **fmp** | Equity fundamentals, news, discovery | Required |
-| **intrinio** | Options data | Required |
-| **eia** | Energy (petroleum, natural gas, electricity) | Required |
-| **econdb** | Global economic data | Optional (higher rate limits) |
-| **federal_reserve** | FRED, FOMC, payrolls, PCE, Michigan, etc. | Optional (higher rate limits) |
-| **bls** | Bureau of Labor Statistics employment data | Optional (higher rate limits) |
-| **deribit** | Crypto derivatives | No |
-| **cboe** | Index data | No |
-| **multpl** | S&P 500 multiples (PE, earnings yield) | No |
-| **oecd** | GDP, economic indicators | No |
-| **imf** | International trade, CPI, balance of payments | No |
-| **ecb** | European balance of payments | No |
-| **stub** | Test/placeholder | No |
-
-**Most things work without any API key** — `yfinance` covers equity quotes, crypto prices, forex rates, and company news. `federal_reserve`, `bls`, and `econdb` also work keyless but with stricter rate limits. Only `fmp`, `intrinio`, and `eia` strictly require a key.
-
-## 5. Adding API Keys (Optional)
-
-To unlock additional providers (FMP, EIA, Intrinio, etc.), create or edit `data/config/market-data.json`:
-
-```json
-{
-  "providerKeys": {
-    "fmp": "your_fmp_api_key_here",
-    "eia": "your_eia_api_key_here"
-  }
-}
-```
-
-Or set them through the Web UI: open [http://localhost:3002](http://localhost:3002), go to the config panel, and edit the OpenBB section. Changes take effect immediately — no restart needed.
-
-The key names map to OpenBB credential fields automatically:
-`fmp` → `fmp_api_key`, `eia` → `eia_api_key`, `fred` → `fred_api_key`, etc.
-
-## 6. What Can You Do?
-
-Once running, Alice has access to a rich set of market data tools powered by OpenTypeBB:
-
-### Market Search
-Ask Alice to find any symbol across equities, crypto, and forex:
-> "Search for Tesla stock"
-> "Find crypto pairs with SOL"
-
-### Equity Data
-- Price quotes and historical OHLCV
-- Company profiles and financial statements
-- Analyst estimates and earnings calendar
-- Insider trading and institutional ownership
-- Market movers (top gainers, losers, most active)
-
-### Crypto & Forex
-- Real-time price data
-- Historical OHLCV with configurable intervals
-
-### Technical Analysis
-Built-in indicator calculator with formula expressions:
-> "Calculate RSI(14) for AAPL on the daily chart"
-> "Show me the 50-day and 200-day SMA crossover for BTC/USD"
-
-Uses syntax like `SMA(CLOSE('AAPL', '1d'), 50)`, `RSI(CLOSE('BTC/USD', '1d'), 14)`, etc.
-
-### Economy & Macro
-- GDP data (OECD, IMF)
-- FRED economic series (rates, inflation, employment)
-- PCE, CPI, nonfarm payrolls, FOMC documents
-- University of Michigan consumer sentiment
-- Fed manufacturing outlook surveys
-
-### Commodities
-- EIA petroleum & natural gas data
-- Spot commodity prices
-
-### News
-- Company-specific news
-- World market news
-- Background RSS collection with searchable archive
-
-## 7. Running OpenTypeBB as a Standalone HTTP Server
-
-If you want to use OpenTypeBB independently — for example, to connect it to [OpenBB Workspace](https://pro.openbb.co) or other tools — you can run it as a standalone API server:
-
-```bash
-# From the repo root:
-cd packages/opentypebb
-
-# Set your API key (optional — yfinance works without one)
-export FMP_API_KEY=your_key_here
-
-# Run the server
-npx tsx src/server.ts
-```
-
-The server starts on port 6901 (configurable via `OPENTYPEBB_PORT`):
-```
-Built widgets.json with 88 widgets
-OpenTypeBB listening on http://localhost:6901
-```
-
-### API Endpoints
-
-The server exposes OpenBB-compatible REST endpoints:
-
-```bash
-# Health check
-curl http://localhost:6901/api/v1/health
-
-# Get a stock quote
-curl "http://localhost:6901/api/v1/equity/price/quote?symbol=AAPL&provider=yfinance"
-
-# Get historical data
-curl "http://localhost:6901/api/v1/equity/price/historical?symbol=MSFT&provider=yfinance&start_date=2024-01-01"
-
-# Get crypto price
-curl "http://localhost:6901/api/v1/crypto/price/historical?symbol=BTC-USD&provider=yfinance"
-
-# Get world news (requires FMP key)
-curl "http://localhost:6901/api/v1/news/world?provider=fmp&limit=5"
-
-# GDP data from OECD
-curl "http://localhost:6901/api/v1/economy/gdp/nominal?provider=oecd&country=united_states"
-
-# Pass credentials per-request
-curl -H 'X-OpenBB-Credentials: {"fmp_api_key": "your_key"}' \
-  "http://localhost:6901/api/v1/equity/fundamental/income?symbol=AAPL&provider=fmp"
-
-# Discover available widgets (for OpenBB Workspace)
-curl http://localhost:6901/widgets.json
-```
-
-### Embedded Server Mode
-
-You can also run the API server embedded inside OpenAlice (alongside the agent). Edit `data/config/market-data.json`:
-
-```json
-{
-  "apiServer": {
+  "hub": {
     "enabled": true,
-    "port": 6901
+    "baseUrl": "https://traderhub.openalice.ai"
   }
 }
 ```
 
-Then `pnpm dev` will start both Alice and the OpenTypeBB HTTP API.
+- `providers` selects the default provider per asset class. ETF, index, and
+  derivatives routes use the equity provider unless the caller explicitly
+  chooses another provider.
+- `extraVendors` adds regional/specialized equity search sources without
+  replacing the always-on primary vendor.
+- `providerKeys` holds user-supplied data-vendor keys. Global provider-key
+  values fill gaps; local config values win.
+- `hub` enables hosted public/reference data and keyed-provider proxy fallback.
+  Disable it or change `baseUrl` for a fully local/self-hosted deployment.
 
-## 8. Using OpenTypeBB as a Library
+The HTTP mount reads provider/key config lazily per request, and optional-vendor
+search reads `extraVendors` per search. Alice's long-lived typed SDK clients are
+constructed during startup, so restart Alice when validating a changed primary
+provider or credential through agent tools unless that exact settings flow
+explicitly rebuilds the client.
 
-You can also import OpenTypeBB directly in your own TypeScript project:
+## Vendor Discovery
 
-```typescript
-import { createExecutor } from '@traderalice/opentypebb'
+Do not maintain a copied provider inventory in this guide. Providers expose
+their own credential declarations and optional `vendorMeta`; the runtime joins
+that self-description to the current configuration.
 
-const executor = createExecutor()
+The agent-facing tools are:
 
-// Get a stock quote (yfinance — no API key needed)
-const quotes = await executor.execute('yfinance', 'EquityQuote', {
-  symbol: 'AAPL',
-}, {})
+- `listMarketVendors` — list available vendor ids, enabled state, keyless
+  status, coverage, and symbol/search conventions;
+- `setMarketVendor` — toggle an optional vendor in `extraVendors`, effective on
+  the next search.
 
-console.log(quotes)
+The Market Data UI exposes the same optional-vendor state. Use this discovery
+loop before assuming a market is unsupported: list vendors, read the vendor's
+usage note, enable it if needed, then search again.
 
-// Get historical crypto data
-const btcHistory = await executor.execute('yfinance', 'CryptoHistorical', {
-  symbol: 'BTC-USD',
-  start_date: '2024-01-01',
-}, {})
+## Code Paths
 
-// With an FMP API key
-const income = await executor.execute('fmp', 'IncomeStatement', {
-  symbol: 'AAPL',
-  period: 'annual',
-}, {
-  fmp_api_key: 'your_key_here',
-})
-```
+| Path | Responsibility |
+|---|---|
+| `packages/opentypebb/src/` | Provider framework, standard models, routers, providers, standalone server |
+| `src/domain/market-data/client/typebb/` | Alice SDK clients and route mapping |
+| `src/domain/market-data/credential-map.ts` | OpenAlice key names → provider credential fields |
+| `src/domain/market-data/vendors.ts` | Runtime vendor catalog and `extraVendors` updates |
+| `src/server/opentypebb.ts` | Mount package routers into Alice's Hono app |
+| `src/main.ts` | Construct clients and register market-data tools |
+| `src/webui/plugin.ts` | Mount `/api/market-data-v1` with live config getters |
+| `ui/src/pages/MarketDataPage.tsx` | Provider/hub/vendor configuration surface |
 
-## 9. Architecture Overview
+## Add or Change a Provider
 
-```
-OpenAlice
-├── packages/opentypebb/          # The OpenTypeBB library
-│   ├── src/
-│   │   ├── index.ts              # Library entry point
-│   │   ├── server.ts             # Standalone HTTP server
-│   │   ├── core/                 # Registry, executor, router, REST API
-│   │   ├── providers/            # 14 data providers (yfinance, fmp, oecd, ...)
-│   │   └── extensions/           # 9 domain routers (equity, crypto, economy, ...)
-│   └── package.json
-│
-├── src/openbb/
-│   ├── sdk/                      # In-process SDK clients (equity, crypto, ...)
-│   │   ├── executor.ts           # Singleton QueryExecutor
-│   │   ├── base-client.ts        # Base class for SDK clients
-│   │   └── *-client.ts           # Domain-specific SDK clients
-│   ├── equity/                   # Equity data layer + SymbolIndex
-│   ├── crypto/                   # Crypto data layer
-│   ├── currency/                 # Currency/forex data layer
-│   ├── commodity/                # Commodity data layer
-│   ├── economy/                  # Economy data layer
-│   ├── news/                     # News data layer
-│   └── credential-map.ts         # Config key → OpenBB credential mapping
-│
-├── src/extension/
-│   ├── analysis-kit/             # Technical indicator calculator
-│   ├── equity/                   # Equity research tools
-│   ├── market/                   # Unified symbol search
-│   └── news/                     # News tools
-│
-└── data/config/market-data.json       # Runtime configuration
-```
+Provider behavior belongs in `packages/opentypebb/src/providers/<id>/`.
+Register it through the package app loader and keep its models/tests beside the
+provider. If it should appear in the optional vendor picker, define `vendorMeta`
+on the provider rather than adding a separate prose table elsewhere.
 
-**Data flow (SDK mode):**
-```
-Alice asks for AAPL quote
-  → ToolCenter dispatches to equity extension
-    → SDKEquityClient.getQuote()
-      → QueryExecutor.execute('yfinance', 'EquityQuote', { symbol: 'AAPL' })
-        → YFinanceFetcher hits Yahoo Finance API
-          → Returns structured data
-```
+When a new credential name is exposed to users, update both the market-data
+config schema and `src/domain/market-data/credential-map.ts`. When a new asset
+class/route lands, update Alice's route map/client and the HTTP default-provider
+resolver together.
 
-No HTTP. No Python. No sidecar. Just TypeScript all the way down.
+## Standalone Package Server
 
----
-
-## TL;DR
+Run the package directly:
 
 ```bash
-git clone https://github.com/TraderAlice/OpenAlice.git
-cd OpenAlice
-pnpm install && pnpm build
-pnpm dev
-# Open http://localhost:3002 and ask Alice about any stock, crypto, or macro data
+pnpm -F @traderalice/opentypebb dev
 ```
 
-Everything works out of the box. OpenTypeBB is the default data backend, `yfinance` is the default provider, and neither requires an API key. Add keys to `data/config/market-data.json` when you want to unlock more providers.
+Environment:
+
+- `OPENTYPEBB_PORT` — listen port, default `6901`;
+- `FMP_API_KEY` — optional default FMP credential;
+- callers may also pass `X-OpenBB-Credentials` for standalone requests.
+
+Standalone routes use the package's native OpenBB-compatible paths without
+Alice's `/api/market-data-v1` prefix.
+
+## Verification
+
+```bash
+pnpm -F @traderalice/opentypebb typecheck
+pnpm vitest run packages/opentypebb/src
+npx tsc --noEmit
+pnpm test
+```
+
+For live keyed-provider verification, use explicit integration credentials and
+the focused suites under `src/domain/market-data/__test__/e2e/`. Do not make
+network/keyed tests a silent prerequisite for the normal unit suite.

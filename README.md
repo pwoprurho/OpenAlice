@@ -108,7 +108,10 @@ pnpm dev
 
 Open the UI URL printed by the terminal, usually `http://localhost:5173`.
 
-You also need at least one agent CLI installed and logged in, usually `claude` or `codex`. OpenAlice runs the model loop inside that native CLI so you keep its prompt cache, terminal rendering, provider login, and tool behavior.
+The packaged desktop includes a managed Pi runtime. Source and Docker installs
+need at least one agent CLI installed and logged in, such as `claude`, `codex`,
+`opencode`, or `pi`. OpenAlice runs the model loop inside that native CLI so you
+keep its prompt cache, terminal rendering, provider login, and tool behavior.
 
 ## Documentation
 
