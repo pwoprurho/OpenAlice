@@ -11,6 +11,7 @@ describe('buildOnboardingTestEnv', () => {
     expect(env['OPENALICE_HOME']).toBe('/tmp/oa-onboarding/home')
     expect(env['AQ_LAUNCHER_ROOT']).toBe('/tmp/oa-onboarding/workspaces')
     expect(env['OPENALICE_GLOBAL_DIR']).toBe('/tmp/oa-onboarding/global')
+    expect(env['PI_CODING_AGENT_DIR']).toBe('/tmp/oa-onboarding/pi-agent')
     expect(env['OPENALICE_AGENT_RUNTIME_INSTALLS']).toBe('only:pi')
     expect(env['OPENALICE_CREDENTIAL_TEST_MODE']).toBe('mock')
     expect(env['VITE_OPENALICE_FIRST_RUN_GUIDE']).toBe('1')
@@ -18,6 +19,9 @@ describe('buildOnboardingTestEnv', () => {
     expect(env['VITE_OPENALICE_CREDENTIAL_TEST_MODE']).toBe('mock')
     expect(env['VITE_OPENALICE_ONBOARDING_STORAGE_SUFFIX']).toMatch(/^[0-9a-f-]{36}$/)
     expect(env['OPENALICE_UI_PORT']).toBe('15173')
+    expect(env['OPENALICE_ONBOARDING_AI_MOCK_PORT']).toBe('0')
+    expect(env['OPENALICE_ONBOARDING_AI_BASE_URL']).toBe('http://127.0.0.1:0/v1')
+    expect(env['VITE_OPENALICE_ONBOARDING_AI_BASE_URL']).toBe('http://127.0.0.1:0/v1')
     expect(env['OPENALICE_TRADING_MODE']).toBeUndefined()
   })
 
@@ -27,6 +31,23 @@ describe('buildOnboardingTestEnv', () => {
     }, { root: '/tmp/oa-onboarding' })
 
     expect(env['VITE_OPENALICE_ONBOARDING_STORAGE_SUFFIX']).toBe('fixed-ui-state')
+  })
+
+  it('threads the dynamically bound mock port through backend and Vite config', () => {
+    const { env } = buildOnboardingTestEnv({}, {
+      root: '/tmp/oa-onboarding',
+      aiMockPort: 61234,
+    })
+
+    expect(env['OPENALICE_ONBOARDING_AI_MOCK_PORT']).toBe('61234')
+    expect(env['OPENALICE_ONBOARDING_AI_BASE_URL']).toBe('http://127.0.0.1:61234/v1')
+    expect(env['VITE_OPENALICE_ONBOARDING_AI_BASE_URL']).toBe('http://127.0.0.1:61234/v1')
+  })
+
+  it('rejects invalid mock ports before starting the product', () => {
+    expect(() => buildOnboardingTestEnv({
+      OPENALICE_ONBOARDING_AI_MOCK_PORT: 'not-a-port',
+    }, { root: '/tmp/oa-onboarding' })).toThrow(/must be an integer/)
   })
 
   it('allows disabling the first-run guide in onboarding test mode', () => {
@@ -55,6 +76,7 @@ describe('buildOnboardingTestEnv', () => {
       AQ_LAUNCHER_ROOT: '/custom/workspaces',
       OPENALICE_GLOBAL_DIR: '/custom/global',
       OPENALICE_UI_PORT: '25173',
+      OPENALICE_ONBOARDING_AI_MOCK_PORT: '25174',
       OPENALICE_AGENT_RUNTIME_INSTALLS: 'only:codex',
       OPENALICE_CREDENTIAL_TEST_MODE: 'real',
     }, { root: '/tmp/oa-onboarding' })
@@ -63,6 +85,7 @@ describe('buildOnboardingTestEnv', () => {
     expect(env['AQ_LAUNCHER_ROOT']).toBe('/custom/workspaces')
     expect(env['OPENALICE_GLOBAL_DIR']).toBe('/custom/global')
     expect(env['OPENALICE_UI_PORT']).toBe('25173')
+    expect(env['OPENALICE_ONBOARDING_AI_BASE_URL']).toBe('http://127.0.0.1:25174/v1')
     expect(env['OPENALICE_AGENT_RUNTIME_INSTALLS']).toBe('only:codex')
     expect(env['OPENALICE_CREDENTIAL_TEST_MODE']).toBe('real')
     expect(env['VITE_OPENALICE_CREDENTIAL_TEST_MODE']).toBe('real')

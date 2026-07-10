@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { PanelRight } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import { useWorkspaceSidePanels } from '../../live/workspace-side-panels'
 
@@ -13,6 +14,7 @@ import { useWorkspaceSidePanels } from '../../live/workspace-side-panels'
  * `useWorkspaceSidePanels`.
  */
 export function WorkspaceFilesToggle(): ReactElement {
+  const { t } = useTranslation()
   const files = useWorkspaceSidePanels((s) => s.files)
   const toggleFiles = useWorkspaceSidePanels((s) => s.toggleFiles)
   return (
@@ -20,7 +22,7 @@ export function WorkspaceFilesToggle(): ReactElement {
       type="button"
       onClick={toggleFiles}
       aria-pressed={files}
-      title={files ? 'Hide the files panel (full-width terminal)' : 'Show the files panel'}
+      title={files ? t('workspace.hideFilesTitle') : t('workspace.showFilesTitle')}
       className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] transition-colors ${
         files
           ? 'text-text bg-bg-tertiary'
@@ -28,7 +30,7 @@ export function WorkspaceFilesToggle(): ReactElement {
       }`}
     >
       <PanelRight size={13} strokeWidth={1.8} aria-hidden />
-      Files
+      {t('workspace.files')}
     </button>
   )
 }

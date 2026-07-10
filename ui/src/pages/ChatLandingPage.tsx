@@ -26,6 +26,7 @@ import {
   detectWorkspaceCredential,
   probeAgentRuntimeReadiness,
   QuickChatError,
+  type AgentInfo,
   type AgentCredentialReadiness,
   type AgentRuntimeReadinessSnapshot,
   type SavedCredential,
@@ -52,6 +53,49 @@ const AGENT_ICONS: Record<string, LucideIcon> = {
   codex: Cpu,
   opencode: Code2,
   pi: Bot,
+}
+
+/** Resolve the runtime that should power a quick chat without turning the
+ *  first message into a mandatory setup form. Explicit and saved choices win;
+ *  otherwise a verified runtime is the safest default. When readiness is
+ *  still stale (the first-run guide may have probed after this page mounted),
+ *  the only installed runtime is unambiguous and can be selected directly. */
+export function resolveChatAgent(
+  agents: readonly Pick<AgentInfo, 'id' | 'installed'>[],
+  selectedAgent: string | null,
+  defaultAgent: string | null,
+  runtimeReadiness: AgentRuntimeReadinessSnapshot | null,
+): string | null {
+  const hasAgent = (agentId: string | null): agentId is string => (
+    agentId !== null && agents.some((agent) => agent.id === agentId)
+  )
+  if (hasAgent(selectedAgent)) return selectedAgent
+  if (hasAgent(defaultAgent)) return defaultAgent
+
+  const readyAgent = agents.find((agent) => runtimeReadiness?.agents[agent.id]?.ready === true)
+  if (readyAgent) return readyAgent.id
+
+  const installedAgents = agents.filter((agent) => agent.installed !== false)
+  return installedAgents.length === 1 ? installedAgents[0].id : null
+}
+
+/** Keep the provider pill truthful for an existing workspace. A ready
+ * workspace still has a detected credential; readiness controls whether we
+ * need a fallback, not whether the current provider name should disappear. */
+export function resolveChatCredential(
+  credentials: readonly Pick<SavedCredential, 'slug'>[] | null,
+  pickedCredential: string | null,
+  detectedCredential: string | null,
+  workspaceCredentialReady: boolean,
+): string | null {
+  if (pickedCredential !== null) return pickedCredential
+  if (
+    detectedCredential !== null &&
+    credentials?.some((credential) => credential.slug === detectedCredential)
+  ) {
+    return detectedCredential
+  }
+  return workspaceCredentialReady ? null : (credentials?.[0]?.slug ?? null)
 }
 
 /**
@@ -104,17 +148,15 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
   // must NOT assert that the host is missing its runtimes.
   const agentsKnown = targetCliAgents.length > 0
 
-  // Prefer the user-level runtime default when it is valid for this target.
-  // Without a saved default, require the user to pick an agent once; the pick is
-  // persisted as the next default runtime.
-  const defaultAgentUsable =
-    defaultAgent !== null &&
-    targetCliAgents.some((a) => a.id === defaultAgent) &&
-    (!targetWs || targetWs.agents.includes(defaultAgent))
-  const selectedAgentUsable =
-    selectedAgent !== null && targetCliAgents.some((a) => a.id === selectedAgent)
-  const effectiveAgent =
-    (selectedAgentUsable ? selectedAgent : null) ?? (defaultAgentUsable ? defaultAgent : null)
+  // Prefer explicit and persisted choices, then remove first-message friction
+  // when the host has one clear usable runtime. The picker remains available
+  // and persists any later user choice.
+  const effectiveAgent = resolveChatAgent(
+    targetCliAgents,
+    selectedAgent,
+    defaultAgent,
+    runtimeReadiness,
+  )
   const selectedInfo = targetCliAgents.find((a) => a.id === effectiveAgent) ?? null
   const SelectedIcon = selectedInfo ? AGENT_ICONS[selectedInfo.id] : undefined
   // Surface install guidance when the chosen runtime isn't on PATH.
@@ -161,10 +203,17 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
   // both; claude/codex never show the picker.
   useEffect(() => {
     let live = true
-    listAgentCredentials('opencode')
-      .then((list) => { if (live) setCreds(list) })
-      .catch(() => { if (live) setCreds([]) })
-    return () => { live = false }
+    const refresh = () => {
+      void listAgentCredentials('opencode')
+        .then((list) => { if (live) setCreds(list) })
+        .catch(() => { if (live) setCreds([]) })
+    }
+    refresh()
+    window.addEventListener('openalice:credentials-changed', refresh)
+    return () => {
+      live = false
+      window.removeEventListener('openalice:credentials-changed', refresh)
+    }
   }, [])
 
   useEffect(() => {
@@ -206,11 +255,12 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
     creds.length === 0
   // Effective cred = explicit pick, else what the workspace already uses, else
   // the first compatible one. Mirrors the backend's resolution order.
-  const effectiveCred =
-    pickedCred ??
-    (!workspaceCredReady && detectedCred && creds?.some((c) => c.slug === detectedCred) ? detectedCred : null) ??
-    (!workspaceCredReady ? creds?.[0]?.slug : null) ??
-    null
+  const effectiveCred = resolveChatCredential(
+    creds,
+    pickedCred,
+    detectedCred,
+    workspaceCredReady,
+  )
   const credInfo = creds?.find((c) => c.slug === effectiveCred) ?? null
   // Warn when sending will overwrite the workspace's existing cred with a
   // different one (only meaningful once today's workspace exists).
@@ -232,7 +282,9 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
     openOrFocus({ kind: 'settings', params: { category: 'ai-provider' } })
   }
 
-  const canSend = value.trim().length > 0 && !launching && effectiveAgent !== null
+  // A missing runtime choice should open the picker, not leave a mysteriously
+  // disabled send button. submit() already handles that branch.
+  const canSend = value.trim().length > 0 && !launching
 
   // Close the agent menu on an outside click.
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '../i18n'
 import { PageSidebarLayout } from './PageSidebarLayout'
 
 class ResizeObserverStub {
@@ -9,8 +10,9 @@ class ResizeObserverStub {
   disconnect() {}
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   window.localStorage.clear()
+  await i18n.changeLanguage('en')
   vi.stubGlobal('ResizeObserver', ResizeObserverStub)
   vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
     matches: query === '(min-width: 768px)',

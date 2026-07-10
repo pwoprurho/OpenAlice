@@ -13,6 +13,7 @@ interface ImportMetaEnv {
   readonly VITE_OPENALICE_FIRST_RUN_GUIDE?: string
   readonly VITE_OPENALICE_ONBOARDING_TEST?: string
   readonly VITE_OPENALICE_CREDENTIAL_TEST_MODE?: string
+  readonly VITE_OPENALICE_ONBOARDING_AI_BASE_URL?: string
   readonly VITE_OPENALICE_ONBOARDING_STORAGE_SUFFIX?: string
 }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { PanelLeftClose, PanelLeftOpen, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { Sidebar } from './Sidebar'
 
 const MIN_WIDTH = 200
@@ -82,6 +83,7 @@ export function PageSidebarLayout({
   children,
   defaultWidth = 260,
 }: PageSidebarLayoutProps) {
+  const { t } = useTranslation()
   const isDesktop = useIsDesktop()
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -164,8 +166,8 @@ export function PageSidebarLayout({
         type="button"
         onClick={() => updateCollapsed(true)}
         className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-overlay hover:text-text"
-        aria-label={`Collapse ${title}`}
-        title="Focus content"
+        aria-label={t('common.collapsePanel', { title })}
+        title={t('common.focusContent')}
       >
         <PanelLeftClose size={15} strokeWidth={1.75} aria-hidden />
       </button>
@@ -190,8 +192,8 @@ export function PageSidebarLayout({
               type="button"
               onClick={() => updateCollapsed(false)}
               className="flex h-8 w-8 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-overlay hover:text-text"
-              aria-label={`Open ${title}`}
-              title={`Open ${title}`}
+              aria-label={t('common.openPanel', { title })}
+              title={t('common.openPanel', { title })}
             >
               <PanelLeftOpen size={16} strokeWidth={1.75} aria-hidden />
             </button>
@@ -227,7 +229,7 @@ export function PageSidebarLayout({
           type="button"
           onClick={() => setDrawerOpen(true)}
           className="flex h-8 w-8 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-overlay hover:text-text"
-          aria-label={`Open ${title}`}
+          aria-label={t('common.openPanel', { title })}
           title={title}
         >
           <PanelLeftOpen size={17} strokeWidth={1.75} aria-hidden />
@@ -255,7 +257,7 @@ export function PageSidebarLayout({
               type="button"
               onClick={() => setDrawerOpen(false)}
               className="text-text-muted hover:text-text p-1 -ml-1"
-              aria-label={`Close ${title}`}
+              aria-label={t('common.closePanel', { title })}
             >
               <X size={15} strokeWidth={1.75} aria-hidden />
             </button>

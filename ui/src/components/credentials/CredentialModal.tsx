@@ -151,6 +151,7 @@ export function CredentialModal({ mode, cred, presets, initialPresetId, initialA
           ...(model.trim() ? { lastModel: model.trim() } : {}),
         })
       }
+      window.dispatchEvent(new CustomEvent('openalice:credentials-changed'))
       await onSaved()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed')

@@ -334,8 +334,8 @@ function ChatWorkspaceRow(props: ChatWorkspaceRowProps): ReactElement {
               props.onConfigure()
             }}
             className="w-5 h-5 rounded flex items-center justify-center text-text-muted hover:text-text hover:bg-bg-secondary"
-            title="Workspace settings"
-            aria-label="Workspace settings"
+            title={t('workspace.configure')}
+            aria-label={t('workspace.configure')}
           >
             <SettingsIcon size={12} strokeWidth={2} />
           </button>

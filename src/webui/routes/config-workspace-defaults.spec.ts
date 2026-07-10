@@ -129,7 +129,7 @@ describe('POST /credentials', () => {
 describe('POST /credentials/test', () => {
   const mockBody = {
     wireShape: 'openai-chat',
-    baseUrl: 'https://onboarding.openalice.test/openai-chat',
+    baseUrl: 'http://127.0.0.1:0/v1',
     apiKey: 'oa_test_ok',
     model: 'openalice-onboarding-test',
   }
