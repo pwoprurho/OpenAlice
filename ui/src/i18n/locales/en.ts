@@ -170,7 +170,7 @@ export const en = {
   },
   chat: {
     newChat: 'New chat',
-    newSession: 'New session in this chat',
+    newSession: 'New conversation in this workspace',
     newWorkspace: 'New workspace',
     moreOptions: 'More options',
     today: 'Today',
@@ -192,6 +192,8 @@ export const en = {
     clearTarget: 'New chat instead',
     placeholder: 'Ask Alice…',
     workspaceType: 'Chat',
+    selectWorkspace: 'Choose Chat workspace',
+    newWorkspaceTarget: 'New Chat workspace',
     defaultAgent: 'Default',
     selectAgent: 'Select agent',
     agentNotInstalled: 'not installed',
@@ -623,7 +625,7 @@ export const en = {
   },
   createWorkspace: {
     dialogTitle: 'New workspace',
-    dialogSubtitle: 'Create a fresh harness instance — a managed, persistent agent session.',
+    dialogSubtitle: 'Create a durable workspace with its own files, issues, and agent context.',
     templateLabel: 'Template',
     communitySuffix: ' — community',
     tagLabel: 'Tag',

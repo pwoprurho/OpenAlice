@@ -95,6 +95,19 @@ and git repository plus PTY sessions, scrollback, issues, schedules, and agent
 configuration. The launcher supplies reusable infrastructure; the work itself
 lives in templates, skills, files, and satellite repositories.
 
+Chat uses that boundary deliberately:
+
+- **New conversation** creates a Session inside the recent Chat Workspace.
+- **New Workspace** explicitly creates a new durable context container.
+- The global Ask Alice composer stores `quickChat.recentChatWorkspaceId` in
+  `data/preferences.json`. A missing or stale pointer falls back to the most
+  recently active Chat Workspace; only a user with no Chat Workspace gets a
+  new stable starter workspace.
+
+Do not reintroduce date-based automatic Chat Workspaces. A date is not a
+context boundary, and new daily repositories strand files, issues, git history,
+and agent configuration in yesterday's Workspace.
+
 Load-bearing paths:
 
 - `src/workspaces/service.ts` — Workspace lifecycle and composition.

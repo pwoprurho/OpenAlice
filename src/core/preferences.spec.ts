@@ -7,6 +7,7 @@ import {
   readPreferences,
   readQuickChatPreferences,
   rememberQuickChatCredential,
+  rememberRecentChatWorkspace,
 } from './preferences.js'
 
 const roots: string[] = []
@@ -26,11 +27,14 @@ describe('preferences', () => {
     const path = await preferenceFile()
     expect(await readPreferences(path)).toEqual({
       version: 1,
-      quickChat: { lastCredentialByAgent: {} },
+      quickChat: { lastCredentialByAgent: {}, recentChatWorkspaceId: null },
     })
 
     await writeFile(path, '{not-json', 'utf-8')
-    expect(await readQuickChatPreferences(path)).toEqual({ lastCredentialByAgent: {} })
+    expect(await readQuickChatPreferences(path)).toEqual({
+      lastCredentialByAgent: {},
+      recentChatWorkspaceId: null,
+    })
   })
 
   it('remembers independent credentials per agent without secret material', async () => {
@@ -40,6 +44,7 @@ describe('preferences', () => {
 
     expect(await readQuickChatPreferences(path)).toEqual({
       lastCredentialByAgent: { pi: 'minimax-1', opencode: 'glm-1' },
+      recentChatWorkspaceId: null,
     })
     const raw = await readFile(path, 'utf-8')
     expect(raw).not.toContain('apiKey')
@@ -56,6 +61,24 @@ describe('preferences', () => {
 
     expect(await readQuickChatPreferences(path)).toEqual({
       lastCredentialByAgent: { opencode: 'glm-1' },
+      recentChatWorkspaceId: null,
+    })
+  })
+
+  it('remembers a recent chat workspace without disturbing runtime credentials', async () => {
+    const path = await preferenceFile()
+    await rememberQuickChatCredential('pi', 'meituan-1', path)
+    await rememberRecentChatWorkspace('chat-calm-river', path)
+
+    expect(await readQuickChatPreferences(path)).toEqual({
+      lastCredentialByAgent: { pi: 'meituan-1' },
+      recentChatWorkspaceId: 'chat-calm-river',
+    })
+
+    await rememberRecentChatWorkspace(null, path)
+    expect(await readQuickChatPreferences(path)).toEqual({
+      lastCredentialByAgent: { pi: 'meituan-1' },
+      recentChatWorkspaceId: null,
     })
   })
 })

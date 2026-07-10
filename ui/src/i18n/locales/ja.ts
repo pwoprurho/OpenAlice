@@ -159,7 +159,7 @@ export const ja: Resources = {
   },
   chat: {
     newChat: '新しいチャット',
-    newSession: 'このチャットで新規セッション',
+    newSession: 'このワークスペースで新しい会話',
     newWorkspace: '新しいワークスペース',
     moreOptions: 'その他のオプション',
     today: '今日',
@@ -181,6 +181,8 @@ export const ja: Resources = {
     clearTarget: '通常の新規チャットに切替',
     placeholder: 'Alice に質問…',
     workspaceType: 'チャット',
+    selectWorkspace: 'チャットワークスペースを選択',
+    newWorkspaceTarget: '新しいチャットワークスペース',
     defaultAgent: 'デフォルト',
     selectAgent: 'エージェントを選択',
     agentNotInstalled: '未インストール',
@@ -610,7 +612,7 @@ export const ja: Resources = {
   },
   createWorkspace: {
     dialogTitle: '新規ワークスペース',
-    dialogSubtitle: '新しい Harness インスタンスを作成 — 管理された永続的なエージェントセッション。',
+    dialogSubtitle: '独自のファイル、Issue、エージェント文脈を持つ永続ワークスペースを作成します。',
     templateLabel: 'テンプレート',
     communitySuffix: '（コミュニティ）',
     tagLabel: 'Tag',

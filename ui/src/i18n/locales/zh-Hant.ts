@@ -167,7 +167,7 @@ export const zhHant: Resources = {
   },
   chat: {
     newChat: '新對話',
-    newSession: '在此對話中新建工作階段',
+    newSession: '在此工作區新增對話',
     newWorkspace: '新增工作區',
     moreOptions: '更多選項',
     today: '今天',
@@ -184,11 +184,13 @@ export const zhHant: Resources = {
   chatLanding: {
     heading: '今天想研究什麼？',
     subheading: '讓 Alice 幫你研究、分析或交易——行情資料與工具都已就緒。',
-    targetHeading: '在此 workspace 中新建工作階段',
+    targetHeading: '在此工作區新增對話',
     targetSub: '這段對話將在 {{tag}} 內建立——選個執行階段直接送出。',
     clearTarget: '改為新對話',
     placeholder: '問 Alice…',
     workspaceType: '對話',
+    selectWorkspace: '選擇對話工作區',
+    newWorkspaceTarget: '新的對話工作區',
     defaultAgent: '預設',
     selectAgent: '選擇智慧代理',
     agentNotInstalled: '未安裝',
@@ -618,7 +620,7 @@ export const zhHant: Resources = {
   },
   createWorkspace: {
     dialogTitle: '新建工作區',
-    dialogSubtitle: '建立一個全新的 Harness 實例——受管理的持久 agent 會話。',
+    dialogSubtitle: '建立一個擁有獨立檔案、Issue 與智慧代理上下文的持久工作區。',
     templateLabel: '模板',
     communitySuffix: '（社群）',
     tagLabel: 'Tag',

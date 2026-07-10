@@ -30,7 +30,9 @@ import {
   type AgentCredentialReadiness,
   type AgentRuntimeReadinessSnapshot,
   type SavedCredential,
+  type Workspace,
 } from '../components/workspace/api'
+import { workspaceDisplayTitle } from '../components/workspace/display'
 import { useWorkspace } from '../tabs/store'
 import { configApi, type WorkspaceCredentialDefault } from '../api/config'
 import { preferencesApi } from '../api/preferences'
@@ -40,13 +42,32 @@ import { preferencesApi } from '../api/preferences'
  *  LOGINLESS_AGENTS; only these surface the credential picker. */
 const LOGINLESS_AGENTS = new Set(['opencode', 'pi'])
 
-/** Today's chat workspace tag — mirrors backend `todayChatTag` / `defaultTagFor`
- *  (`chat-<month><day>`, en-US short month) so the composer can find the
- *  workspace a send will reuse and detect its current credential. */
-function todayChatTag(): string {
-  const now = new Date()
-  const month = now.toLocaleString('en-US', { month: 'short' }).toLowerCase()
-  return `chat-${month}${now.getDate()}`
+function workspaceActivityMs(workspace: Pick<Workspace, 'createdAt' | 'sessions'>): number {
+  const sessionActivity = workspace.sessions
+    .map((session) => Date.parse(session.lastActiveAt))
+    .filter(Number.isFinite)
+  if (sessionActivity.length > 0) return Math.max(...sessionActivity)
+  const created = Date.parse(workspace.createdAt)
+  return Number.isFinite(created) ? created : 0
+}
+
+/** Resolve the visible global-composer target. Explicit selection wins, then
+ *  the persisted recent Chat workspace, then latest activity for upgrades. */
+export function resolveChatWorkspaceTarget(
+  workspaces: readonly Workspace[],
+  explicitWorkspaceId: string | null,
+  recentWorkspaceId: string | null,
+): Workspace | null {
+  const chats = workspaces.filter((workspace) => workspace.template === 'chat')
+  const explicit = explicitWorkspaceId
+    ? chats.find((workspace) => workspace.id === explicitWorkspaceId)
+    : undefined
+  if (explicit) return explicit
+  const recent = recentWorkspaceId
+    ? chats.find((workspace) => workspace.id === recentWorkspaceId)
+    : undefined
+  if (recent) return recent
+  return [...chats].sort((a, b) => workspaceActivityMs(b) - workspaceActivityMs(a))[0] ?? null
 }
 
 /** Glyph per agent CLI, for the runtime picker (claude/codex/opencode/pi). */
@@ -123,16 +144,35 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
 
   // Targeted launch: the chat sidebar's per-workspace "+" routes here with a
   // targetWsId — "Ask Alice, but spawn the session in THIS workspace" rather
-  // than the default (today's chat workspace). Same composer; the send just
+  // than the recent Chat workspace. Same composer; the send just
   // carries the target.
   const targetWsId = spec.params.targetWsId
   const targetWs = targetWsId ? workspaces.find((w) => w.id === targetWsId) : undefined
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null)
+  const [recentChatWorkspaceId, setRecentChatWorkspaceId] = useState<string | null>(null)
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false)
+  const workspaceBoxRef = useRef<HTMLDivElement>(null)
+  const selectedChatWorkspace = useMemo(
+    () => resolveChatWorkspaceTarget(
+      workspaces,
+      targetWsId ?? selectedWorkspaceId,
+      recentChatWorkspaceId,
+    ),
+    [workspaces, targetWsId, selectedWorkspaceId, recentChatWorkspaceId],
+  )
+  const workspaceTarget = targetWs ?? selectedChatWorkspace
+  const chatWorkspaceOptions = useMemo(
+    () => workspaces
+      .filter((workspace) => workspace.template === 'chat')
+      .sort((a, b) => workspaceActivityMs(b) - workspaceActivityMs(a)),
+    [workspaces],
+  )
 
   // The selectable agent runtimes = the agent CLIs (the bare shell has no agent
   // loop, so it can't be seeded with a first message).
   const cliAgents = agents.filter((a) => a.kind !== 'utility')
-  const targetCliAgents = targetWs
-    ? cliAgents.filter((a) => targetWs.agents.includes(a.id))
+  const targetCliAgents = workspaceTarget
+    ? cliAgents.filter((a) => workspaceTarget.agents.includes(a.id))
     : cliAgents
 
   const [value, setValue] = useState('')
@@ -189,7 +229,7 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
   const [creds, setCreds] = useState<SavedCredential[] | null>(null)
   // The cred the user explicitly picked (null = use the default below).
   const [pickedCred, setPickedCred] = useState<string | null>(null)
-  // The cred today's chat workspace is already configured with, if it exists.
+  // The credential the visible target Workspace is configured with, if any.
   const [detectedCred, setDetectedCred] = useState<string | null>(null)
   const [agentReadiness, setAgentReadiness] = useState<AgentCredentialReadiness | null>(null)
   const [credentialWorkspaceResolved, setCredentialWorkspaceResolved] = useState(false)
@@ -200,12 +240,10 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
   const [credMenuOpen, setCredMenuOpen] = useState(false)
   const credBoxRef = useRef<HTMLDivElement>(null)
 
-  // Today's chat workspace (the one a send reuses), if already created.
-  const todaysChat = useMemo(
-    () => workspaces.find((w) => w.template === 'chat' && w.tag === todayChatTag()) ?? null,
-    [workspaces],
-  )
-  const credentialWorkspace = targetWs ?? todaysChat
+  // Credential state belongs to the Workspace the composer visibly targets.
+  // With no Chat workspace yet this remains null; the backend creates one
+  // stable starter workspace on the first successful send.
+  const credentialWorkspace = workspaceTarget
 
   // Preload the loginless credential set ONCE on mount — NOT gated on the
   // selected agent. Previously this fired only after the agents list resolved
@@ -224,12 +262,16 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
     }
     void Promise.all([
       listAgentCredentials('opencode').catch(() => []),
-      preferencesApi.getQuickChat().catch(() => ({ lastCredentialByAgent: {} })),
+      preferencesApi.getQuickChat().catch(() => ({
+        lastCredentialByAgent: {},
+        recentChatWorkspaceId: null,
+      })),
       configApi.getWorkspaceCredentialDefaults().catch(() => ({ defaults: {}, compatibleByAgent: {} })),
     ]).then(([list, preferences, defaults]) => {
       if (!live) return
       setCreds(list)
       setLastCredentialByAgent(preferences.lastCredentialByAgent)
+      setRecentChatWorkspaceId(preferences.recentChatWorkspaceId)
       setWorkspaceCredentialDefaults(defaults.defaults)
     })
     window.addEventListener('openalice:credentials-changed', refreshCredentials)
@@ -325,6 +367,7 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
     selectedRuntimeUsesGlobalConfig ||
     (creds !== null && credentialWorkspaceResolved)
   const canSend = value.trim().length > 0 && !launching && credentialSelectionReady
+  const effectiveTargetWorkspaceId = targetWsId ?? workspaceTarget?.id
 
   // Close the agent menu on an outside click.
   useEffect(() => {
@@ -337,6 +380,17 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [agentMenuOpen])
+
+  useEffect(() => {
+    if (!workspaceMenuOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (workspaceBoxRef.current && !workspaceBoxRef.current.contains(e.target as Node)) {
+        setWorkspaceMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [workspaceMenuOpen])
 
   const submit = async () => {
     const prompt = value.trim()
@@ -372,12 +426,13 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
         needsCred && !runtimeUsesGlobalConfig ? (effectiveCred ?? undefined) : undefined
       // On success this focuses the new session's terminal tab; the landing tab
       // stays open in the background, so clear it for next time.
-      await quickChat(
+      const workspaceId = await quickChat(
         prompt,
         effectiveAgent,
         credentialSlug,
-        targetWsId,
+        effectiveTargetWorkspaceId,
       )
+      setRecentChatWorkspaceId(workspaceId)
       setValue('')
     } catch (err) {
       // Backend says no compatible credential — bounce to the provider settings.
@@ -467,11 +522,57 @@ export function ChatLandingPage({ spec }: { spec: { params: { targetWsId?: strin
           />
           <div className="flex flex-col gap-2 px-1 pt-1 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              {/* Workspace type (Chat). Static — quick-chat always targets the chat template. */}
-              <span className="inline-flex min-h-8 items-center gap-1.5 text-[11px] text-text-muted bg-bg-tertiary px-2.5 py-1 rounded-md">
-                <MessageSquare className="w-3 h-3" />
-                {t('chatLanding.workspaceType')}
-              </span>
+              {/* Workspace target — recent by default, explicit when selected.
+                  Visible but non-blocking: users can see where the new Session
+                  will live without answering a chooser on every send. */}
+              <div ref={workspaceBoxRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setWorkspaceMenuOpen((open) => !open)}
+                  disabled={chatWorkspaceOptions.length === 0 || targetWs !== undefined}
+                  aria-haspopup="menu"
+                  aria-expanded={workspaceMenuOpen}
+                  aria-label={t('chatLanding.selectWorkspace')}
+                  className="inline-flex min-h-8 max-w-[220px] items-center gap-1.5 rounded-md bg-bg-tertiary px-2.5 py-1 text-[11px] text-text-muted transition-colors hover:text-text disabled:cursor-default"
+                >
+                  <MessageSquare className="w-3 h-3 shrink-0" />
+                  <span className="truncate">
+                    {workspaceTarget
+                      ? workspaceDisplayTitle(workspaceTarget)
+                      : t('chatLanding.newWorkspaceTarget')}
+                  </span>
+                  {chatWorkspaceOptions.length > 0 && targetWs === undefined && (
+                    <ChevronDown className="w-3 h-3 shrink-0 opacity-60" />
+                  )}
+                </button>
+                {workspaceMenuOpen && targetWs === undefined && chatWorkspaceOptions.length > 0 && (
+                  <div
+                    role="menu"
+                    className="absolute bottom-full left-0 z-10 mb-1 min-w-[220px] max-w-[320px] py-1 rounded-lg border border-border/70 bg-bg-secondary shadow-lg"
+                  >
+                    {chatWorkspaceOptions.map((workspace) => {
+                      const active = workspace.id === workspaceTarget?.id
+                      return (
+                        <button
+                          key={workspace.id}
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setSelectedWorkspaceId(workspace.id)
+                            setPickedCred(null)
+                            setWorkspaceMenuOpen(false)
+                          }}
+                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-bg-tertiary ${active ? 'text-accent' : 'text-text'}`}
+                        >
+                          <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">{workspaceDisplayTitle(workspace)}</span>
+                          {active && <Check className="w-3.5 h-3.5 shrink-0" />}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
 
               {/* Agent runtime picker — one of the installed CLIs. */}
               <div ref={agentBoxRef} className="relative">

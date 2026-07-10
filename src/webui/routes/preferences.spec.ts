@@ -2,31 +2,47 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createPreferencesRoutes } from './preferences.js'
 
+const unusedShellStatus = vi.fn(async () => ({ supported: false as const }))
+const unusedShellSave = vi.fn(async () => ({ supported: false as const }))
+const unusedRecentWorkspace = vi.fn(async () => ({
+  lastCredentialByAgent: {},
+  recentChatWorkspaceId: null,
+}))
+
 describe('preferences routes', () => {
   it('reads the non-sensitive quick-chat preference map', async () => {
-    const read = vi.fn(async () => ({ lastCredentialByAgent: { pi: 'minimax-1' } }))
+    const read = vi.fn(async () => ({
+      lastCredentialByAgent: { pi: 'minimax-1' },
+      recentChatWorkspaceId: 'chat-calm-river',
+    }))
     const app = createPreferencesRoutes({
       readQuickChatPreferences: read,
       rememberQuickChatCredential: vi.fn(),
-      getWorkspaceShellStatus: vi.fn(),
-      saveWorkspaceShellPreference: vi.fn(),
+      rememberRecentChatWorkspace: unusedRecentWorkspace,
+      getWorkspaceShellStatus: unusedShellStatus,
+      saveWorkspaceShellPreference: unusedShellSave,
     })
 
     const response = await app.request('/quick-chat')
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ lastCredentialByAgent: { pi: 'minimax-1' } })
+    expect(await response.json()).toEqual({
+      lastCredentialByAgent: { pi: 'minimax-1' },
+      recentChatWorkspaceId: 'chat-calm-river',
+    })
     expect(read).toHaveBeenCalledOnce()
   })
 
   it('persists a provider choice for a loginless runtime', async () => {
     const remember = vi.fn(async (agent: string, credentialSlug: string | null) => ({
       lastCredentialByAgent: { [agent]: credentialSlug! },
+      recentChatWorkspaceId: null,
     }))
     const app = createPreferencesRoutes({
       readQuickChatPreferences: vi.fn(),
       rememberQuickChatCredential: remember,
-      getWorkspaceShellStatus: vi.fn(),
-      saveWorkspaceShellPreference: vi.fn(),
+      rememberRecentChatWorkspace: unusedRecentWorkspace,
+      getWorkspaceShellStatus: unusedShellStatus,
+      saveWorkspaceShellPreference: unusedShellSave,
     })
 
     const response = await app.request('/quick-chat', {
@@ -43,8 +59,9 @@ describe('preferences routes', () => {
     const app = createPreferencesRoutes({
       readQuickChatPreferences: vi.fn(),
       rememberQuickChatCredential: remember,
-      getWorkspaceShellStatus: vi.fn(),
-      saveWorkspaceShellPreference: vi.fn(),
+      rememberRecentChatWorkspace: unusedRecentWorkspace,
+      getWorkspaceShellStatus: unusedShellStatus,
+      saveWorkspaceShellPreference: unusedShellSave,
     })
 
     for (const body of [
@@ -59,6 +76,31 @@ describe('preferences routes', () => {
       expect(response.status).toBe(400)
     }
     expect(remember).not.toHaveBeenCalled()
+  })
+
+  it('persists and clears the recent chat workspace id', async () => {
+    const remember = vi.fn(async (workspaceId: string | null) => ({
+      lastCredentialByAgent: {},
+      recentChatWorkspaceId: workspaceId,
+    }))
+    const app = createPreferencesRoutes({
+      readQuickChatPreferences: vi.fn(),
+      rememberQuickChatCredential: vi.fn(),
+      rememberRecentChatWorkspace: remember,
+      getWorkspaceShellStatus: unusedShellStatus,
+      saveWorkspaceShellPreference: unusedShellSave,
+    })
+
+    for (const workspaceId of ['chat-calm-river', null]) {
+      const response = await app.request('/quick-chat/recent-workspace', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId }),
+      })
+      expect(response.status).toBe(200)
+    }
+    expect(remember).toHaveBeenNthCalledWith(1, 'chat-calm-river')
+    expect(remember).toHaveBeenNthCalledWith(2, null)
   })
 
   it('reads and updates the Windows workspace shell preference', async () => {
@@ -82,6 +124,7 @@ describe('preferences routes', () => {
     const app = createPreferencesRoutes({
       readQuickChatPreferences: vi.fn(),
       rememberQuickChatCredential: vi.fn(),
+      rememberRecentChatWorkspace: unusedRecentWorkspace,
       getWorkspaceShellStatus: read,
       saveWorkspaceShellPreference: save,
     })
@@ -101,7 +144,8 @@ describe('preferences routes', () => {
     const app = createPreferencesRoutes({
       readQuickChatPreferences: vi.fn(),
       rememberQuickChatCredential: vi.fn(),
-      getWorkspaceShellStatus: vi.fn(),
+      rememberRecentChatWorkspace: unusedRecentWorkspace,
+      getWorkspaceShellStatus: unusedShellStatus,
       saveWorkspaceShellPreference: save,
     })
     const response = await app.request('/workspace-shell', {

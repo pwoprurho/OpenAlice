@@ -1,22 +1,18 @@
 /**
  * "Ask Alice" secondary sidebar — your chat history.
  *
- * Reads as a conversation list: a prominent "New chat" action on top (opens the
- * Ask Alice composer), then chat workspaces newest-first. Each workspace is a
- * day's bucket — daily ones (`chat-jun15`) are relabelled Today / Yesterday /
- * "Jun 14" so the list reads like chat history; user-named ones (`nvda-thesis`)
- * keep their tag. Sessions hang underneath as the day's individual
- * conversations, resumable on click.
+ * Makes the two lifecycle actions explicit: "New chat" creates a Session inside
+ * the recent Chat Workspace; "New workspace" creates a new durable context
+ * container. Workspaces keep their actual names and Sessions hang underneath.
  *
  * Named-workspace creation (a custom tag) lives in the Workspaces activity —
  * this surface is for chatting, not workspace management.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useMemo, useState, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, FolderPlus, Plus, Settings as SettingsIcon, X } from 'lucide-react'
 
-import { getIntlLocale } from '../../lib/intl'
 import { useWorkspaces } from '../../contexts/workspaces-context'
 import { Skeleton } from '../StateViews'
 import { useWorkspace } from '../../tabs/store'
@@ -26,23 +22,16 @@ import { deleteWorkspace, type SessionRecord, type Workspace } from './api'
 import { CreateWorkspaceDialog } from './CreateWorkspaceDialog'
 import { SessionRow } from './Sidebar'
 import { workspaceDisplayTitle } from './display'
+import { preferencesApi } from '../../api/preferences'
 
 const CHAT_TEMPLATE = 'chat'
 
-/** Auto-generated daily tag shape (`chat-jun15`) — these get a friendly date label. */
-const DAILY_TAG_RE = /^chat-[a-z]{3}\d{1,2}$/
-
-/** Friendly label for a chat workspace: Today / Yesterday / "Jun 14" for daily
- *  buckets, the raw tag for user-named workspaces. */
-function chatLabel(w: Workspace, todayLabel: string, yesterdayLabel: string): string {
-  if (!DAILY_TAG_RE.test(w.tag)) return w.tag
-  const created = new Date(w.createdAt)
-  if (Number.isNaN(created.getTime())) return w.tag
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-  const diffDays = Math.round((startOfDay(new Date()) - startOfDay(created)) / 86_400_000)
-  if (diffDays <= 0) return todayLabel
-  if (diffDays === 1) return yesterdayLabel
-  return created.toLocaleDateString(getIntlLocale(), { month: 'short', day: 'numeric' })
+function nextChatWorkspaceTag(workspaces: readonly Workspace[]): string {
+  const tags = new Set(workspaces.map((workspace) => workspace.tag))
+  if (!tags.has(CHAT_TEMPLATE)) return CHAT_TEMPLATE
+  let suffix = 2
+  while (tags.has(`${CHAT_TEMPLATE}-${suffix}`)) suffix += 1
+  return `${CHAT_TEMPLATE}-${suffix}`
 }
 
 export function ChatWorkspaceSection(): ReactElement | null {
@@ -65,18 +54,10 @@ export function ChatWorkspaceSection(): ReactElement | null {
   const chatTemplate = ctx.templates.find((tpl) => tpl.name === CHAT_TEMPLATE)
   const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null)
   const [showCreate, setShowCreate] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
 
-  // Close the "more" menu on an outside click.
-  useEffect(() => {
-    if (!menuOpen) return
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [menuOpen])
+  const rememberChatWorkspace = (workspaceId: string): void => {
+    void preferencesApi.rememberRecentChatWorkspace(workspaceId).catch(() => undefined)
+  }
 
   const handleConfirmDelete = async (): Promise<void> => {
     if (!pendingDelete) return
@@ -94,59 +75,28 @@ export function ChatWorkspaceSection(): ReactElement | null {
   // known-loaded AND there genuinely is no chat template (broken deployment).
   if (ctx.templatesLoaded && !chatTemplate) return null
 
-  const todayLabel = t('chat.today')
-  const yesterdayLabel = t('chat.yesterday')
-
   return (
     <>
-      {/* Primary action: New chat (the Ask Alice composer). The split caret
-          keeps the power-user "New workspace" (named, custom tag) reachable. */}
+      {/* A conversation is a Session inside the recent Chat Workspace; creating
+          a new Workspace is a separate, explicit context-boundary action. */}
       <div className="px-2 pt-2 pb-1.5">
-        <div className="flex items-stretch gap-1">
+        <div className="grid grid-cols-2 gap-1">
           <button
             type="button"
             onClick={() => openOrFocus({ kind: 'chat-landing', params: {} })}
-            className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 rounded-lg border border-border/60 bg-bg-tertiary/30 text-[13px] font-medium text-text-muted transition-colors hover:text-text hover:border-accent/50 hover:bg-bg-tertiary/60"
+            className="min-w-0 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border border-border/60 bg-bg-tertiary/30 text-[12px] font-medium text-text-muted transition-colors hover:text-text hover:border-accent/50 hover:bg-bg-tertiary/60"
           >
-            <Plus size={15} strokeWidth={2.25} className="shrink-0" />
+            <Plus size={14} strokeWidth={2.25} className="shrink-0" />
             <span className="truncate">{t('chat.newChat')}</span>
           </button>
-          <div ref={menuRef} className="relative shrink-0">
-            <button
-              type="button"
-              onClick={() => setMenuOpen((o) => !o)}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              aria-label={t('chat.moreOptions')}
-              title={t('chat.moreOptions')}
-              className={`h-full px-2 flex items-center justify-center rounded-lg border transition-colors ${
-                menuOpen
-                  ? 'border-accent/50 bg-bg-tertiary/60 text-text'
-                  : 'border-border/60 bg-bg-tertiary/30 text-text-muted hover:text-text hover:border-accent/50 hover:bg-bg-tertiary/60'
-              }`}
-            >
-              <ChevronDown size={14} strokeWidth={2.25} />
-            </button>
-            {menuOpen && (
-              <div
-                role="menu"
-                className="absolute right-0 top-full mt-1 min-w-[170px] py-1 bg-bg-secondary border border-border/70 rounded-lg shadow-lg z-10"
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    setShowCreate(true)
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left text-text transition-colors hover:bg-bg-tertiary"
-                >
-                  <FolderPlus size={14} strokeWidth={2} className="shrink-0 text-text-muted" />
-                  <span>{t('chat.newWorkspace')}</span>
-                </button>
-              </div>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            className="min-w-0 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border border-border/60 bg-bg-tertiary/15 text-[12px] font-medium text-text-muted transition-colors hover:text-text hover:border-accent/50 hover:bg-bg-tertiary/50"
+          >
+            <FolderPlus size={14} strokeWidth={2} className="shrink-0" />
+            <span className="truncate">{t('chat.newWorkspace')}</span>
+          </button>
         </div>
       </div>
 
@@ -154,9 +104,11 @@ export function ChatWorkspaceSection(): ReactElement | null {
         <CreateWorkspaceDialog
           templates={ctx.templates}
           presetTemplate={CHAT_TEMPLATE}
+          initialTag={nextChatWorkspaceTag(ctx.workspaces)}
           onCreated={(workspace) => {
             ctx.refresh()
-            openOrFocus({ kind: 'workspace', params: { wsId: workspace.id, source: 'chat' } })
+            rememberChatWorkspace(workspace.id)
+            openOrFocus({ kind: 'chat-landing', params: { targetWsId: workspace.id } })
           }}
           onClose={() => setShowCreate(false)}
         />
@@ -190,9 +142,10 @@ export function ChatWorkspaceSection(): ReactElement | null {
           <ChatWorkspaceRow
             key={w.id}
             workspace={w}
-            label={chatLabel(w, todayLabel, yesterdayLabel)}
+            label={workspaceDisplayTitle(w)}
             selection={selection}
             onOpen={() => {
+              rememberChatWorkspace(w.id)
               const recent = mostRecentSession(w.sessions)
               openOrFocus({
                 kind: 'workspace',
@@ -201,11 +154,15 @@ export function ChatWorkspaceSection(): ReactElement | null {
                   : { wsId: w.id, source: 'chat' },
               })
             }}
-            onOpenSession={(sid) =>
+            onOpenSession={(sid) => {
+              rememberChatWorkspace(w.id)
               openOrFocus({ kind: 'workspace', params: { wsId: w.id, sessionId: sid, source: 'chat' } })
-            }
+            }}
             onPauseSession={(sid) => void ctx.pauseSession(w.id, sid)}
-            onResumeSession={(sid) => void ctx.resumeSession(w.id, sid, 'chat')}
+            onResumeSession={(sid) => {
+              rememberChatWorkspace(w.id)
+              void ctx.resumeSession(w.id, sid, 'chat')
+            }}
             onDeleteSession={(sid) => ctx.requestDeleteSession(w.id, sid)}
             onConfigure={() => ctx.openAgentConfig(w.id)}
             onDelete={() => setPendingDelete(w)}

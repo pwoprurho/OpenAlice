@@ -158,10 +158,14 @@ export const workspacesHandlers = [
     }),
   ),
 
-  // Quick-chat launch — reuse the first demo chat workspace and hand back the
-  // scripted demo session (the Terminal short-circuits to DemoTerminalReplay).
-  http.post('/api/workspaces/quick-chat', () => {
-    const ws = demoChatWorkspace
+  // Quick-chat launch — honor an explicit Chat Workspace target and otherwise
+  // reuse the recent demo Chat workspace. The terminal is a scripted replay.
+  http.post('/api/workspaces/quick-chat', async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as { targetWsId?: unknown } | null
+    const explicit = typeof body?.targetWsId === 'string'
+      ? demoWorkspaces.find((workspace) => workspace.id === body.targetWsId)
+      : undefined
+    const ws = explicit ?? demoChatWorkspace
     return HttpResponse.json(
       {
         workspace: ws,

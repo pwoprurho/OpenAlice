@@ -25,7 +25,7 @@ export interface WorkspacesContextValue {
   spawn(wsId: string, opts?: SpawnOpts, source?: WorkspaceSource): Promise<void>
   setDefaultAgent(agent: string | null): Promise<void>
   setIssueDefaultAgent(agent: string | null): Promise<void>
-  quickChat(prompt: string, agent?: string, credentialSlug?: string, targetWsId?: string): Promise<void>
+  quickChat(prompt: string, agent?: string, credentialSlug?: string, targetWsId?: string): Promise<string>
   pauseSession(wsId: string, sessionId: string): Promise<void>
   resumeSession(wsId: string, sessionId: string, source?: WorkspaceSource): Promise<void>
   requestDeleteSession(wsId: string, sessionId: string): void

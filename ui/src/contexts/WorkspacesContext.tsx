@@ -185,7 +185,7 @@ export function WorkspacesProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const quickChat = useCallback(
-    async (prompt: string, agent?: string, credentialSlug?: string, targetWsId?: string): Promise<void> => {
+    async (prompt: string, agent?: string, credentialSlug?: string, targetWsId?: string): Promise<string> => {
       const { workspace, session } = await apiQuickChat(prompt, agent, credentialSlug, targetWsId, terminalTheme)
       const nowIso = new Date().toISOString()
       const newRecord: SessionRecord = {
@@ -223,6 +223,7 @@ export function WorkspacesProvider({ children }: { children: ReactNode }) {
         params: { wsId: workspace.id, sessionId: session.sessionId, source: 'chat' },
       })
       void refresh()
+      return workspace.id
     },
     [refresh, openOrFocus, terminalTheme],
   )

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveChatAgent, resolveChatCredential } from './ChatLandingPage'
-import type { AgentRuntimeReadinessSnapshot } from '../components/workspace/api'
+import { resolveChatAgent, resolveChatCredential, resolveChatWorkspaceTarget } from './ChatLandingPage'
+import type { AgentRuntimeReadinessSnapshot, Workspace } from '../components/workspace/api'
 
 const agents = [
   { id: 'claude', installed: true },
@@ -29,6 +29,59 @@ function readiness(readyAgent: string): AgentRuntimeReadinessSnapshot {
     checkedAt: '2026-07-10T00:00:00.000Z',
   }
 }
+
+function workspace(
+  id: string,
+  createdAt: string,
+  lastActiveAt?: string,
+  template = 'chat',
+): Workspace {
+  return {
+    id,
+    tag: id,
+    dir: `/tmp/${id}`,
+    createdAt,
+    template,
+    agents: ['pi'],
+    sessions: lastActiveAt
+      ? [{
+          id: `${id}-session`,
+          wsId: id,
+          agent: 'pi',
+          name: 'p1',
+          createdAt,
+          lastActiveAt,
+          state: 'paused',
+          agentSessionId: null,
+          pid: null,
+          startedAt: null,
+          title: null,
+        }]
+      : [],
+  }
+}
+
+describe('resolveChatWorkspaceTarget', () => {
+  const older = workspace('older', '2026-07-01T00:00:00Z', '2026-07-09T00:00:00Z')
+  const active = workspace('active', '2026-07-02T00:00:00Z', '2026-07-10T00:00:00Z')
+  const autoQuant = workspace('auto-quant', '2026-07-11T00:00:00Z', undefined, 'auto-quant')
+
+  it('uses an explicit Chat workspace ahead of the remembered target', () => {
+    expect(resolveChatWorkspaceTarget([older, active], older.id, active.id)?.id).toBe(older.id)
+  })
+
+  it('uses the remembered Chat workspace when it is still valid', () => {
+    expect(resolveChatWorkspaceTarget([older, active], null, older.id)?.id).toBe(older.id)
+  })
+
+  it('falls back to the most recently active Chat workspace and ignores other templates', () => {
+    expect(resolveChatWorkspaceTarget([older, active, autoQuant], null, 'deleted')?.id).toBe(active.id)
+  })
+
+  it('returns null when the first Quick Chat must create a starter workspace', () => {
+    expect(resolveChatWorkspaceTarget([autoQuant], null, null)).toBeNull()
+  })
+})
 
 describe('resolveChatAgent', () => {
   it('keeps an explicit valid choice ahead of saved and detected defaults', () => {

@@ -38,6 +38,11 @@ import {
   getAgentCredentialReadiness,
 } from '../../workspaces/agent-credential-readiness.js';
 import { isTerminalThemeVariant, type TerminalThemeVariant } from '../../workspaces/terminal-theme.js';
+import {
+  readQuickChatPreferences,
+  rememberRecentChatWorkspace,
+  type QuickChatPreferences,
+} from '../../core/preferences.js';
 
 // The spawn body's `resume` value is an AGENT-side session id, whose shape is
 // adapter-native: uuid for claude/codex/pi, `ses_<base62>` for opencode. This
@@ -59,20 +64,15 @@ const resumeInFlight = new Map<string, Promise<unknown>>();
 /** The template quick-chat reuses-or-creates its workspace from. */
 const QUICK_CHAT_TEMPLATE = 'chat';
 
-const MONTH_ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'] as const;
-
-/**
- * Tag for TODAY's chat workspace — `chat-<mon><day>` (e.g. `chat-jun15`).
- * Quick-chat is one-workspace-per-DAY: today's conversations are sessions inside
- * today's workspace. The format mirrors the frontend's `defaultTagFor`
- * (`<template>-<month><day>`, en-US short month lowercased) so a quick-chat-
- * created daily workspace is byte-identical to one created from the form on the
- * same day — the two converge on the same workspace instead of duplicating.
- */
-function todayChatTag(): string {
-  const now = new Date();
-  return `${QUICK_CHAT_TEMPLATE}-${MONTH_ABBR[now.getMonth()]}${now.getDate()}`;
+interface QuickChatWorkspacePreferenceDeps {
+  readQuickChatPreferences(): Promise<QuickChatPreferences>;
+  rememberRecentChatWorkspace(workspaceId: string | null): Promise<QuickChatPreferences>;
 }
+
+const defaultQuickChatWorkspacePreferenceDeps: QuickChatWorkspacePreferenceDeps = {
+  readQuickChatPreferences: () => readQuickChatPreferences(),
+  rememberRecentChatWorkspace: (workspaceId) => rememberRecentChatWorkspace(workspaceId),
+};
 
 /**
  * Validate an optional quick-chat seed prompt (the first message a fresh
@@ -122,7 +122,10 @@ type SpawnSessionResult =
   | { readonly ok: true; readonly session: SpawnedSessionBody }
   | { readonly ok: false; readonly status: number; readonly body: { error: string; message?: string } };
 
-export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
+export function createWorkspaceRoutes(
+  svc: WorkspaceService,
+  quickChatPreferences: QuickChatWorkspacePreferenceDeps = defaultQuickChatWorkspacePreferenceDeps,
+): Hono {
   const app = new Hono();
 
   const resolveDefaultAgentId = async (meta: WorkspaceMeta): Promise<string | undefined> => {
@@ -262,42 +265,95 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
     }
   }
 
-  // TODAY's chat workspace, by its daily tag (`chat-jun15`). A workspace someone
-  // happened to tag `chat-jun15` with a non-chat template doesn't count — the
-  // daily bucket is a chat-template workspace.
-  const findTodaysChat = (): WorkspaceMeta | undefined => {
-    const tag = todayChatTag();
-    return svc.registry.list().find((w) => w.template === QUICK_CHAT_TEMPLATE && w.tag === tag);
+  const rememberRecentChat = async (meta: WorkspaceMeta): Promise<void> => {
+    if (meta.template !== QUICK_CHAT_TEMPLATE) return;
+    try {
+      await quickChatPreferences.rememberRecentChatWorkspace(meta.id);
+    } catch (err) {
+      launcherLogger.warn('quick_chat.preference_write_failed', { id: meta.id, err });
+    }
   };
 
-  // Serializes quick-chat's find-or-create so two concurrent FIRST-OF-DAY
-  // launches don't both bootstrap today's workspace — the loser's `registry.add`
-  // would throw on the duplicate tag and leak an orphaned bootstrap dir.
+  const workspaceActivityMs = async (meta: WorkspaceMeta): Promise<number> => {
+    await svc.sessionRegistry.ensureLoaded(meta.id);
+    const active = svc.sessionRegistry
+      .listFor(meta.id)
+      .map((session) => Date.parse(session.lastActiveAt))
+      .filter(Number.isFinite);
+    const created = Date.parse(meta.createdAt);
+    return active.length > 0
+      ? Math.max(...active)
+      : Number.isFinite(created) ? created : 0;
+  };
+
+  const mostRecentlyActiveChat = async (): Promise<WorkspaceMeta | undefined> => {
+    const chats = svc.registry.list().filter((w) => w.template === QUICK_CHAT_TEMPLATE);
+    if (chats.length <= 1) return chats[0];
+    const ranked = await Promise.all(chats.map(async (meta) => ({
+      meta,
+      activity: await workspaceActivityMs(meta),
+    })));
+    ranked.sort((a, b) => b.activity - a.activity);
+    return ranked[0]?.meta;
+  };
+
+  const starterChatTag = (): string => {
+    const tags = new Set(svc.registry.list().map((workspace) => workspace.tag));
+    if (!tags.has(QUICK_CHAT_TEMPLATE)) return QUICK_CHAT_TEMPLATE;
+    let suffix = 2;
+    while (tags.has(`${QUICK_CHAT_TEMPLATE}-${suffix}`)) suffix += 1;
+    return `${QUICK_CHAT_TEMPLATE}-${suffix}`;
+  };
+
+  // Serializes quick-chat's resolve-or-create path so concurrent first launches
+  // don't both bootstrap a starter workspace. The preference is a stable wsId;
+  // if it is absent/stale, reuse the most recently active Chat workspace before
+  // creating one. This keeps Workspace context durable across days.
   // In-process chain (quick-chat is low-frequency, single-process); the `.catch`
   // keeps a failed run from poisoning the gate forever.
   let chatWsGate: Promise<unknown> = Promise.resolve();
 
-  const findOrCreateChatWorkspace = async (): Promise<
+  const resolveOrCreateChatWorkspace = async (): Promise<
     { ok: true; meta: WorkspaceMeta } | { ok: false; status: number; body: { error: string; message?: string } }
   > => {
-    const existing = findTodaysChat();
-    if (existing) return { ok: true, meta: existing };
+    const preference = await quickChatPreferences.readQuickChatPreferences().catch((err) => {
+      launcherLogger.warn('quick_chat.preference_read_failed', { err });
+      return null;
+    });
+    const preferred = preference?.recentChatWorkspaceId
+      ? svc.registry.get(preference.recentChatWorkspaceId)
+      : undefined;
+    if (preferred?.template === QUICK_CHAT_TEMPLATE) {
+      return { ok: true, meta: preferred };
+    }
+
+    const existing = await mostRecentlyActiveChat();
+    if (existing) {
+      await rememberRecentChat(existing);
+      return { ok: true, meta: existing };
+    }
+
     let created: Awaited<ReturnType<typeof svc.creator.create>>;
     try {
-      created = await svc.creator.create(todayChatTag(), QUICK_CHAT_TEMPLATE);
+      created = await svc.creator.create(starterChatTag(), QUICK_CHAT_TEMPLATE);
     } catch (err) {
-      // e.g. a concurrent create committed today's tag first. Re-find — the
-      // winner's workspace now exists.
-      const after = findTodaysChat();
-      if (after) return { ok: true, meta: after };
+      // A concurrent creator may have committed a Chat workspace first.
+      const after = await mostRecentlyActiveChat();
+      if (after) {
+        await rememberRecentChat(after);
+        return { ok: true, meta: after };
+      }
       launcherLogger.error('quick_chat.create_threw', { err });
       return { ok: false, status: 500, body: { error: 'create_failed', message: (err as Error).message } };
     }
     if (!created.ok) {
-      // tag_in_use means today's workspace was created concurrently — re-find it.
+      // tag_in_use can mean another first launch won the create race — re-find it.
       if (created.code === 'tag_in_use') {
-        const after = findTodaysChat();
-        if (after) return { ok: true, meta: after };
+        const after = await mostRecentlyActiveChat();
+        if (after) {
+          await rememberRecentChat(after);
+          return { ok: true, meta: after };
+        }
       }
       const status =
         created.code === 'tag_in_use' ? 409
@@ -308,6 +364,7 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
       launcherLogger.error('quick_chat.create_failed', { code: created.code, message: created.message });
       return { ok: false, status, body: { error: created.code, message: created.message } };
     }
+    await rememberRecentChat(created.workspace);
     return { ok: true, meta: created.workspace };
   };
 
@@ -663,10 +720,10 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
   });
 
   // Quick-chat launch — the "type a message → you're in" front door, decoupled
-  // from the multi-step create-workspace UI. Enters TODAY's chat workspace
-  // (creating it on the day's first use), then spawns a fresh interactive session
-  // seeded with the user's first message. One POST returns both the workspace
-  // and the live session, so the client can drop the user straight into the TUI.
+  // from the explicit create-workspace UI. Enters the recent Chat workspace (or
+  // creates one stable starter workspace when none exists), then spawns a fresh
+  // interactive session seeded with the user's first message. One POST returns
+  // both workspace and live session so the client can enter the TUI directly.
   // Body: { prompt: string; agent?: string }
   app.post('/quick-chat', async (c) => {
     let prompt: string;
@@ -698,21 +755,19 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
       return c.json({ error: 'bad_request', message: (err as Error).message }, 400);
     }
 
-    // One chat workspace per DAY: enter today's if it exists, else create it.
-    // Each send is a new SESSION inside today's workspace (conversations =
-    // sessions, resumable from the chat sidebar) — closer to a traditional
-    // chatbot while staying aligned with the Workspace/Session model. Create is
-    // heavy (bash + git + skill injection) but happens at most once per day. The
-    // find-or-create runs through `chatWsGate` so concurrent first-of-day
-    // launches don't double-bootstrap.
+    // Each send is a new Session in a durable Chat Workspace. The explicit
+    // target wins; otherwise the resolver uses recentChatWorkspaceId, falls back
+    // to the most recently active Chat workspace, and creates only when none
+    // exists. The gate prevents concurrent first launches from double-bootstrap.
     let meta: WorkspaceMeta;
     if (targetWsId) {
       // Targeted: spawn a new session into the given existing workspace.
       const found = svc.registry.list().find((w) => w.id === targetWsId);
       if (!found) return c.json({ error: 'workspace_not_found' }, 404);
       meta = found;
+      await rememberRecentChat(meta);
     } else {
-      const run = chatWsGate.catch(() => undefined).then(() => findOrCreateChatWorkspace());
+      const run = chatWsGate.catch(() => undefined).then(() => resolveOrCreateChatWorkspace());
       chatWsGate = run;
       const target = await run;
       if (!target.ok) return c.json(target.body, target.status as 400 | 409 | 500);

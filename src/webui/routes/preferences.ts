@@ -4,6 +4,7 @@ import { z } from 'zod'
 import {
   readQuickChatPreferences,
   rememberQuickChatCredential,
+  rememberRecentChatWorkspace,
   type QuickChatPreferences,
 } from '../../core/preferences.js'
 import {
@@ -20,6 +21,10 @@ const quickChatPreferenceUpdateSchema = z.object({
   credentialSlug: z.string().trim().min(1).max(128).nullable(),
 })
 
+const recentChatWorkspaceUpdateSchema = z.object({
+  workspaceId: z.string().trim().min(1).max(128).nullable(),
+})
+
 const workspaceShellPreferenceUpdateSchema = z.discriminatedUnion('mode', [
   z.object({ mode: z.literal('auto'), customPath: z.null().optional() }),
   z.object({ mode: z.literal('custom'), customPath: z.string().trim().min(1).max(1024) }),
@@ -28,6 +33,7 @@ const workspaceShellPreferenceUpdateSchema = z.discriminatedUnion('mode', [
 interface PreferenceRouteDeps {
   readQuickChatPreferences(): Promise<QuickChatPreferences>
   rememberQuickChatCredential(agent: string, credentialSlug: string | null): Promise<QuickChatPreferences>
+  rememberRecentChatWorkspace(workspaceId: string | null): Promise<QuickChatPreferences>
   getWorkspaceShellStatus(): Promise<WindowsWorkspaceShellStatus>
   saveWorkspaceShellPreference(input: {
     mode: 'auto' | 'custom'
@@ -39,6 +45,7 @@ const defaultDeps: PreferenceRouteDeps = {
   readQuickChatPreferences: () => readQuickChatPreferences(),
   rememberQuickChatCredential: (agent, credentialSlug) =>
     rememberQuickChatCredential(agent, credentialSlug),
+  rememberRecentChatWorkspace: (workspaceId) => rememberRecentChatWorkspace(workspaceId),
   getWorkspaceShellStatus: () => getWindowsWorkspaceShellStatus(),
   saveWorkspaceShellPreference: (input) => saveWindowsWorkspaceShellPreference(input),
 }
@@ -64,6 +71,18 @@ export function createPreferencesRoutes(deps: PreferenceRouteDeps = defaultDeps)
         parsed.data.agent,
         parsed.data.credentialSlug,
       ))
+    } catch (error) {
+      return c.json({ error: 'preferences_write_failed', message: String(error) }, 500)
+    }
+  })
+
+  app.put('/quick-chat/recent-workspace', async (c) => {
+    const parsed = recentChatWorkspaceUpdateSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) {
+      return c.json({ error: 'invalid_quick_chat_workspace_preference' }, 400)
+    }
+    try {
+      return c.json(await deps.rememberRecentChatWorkspace(parsed.data.workspaceId))
     } catch (error) {
       return c.json({ error: 'preferences_write_failed', message: String(error) }, 500)
     }

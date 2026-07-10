@@ -2,6 +2,7 @@ import { fetchJson, headers } from './client'
 
 export interface QuickChatPreferences {
   lastCredentialByAgent: Record<string, string>
+  recentChatWorkspaceId: string | null
 }
 
 export type WorkspaceShellStatus =
@@ -29,6 +30,14 @@ export const preferencesApi = {
       method: 'PUT',
       headers,
       body: JSON.stringify({ agent, credentialSlug }),
+    })
+  },
+
+  rememberRecentChatWorkspace(workspaceId: string | null): Promise<QuickChatPreferences> {
+    return fetchJson('/api/preferences/quick-chat/recent-workspace', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ workspaceId }),
     })
   },
 
