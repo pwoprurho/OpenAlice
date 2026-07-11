@@ -135,7 +135,9 @@ export async function runRendererWorkspaceAcceptanceSmoke(
           // Capture a failing command's stderr and report it through stdout.
           // Electron's Windows GUI binary can otherwise make a child stderr
           // failure look like a silent PTY timeout.
-          'oa_step() { oa_label="$1"; shift; oa_output=$("$@" 2>&1); oa_status=$?; if test "$oa_status" -ne 0; then printf "__OPENALICE_WORKSPACE_CLI_STEP_FAILED__ %s %s\\\\n%s\\\\n" "$oa_label" "$oa_status" "$oa_output"; return "$oa_status"; fi; }',
+          // Split the failure sentinel too, so terminal command echo cannot
+          // reject the contract before the helper has executed.
+          'oa_step() { oa_label="$1"; shift; oa_output=$("$@" 2>&1); oa_status=$?; if test "$oa_status" -ne 0; then printf "__OPENALICE_WORKSPACE_%s_FAILED__ %s %s\\\\n%s\\\\n" "CLI_STEP" "$oa_label" "$oa_status" "$oa_output"; return "$oa_status"; fi; }',
           'oa_step alice-manifest alice --help',
           'oa_step alice-workspace-manifest alice-workspace --help',
           'oa_step traderhub-manifest traderhub --help',
