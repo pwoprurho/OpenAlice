@@ -53,6 +53,7 @@ async function main() {
       ? toolUrl.replace(/\/+$/, '')
       : legacyMcpUrl.replace(/\/+$/, '').replace(/\/mcp$/, '/cli')
   const base = gateway + '/' + wsId + '/' + exportKey
+  debug('runtime', { bin: BIN, wsId, toolSocket, toolUrl, base })
 
   const wantsHelp = argv.includes('--help') || argv.includes('-h')
   const positionals = argv.filter((a) => !a.startsWith('-'))
@@ -156,6 +157,7 @@ async function fetchJson(url, opts) {
 
 async function fetchSocketJson(socketPath, path, opts) {
   const http = await import('node:http')
+  debug('socket.request', { socketPath, path, method: opts && opts.method ? opts.method : 'GET' })
   return new Promise((resolve) => {
     const req = http.request({
       socketPath,
@@ -169,10 +171,14 @@ async function fetchSocketJson(socketPath, path, opts) {
       res.on('end', () => {
         let body = null
         try { body = raw ? JSON.parse(raw) : null } catch { body = raw }
+        debug('socket.response', { path, status: res.statusCode, bytes: raw.length })
         resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, body })
       })
     })
-    req.on('error', (e) => fail(`cannot reach OpenAlice at ${socketPath}${path} — is the backend running? (${e && e.message})`))
+    req.on('error', (e) => {
+      debug('socket.error', { socketPath, path, code: e && e.code, message: e && e.message })
+      fail(`cannot reach OpenAlice at ${socketPath}${path} — is the backend running? (${e && e.message})`)
+    })
     if (opts && opts.body) req.write(opts.body)
     req.end()
   })
@@ -276,6 +282,10 @@ function firstLine(s) {
 }
 function out(s) {
   process.stdout.write(s + '\n')
+}
+function debug(label, value) {
+  if (process.env.OPENALICE_CLI_DEBUG !== '1') return
+  out('[openalice-cli-debug] ' + label + ' ' + JSON.stringify(value))
 }
 function fail(msg) {
   process.stderr.write(BIN + ': ' + msg + '\n')

@@ -46,6 +46,11 @@ describe('CLI launchers and payload', () => {
     const src = canonical.toString('utf8')
     expect(src).toContain('#!/bin/sh')
     expect(src).toContain('OPENALICE_MANAGED_PI_NODE_PATH')
+    expect(src).toContain('cygpath -u "$launcher"')
+    expect(src).toContain('cygpath -u "$managed_node"')
+    expect(src).toContain('cygpath -w "$payload"')
+    expect(src).toContain('MSYS2_ENV_CONV_EXCL')
+    expect(src).toContain('OPENALICE_TOOL_URL;OPENALICE_TOOL_SOCKET')
     expect(src).toContain('openalice-cli.cjs')
     expect(src).not.toContain('/usr/bin/env node')
   })
@@ -90,7 +95,10 @@ describe('CLI launchers and payload', () => {
           AQ_WS_ID: 'ws1',
           OPENALICE_TOOL_SOCKET: socketPath,
           OPENALICE_TOOL_URL: '/cli',
+          OPENALICE_CLI_DEBUG: '1',
       })
+      expect(stdout).toContain('[openalice-cli-debug] runtime')
+      expect(stdout).toContain('[openalice-cli-debug] socket.response')
       expect(stdout).toContain('OpenAlice CLI')
       expect(stdout).toContain('market')
       expect(seen).toEqual(['/cli/ws1/data/manifest'])

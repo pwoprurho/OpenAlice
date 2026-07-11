@@ -18,9 +18,17 @@ on:
       - "scripts/guardian/**"
       - "scripts/prepare-desktop-release-assets.mjs"
       - "scripts/smoke-packaged-toolchain.mjs"
+      - "scripts/workspace-acceptance-ai-mock.mjs"
       - "scripts/vendor-managed-runtime.mjs"
-      - "src/core/paths.ts"
-      - "src/core/runtime-profile.ts"
+      - "default/**"
+      - "src/ai-providers/**"
+      - "src/core/**"
+      - "src/server/cli.ts"
+      - "src/server/cli-commands.ts"
+      - "src/tool/**"
+      - "src/webui/plugin.ts"
+      - "src/webui/routes/issues.ts"
+      - "src/webui/routes/workspaces.ts"
       - "src/workspaces/**"
       - "services/uta/**"
   push:
@@ -41,9 +49,17 @@ on:
       - "scripts/guardian/**"
       - "scripts/prepare-desktop-release-assets.mjs"
       - "scripts/smoke-packaged-toolchain.mjs"
+      - "scripts/workspace-acceptance-ai-mock.mjs"
       - "scripts/vendor-managed-runtime.mjs"
-      - "src/core/paths.ts"
-      - "src/core/runtime-profile.ts"
+      - "default/**"
+      - "src/ai-providers/**"
+      - "src/core/**"
+      - "src/server/cli.ts"
+      - "src/server/cli-commands.ts"
+      - "src/tool/**"
+      - "src/webui/plugin.ts"
+      - "src/webui/routes/issues.ts"
+      - "src/webui/routes/workspaces.ts"
       - "src/workspaces/**"
       - "services/uta/**"
 
@@ -113,3 +129,17 @@ jobs:
 
       - name: Smoke packaged managed toolchain
         run: pnpm electron:smoke-toolchain
+
+      - name: Prove packaged Workspace CLI acceptance
+        run: pnpm electron:smoke:workspace --skip-build --skip-pack
+        timeout-minutes: 5
+        env:
+          OPENALICE_SMOKE_RECEIPT_PATH: ${{ runner.temp }}/openalice-workspace-acceptance.json
+
+      - name: Upload Workspace acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-acceptance-${{ matrix.os }}
+          path: ${{ runner.temp }}/openalice-workspace-acceptance.json
+          if-no-files-found: warn

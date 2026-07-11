@@ -22,6 +22,7 @@
 
 import { app, BrowserWindow, dialog, Menu, protocol, session } from 'electron'
 import { runRendererTradingModeSmoke } from './trading-mode-smoke.js'
+import { runRendererWorkspaceAcceptanceSmoke } from './workspace-acceptance-smoke.js'
 import { planUTATransition } from './uta-lifecycle.js'
 import {
   acquireGuardianRuntime,
@@ -34,7 +35,7 @@ import {
 } from '@traderalice/guardian-runtime'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
-import { mkdir, readFile, watch } from 'node:fs/promises'
+import { mkdir, readFile, watch, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
@@ -54,6 +55,7 @@ let restartingUTA = false
 let pendingUTAMode: GuardianTradingModePlan | null = null
 let rendererOnboardingSmokeStarted = false
 let rendererTradingModeSmokeStarted = false
+let rendererWorkspaceAcceptanceSmokeStarted = false
 let guardianRuntimeLock: RuntimeProcessLock | null = null
 
 const DEFAULT_WEB_PORT_START = 47331
@@ -871,6 +873,42 @@ app.whenReady().then(async () => {
                 shutdown()
               }
             })
+        }
+        if (
+          ready &&
+          process.env['OPENALICE_ELECTRON_SMOKE_WORKSPACE_ACCEPTANCE'] === '1' &&
+          !rendererWorkspaceAcceptanceSmokeStarted
+        ) {
+          rendererWorkspaceAcceptanceSmokeStarted = true
+          const aiBaseUrl = process.env['OPENALICE_WORKSPACE_ACCEPTANCE_AI_BASE_URL']?.trim()
+          const receiptPath = process.env['OPENALICE_SMOKE_RECEIPT_PATH']?.trim()
+          if (!aiBaseUrl || !receiptPath) {
+            console.error('[guardian] electron smoke workspace acceptance → failed: AI base URL or receipt path missing')
+            process.exitCode = 1
+            if (process.env['OPENALICE_ELECTRON_SMOKE_EXIT'] === '1') shutdown()
+          } else {
+            void runRendererWorkspaceAcceptanceSmoke(win, aiBaseUrl)
+              .then(async (result) => {
+                await writeFile(receiptPath, `${JSON.stringify(result, null, 2)}\n`, 'utf8')
+                const failedChecks = Object.entries(result.checks)
+                  .filter(([, ok]) => ok !== true)
+                  .map(([name]) => name)
+                if (failedChecks.length > 0) {
+                  throw new Error(
+                    `${result.error ?? 'Workspace acceptance failed'}; failed checks: ${failedChecks.join(', ')}`,
+                  )
+                }
+                console.log(`[guardian] electron smoke workspace acceptance → ok ${JSON.stringify(result)}`)
+                if (process.env['OPENALICE_ELECTRON_SMOKE_EXIT'] === '1') shutdown()
+              })
+              .catch((err) => {
+                console.error(`[guardian] electron smoke workspace acceptance → failed: ${err instanceof Error ? err.message : String(err)}`)
+                if (process.env['OPENALICE_ELECTRON_SMOKE_EXIT'] === '1') {
+                  process.exitCode = 1
+                  shutdown()
+                }
+              })
+          }
         }
       })
       .catch((err) => {

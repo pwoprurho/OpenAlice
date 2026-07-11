@@ -61,8 +61,12 @@ Workspace-facing OpenAlice commands (`alice`, `alice-workspace`, `traderhub`,
 and `alice-uta`) also do not depend on a host Node installation. Their POSIX
 and Windows launchers execute the explicit `openalice-cli.cjs` payload through
 the Electron executable recorded in `OPENALICE_MANAGED_PI_NODE_PATH`, with
-`ELECTRON_RUN_AS_NODE=1`. Source/dev falls back to `node` from the contributor
-environment. Keep the public commands as launchers: executing extensionless
+`ELECTRON_RUN_AS_NODE=1`. When the POSIX launcher is reached from managed Git
+Bash, it normalizes Windows-native launcher and Electron paths through
+`cygpath` before execution and excludes `OPENALICE_TOOL_URL` plus
+`OPENALICE_TOOL_SOCKET` from MSYS environment conversion. In particular,
+`/cli` is an application route and must not become a Git installation path.
+Source/dev falls back to `node` from the contributor environment. Keep the public commands as launchers: executing extensionless
 JavaScript directly makes behavior depend on the host Node version and the
 nearest `package.json` module type.
 
@@ -217,6 +221,38 @@ Keep these true together:
 
 ## Verification
 
+### Workspace acceptance contract
+
+`pnpm electron:smoke:workspace` is the release-facing definition of an
+actually usable packaged Workspace. It runs against isolated temporary data
+and a deterministic local OpenAI-compatible provider; it never reads a real
+API key or depends on external model availability.
+
+The smoke creates one real Chat Workspace and proves both layers of the product
+contract:
+
+1. A shell Session, reached through the Electron preload PTY bridge, receives
+   the production-composed Workspace environment. It resolves `alice`,
+   `alice-workspace`, `traderhub`, and `alice-uta`, loads every CLI manifest over
+   the Electron tool socket, verifies Git, and creates then reads an issue with
+   the real `alice-workspace` shim.
+2. The packaged managed Pi runtime performs a deterministic `bash` tool call
+   that invokes `alice-workspace issue create`. The smoke accepts the run only
+   when structured assistant output is decoded and the created issue is visible
+   from the external `/api/issues` surface.
+
+The second assertion deliberately uses an observable Workspace side effect,
+not a model claiming that a command succeeded. The run emits a versioned JSON
+receipt whose individual checks make PATH, injection, CLI transport, runtime
+output, tool use, and cleanup failures distinguishable. The Desktop Package
+Smoke matrix preserves these receipts as CI artifacts. Release candidates run
+the same acceptance on all three platform/architecture builds before any tag or
+GitHub Release is created; only accepted installers are then published.
+
+Do not replace the actual shims with direct tool-function calls in this smoke:
+that would stop covering argv parsing, manifest discovery, managed Node,
+Workspace identity headers, and the Electron-only socket transport.
+
 For runtime or packaging changes, run the focused local tests first:
 
 ```bash
@@ -238,6 +274,7 @@ pnpm vendor:runtime
 pnpm -F @traderalice/desktop exec electron-builder --dir --projectDir ../.. --publish never
 pnpm electron:assert-package
 pnpm electron:smoke-toolchain
+pnpm electron:smoke:workspace --skip-build --skip-pack
 ```
 
 On Windows, the standard `electron-builder` step rebuilds native dependencies

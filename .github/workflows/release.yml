@@ -14,16 +14,17 @@ on:
 
 jobs:
   release:
+    name: Plan release candidate
     runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
-      # Whether this run actually cut a new release (version was bumped). The
-      # desktop build matrix gates on this — a full per-platform Electron build
-      # is expensive (mac runners bill 10×), so it must NOT run on every master
-      # push, only when a new tag/release was created.
+      # Whether this push introduces a version that does not have a tag yet.
+      # The tag and GitHub Release are deliberately created only after every
+      # platform builds and passes Workspace acceptance.
       created: ${{ !github.event.inputs.mirror_tag && steps.check.outputs.exists == 'false' }}
       tag: ${{ github.event.inputs.mirror_tag || steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
 
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +64,7 @@ jobs:
         run: |
           # Generate notes for this version only (since last tag).
           # --tag labels the about-to-be-created version: git-cliff runs
-          # BEFORE the tag exists (it's created in the next step), so without
+          # BEFORE the tag exists (it's created only after candidate acceptance), so without
           # this the section header falls back to "[Unreleased]" instead of
           # the version. See cliff.toml's `{% if version %}` template.
           TAG="${{ steps.version.outputs.tag }}"
@@ -74,18 +75,16 @@ jobs:
             git-cliff "$LAST_TAG"..HEAD --tag "$TAG" --output notes.md
           fi
 
-      - name: Create tag and GitHub Release
+      - name: Preserve release notes for gated publication
         if: steps.check.outputs.exists == 'false' && !github.event.inputs.mirror_tag
-        uses: softprops/action-gh-release@v2
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: ${{ steps.version.outputs.tag }}
-          body_path: notes.md
-          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
-          generate_release_notes: false
+          name: release-notes
+          path: notes.md
+          if-no-files-found: error
 
-  # Per-platform desktop installers, attached to the release the `release`
-  # job already created. Each runner builds only its own platform/arch, so each
+  # Per-platform desktop installers are built and acceptance-tested before any
+  # tag or GitHub Release exists. Each runner builds only its own platform/arch, so each
   # artifact carries just its matching native binary (longbridge, node-pty) —
   # pnpm installs only the os/cpu-matching prebuilt. macOS builds are signed and
   # notarized through Developer ID secrets; Windows remains unsigned until a
@@ -105,7 +104,7 @@ jobs:
             arch: x64
     runs-on: ${{ matrix.os }}
     permissions:
-      contents: write # upload release assets
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -163,6 +162,21 @@ jobs:
         # available.
         run: pnpm -F @traderalice/desktop exec electron-builder --projectDir ../.. --publish never --${{ matrix.arch }}
 
+      - name: Prove release candidate Workspace CLI acceptance
+        run: pnpm electron:smoke:workspace --skip-build --skip-pack
+        timeout-minutes: 5
+        env:
+          OPENALICE_SMOKE_RECEIPT_PATH: ${{ runner.temp }}/openalice-workspace-acceptance.json
+
+      - name: Preserve release acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-acceptance-${{ runner.os }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/openalice-workspace-acceptance.json
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Prepare update channel aliases
         shell: bash
         env:
@@ -177,20 +191,61 @@ jobs:
             --version "$VERSION"
           rm -f dist/electron-app/builder-debug.yml
 
-      - name: Attach installer to the release
-        uses: softprops/action-gh-release@v2
+      - name: Preserve accepted release assets
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ needs.release.outputs.tag }}
-          files: |
+          name: release-assets-${{ runner.os }}-${{ matrix.arch }}
+          path: |
             dist/electron-app/*.dmg
             dist/electron-app/*.zip
             dist/electron-app/*.yml
             dist/electron-app/*.blockmap
             dist/electron-app/*.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  publish-release:
+    name: Publish accepted release
+    needs: [release, build-desktop]
+    if: needs.release.outputs.created == 'true' && needs.build-desktop.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: dist/release-notes
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          path: dist/release-assets
+          merge-multiple: true
+
+      - name: Create tag and GitHub Release from accepted candidates
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release.outputs.tag }}
+          name: ${{ needs.release.outputs.tag }}
+          body_path: dist/release-notes/notes.md
+          prerelease: ${{ needs.release.outputs.prerelease == 'true' }}
+          generate_release_notes: false
+          target_commitish: ${{ github.sha }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/release-assets/*.dmg
+            dist/release-assets/*.zip
+            dist/release-assets/*.yml
+            dist/release-assets/*.blockmap
+            dist/release-assets/*.exe
 
   mirror-release-assets:
-    needs: [release, build-desktop]
-    if: always() && ((needs.release.outputs.created == 'true' && needs.build-desktop.result == 'success') || github.event.inputs.mirror_tag)
+    needs: [release, publish-release]
+    if: always() && ((needs.release.outputs.created == 'true' && needs.publish-release.result == 'success') || github.event.inputs.mirror_tag)
     runs-on: ubuntu-latest
     permissions:
       contents: write
