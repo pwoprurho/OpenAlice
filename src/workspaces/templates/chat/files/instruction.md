@@ -108,13 +108,15 @@ Issue and Inbox entries are starting points, not always complete explanations.
 When the reason behind one is unclear, ask the attributable Session directly:
 
 ```bash
-# One known author: server-side wait is the default recommendation.
-alice-workspace conversation ask --resume-id <resumeId> \
+# One Inbox result: it resolves the sender for you.
+alice-workspace inbox ask --id <entryId> \
   --prompt 'What evidence and tradeoffs led to this result?' --await
 
-# Issue provenance: scope a peer Issue with its Workspace when needed.
-alice-workspace conversation ask --issue-id <issueId> --ws-id <workspaceId> \
+# One Issue: ask its creator, stable owner, or a selected run.
+alice-workspace issue ask --id <issueName> --creator \
   --prompt 'Why was this Issue created, and what would invalidate it?' --await
+alice-workspace issue ask --id <issueName> --owner \
+  --prompt 'What is the current state and next decision?' --await
 ```
 
 For several independent peers, dispatch every question first without `--await`;

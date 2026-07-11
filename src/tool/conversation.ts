@@ -4,6 +4,8 @@ import { z } from 'zod'
 import type {
   WorkspaceConversationControl,
   WorkspaceConversationTask,
+  WorkspaceConversationTarget,
+  WorkspaceToolContext,
   WorkspaceToolFactory,
 } from '../core/workspace-tool-center.js'
 import type { HeadlessMessageBlock } from '../workspaces/headless-output.js'
@@ -12,6 +14,17 @@ const DEFAULT_TIMEOUT_MS = 300_000
 const MAX_TIMEOUT_MS = 1_800_000
 const MAX_PROMPT_CHARS = 16_000
 const AWAIT_POLL_MS = 250
+
+export const conversationAskCommonShape = {
+  prompt: z.string().trim().min(1).max(MAX_PROMPT_CHARS)
+    .describe('Question for the responsible Session or reconstructing worker.'),
+  agent: z.string().min(1).optional()
+    .describe('Optional runtime for reconstructed/fresh work only; exact Session runtime cannot be overridden.'),
+  timeoutMs: z.coerce.number().int().positive().max(MAX_TIMEOUT_MS).optional()
+    .describe(`Headless watchdog in milliseconds (default ${DEFAULT_TIMEOUT_MS}).`),
+  await: z.boolean().optional().default(false)
+    .describe('Wait server-side for the final reply; on timeout, return the taskId for later await/read.'),
+}
 
 function taskProjection(task: WorkspaceConversationTask, mode: 'summary' | 'detailed') {
   const structured = task.structured
@@ -56,6 +69,68 @@ async function awaitConversationTask(
   return task
 }
 
+export async function askWorkspaceConversation(
+  ctx: WorkspaceToolContext,
+  input: {
+    prompt: string
+    target: WorkspaceConversationTarget
+    agent?: string
+    timeoutMs?: number
+    await?: boolean
+  },
+) {
+  if (!ctx.conversation) {
+    return { ok: false as const, error: 'workspace conversation control is unavailable' }
+  }
+  try {
+    const effectiveTimeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    const result = await ctx.conversation.ask({
+      prompt: input.prompt,
+      target: input.target,
+      timeoutMs: effectiveTimeoutMs,
+      ...(input.agent ? { agent: input.agent } : {}),
+    })
+    if (result.status === 'unavailable') {
+      return {
+        ok: false as const,
+        status: result.status,
+        resolution: { mode: result.resolution.mode, reason: result.resolution.reason },
+      }
+    }
+    const dispatched = {
+      ok: true as const,
+      status: 'running' as const,
+      taskId: result.taskId,
+      resumeId: result.resumeId,
+      workspaceId: result.workspaceId,
+      workspace: result.workspace,
+      agent: result.agent,
+      resolution: result.resolution.mode === 'reconstructed'
+        ? { mode: result.resolution.mode, reason: result.resolution.reason }
+        : { mode: result.resolution.mode },
+    }
+    if (!input.await) return dispatched
+    const task = await awaitConversationTask(ctx.conversation, result.taskId, effectiveTimeoutMs)
+    if (!task) {
+      return {
+        ok: false as const,
+        taskId: result.taskId,
+        error: `conversation task disappeared while awaiting: ${result.taskId}`,
+      }
+    }
+    return {
+      ...dispatched,
+      ...taskProjection(task, 'summary'),
+      awaited: task.status !== 'running',
+      ...(task.status === 'running'
+        ? { next: `alice-workspace conversation await --task-id ${task.taskId}` }
+        : {}),
+    }
+  } catch (err) {
+    return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 export const conversationAskFactory: WorkspaceToolFactory = {
   name: 'conversation_ask',
   build(ctx) {
@@ -73,20 +148,13 @@ export const conversationAskFactory: WorkspaceToolFactory = {
         'questions run concurrently before conversation_await collects their replies.',
       ].join('\n'),
       inputSchema: z.object({
-        prompt: z.string().trim().min(1).max(MAX_PROMPT_CHARS)
-          .describe('Question for the responsible Session or reconstructing worker.'),
+        ...conversationAskCommonShape,
         resumeId: z.string().min(1).optional()
           .describe('Exact product Session to continue. Cannot be combined with wsId or issueId.'),
         wsId: z.string().min(1).optional()
           .describe('Workspace for a fresh worker, or optional scope for issueId.'),
         issueId: z.string().min(1).optional()
           .describe('Issue whose attributable Session should answer. Defaults to the current Workspace.'),
-        agent: z.string().min(1).optional()
-          .describe('Optional runtime for reconstructed/fresh work only; exact Session runtime cannot be overridden.'),
-        timeoutMs: z.coerce.number().int().positive().max(MAX_TIMEOUT_MS).optional()
-          .describe(`Headless watchdog in milliseconds (default ${DEFAULT_TIMEOUT_MS}).`),
-        await: z.boolean().optional().default(false)
-          .describe('Wait server-side for the final reply; on timeout, return the taskId for later await/read.'),
       }),
       execute: async ({ prompt, resumeId, wsId, issueId, agent, timeoutMs, await: shouldAwait = false }) => {
         if (!ctx.conversation) {
@@ -109,53 +177,13 @@ export const conversationAskFactory: WorkspaceToolFactory = {
           : issueId
             ? { kind: 'issue' as const, workspaceId: wsId ?? ctx.workspaceId, issueId }
             : { kind: 'workspace' as const, workspaceId: wsId! }
-        try {
-          const effectiveTimeoutMs = timeoutMs ?? DEFAULT_TIMEOUT_MS
-          const result = await ctx.conversation.ask({
-            prompt,
-            target,
-            timeoutMs: effectiveTimeoutMs,
-            ...(agent ? { agent } : {}),
-          })
-          if (result.status === 'unavailable') {
-            return {
-              ok: false as const,
-              status: result.status,
-              resolution: { mode: result.resolution.mode, reason: result.resolution.reason },
-            }
-          }
-          const dispatched = {
-            ok: true as const,
-            status: 'running' as const,
-            taskId: result.taskId,
-            resumeId: result.resumeId,
-            workspaceId: result.workspaceId,
-            workspace: result.workspace,
-            agent: result.agent,
-            resolution: result.resolution.mode === 'reconstructed'
-              ? { mode: result.resolution.mode, reason: result.resolution.reason }
-              : { mode: result.resolution.mode },
-          }
-          if (!shouldAwait) return dispatched
-          const task = await awaitConversationTask(ctx.conversation, result.taskId, effectiveTimeoutMs)
-          if (!task) {
-            return {
-              ok: false as const,
-              taskId: result.taskId,
-              error: `conversation task disappeared while awaiting: ${result.taskId}`,
-            }
-          }
-          return {
-            ...dispatched,
-            ...taskProjection(task, 'summary'),
-            awaited: task.status !== 'running',
-            ...(task.status === 'running'
-              ? { next: `alice-workspace conversation await --task-id ${task.taskId}` }
-              : {}),
-          }
-        } catch (err) {
-          return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
-        }
+        return askWorkspaceConversation(ctx, {
+          prompt,
+          target,
+          ...(agent ? { agent } : {}),
+          ...(timeoutMs ? { timeoutMs } : {}),
+          await: shouldAwait,
+        })
       },
     })
   },

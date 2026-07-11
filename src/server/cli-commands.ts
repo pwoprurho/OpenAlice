@@ -157,6 +157,7 @@ export const CLI_EXPORTS: Record<string, CliExport> = {
       inbox: {
         push: 'inbox_push',
         read: 'inbox_read',
+        ask: 'inbox_ask',
       },
       // peer path: resolve another workspace's absolute dir by id (the
       // `workspaceId` an inbox_read entry carries), so the agent can read/edit
@@ -181,6 +182,7 @@ export const CLI_EXPORTS: Record<string, CliExport> = {
         create: 'issue_create',
         list: 'issue_list',
         show: 'issue_show',
+        ask: 'issue_ask',
       },
       provenance: {
         show: 'provenance_show',

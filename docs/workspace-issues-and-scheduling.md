@@ -183,9 +183,9 @@ remain valid and are never renamed. `taskId` remains one execution, while
 rather than silently pruned.
 
 Internal agents use the same product handle through the embedded collaboration
-path. For example, `alice-workspace conversation ask --issue-id <id>
---ws-id <ws> --prompt '<question>'`
-queries Issue provenance first: it resumes the exact attributable Session,
+path. `alice-workspace issue ask --id <name> --creator --prompt '<question>'`
+queries Issue provenance first without making the caller extract a Workspace or
+resume id: it resumes the exact attributable Session,
 reconstructs with a fresh worker only when the Workspace is known and no
 Session origin exists, or returns unavailable without substituting another
 agent. `alice-workspace conversation read --task-id <id>` returns the latest

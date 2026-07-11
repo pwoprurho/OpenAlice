@@ -439,6 +439,15 @@ alice-workspace conversation await --task-id <taskId>
 alice-workspace conversation read --task-id <taskId>
 ```
 
+Inbox and Issue callers normally use the business-level wrappers instead:
+
+```bash
+alice-workspace inbox ask --id <entryId> --prompt '<question>' --await
+alice-workspace issue ask --id <issueName> --creator --prompt '<question>' --await
+alice-workspace issue ask --id <issueName> --owner --prompt '<question>' --await
+alice-workspace issue ask --id <issueName> --run-id <taskId> --prompt '<question>' --await
+```
+
 The public CLI accepts only flat identity flags. `resumeId` addresses one exact
 Session, `issueId` consults the Phase 1 index, and `wsId` recruits a fresh worker
 when there is no known owner. Rich Inbox/report/trade target structures stay
@@ -459,13 +468,13 @@ worker into the historical author.
 
 ## Phase 2 Feature Design Skeleton
 
-All future convenience wrappers should delegate to the same shipped resolver:
+Business convenience wrappers delegate to the same shipped resolver:
 
 ```text
-inbox ask <entry>             -> sender Session or reconstructed Workspace Session
-issue ask <issue> --creator   -> creation provenance
-issue ask <issue> --owner     -> declared resume owner, or explain fresh mode
-issue ask <issue> --run <id>  -> that run's Session
+inbox ask <entry>             -> sender Session or reconstructed Workspace Session (shipped)
+issue ask <issue> --creator   -> creation provenance (shipped)
+issue ask <issue> --owner     -> declared resume owner, or explain fresh mode (shipped)
+issue ask <issue> --run-id    -> that run's Session (shipped)
 report ask <path> [revision]  -> matching writer/update occurrence
 trade ask <order> --decision  -> initiating Session
 trade ask <order> --execution -> UTA/broker evidence, not an AI conversation

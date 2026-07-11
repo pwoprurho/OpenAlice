@@ -85,22 +85,29 @@ missing origin is not permission to pick an arbitrary old Session.
 headless follow-up without leaving the embedded Workspace CLI:
 
 ```bash
-alice-workspace conversation ask \
-  --issue-id <id> --ws-id <ws> \
-  --prompt 'Why did you create this issue?' --await
-alice-workspace conversation ask \
-  --resume-id <resumeId> \
+alice-workspace inbox ask --id <entryId> \
   --prompt 'Why did you send this result?' --await
+alice-workspace issue ask --id <issueName> --creator \
+  --prompt 'Why did you create this Issue?' --await
+alice-workspace issue ask --id <issueName> --owner \
+  --prompt 'What is the current state and next decision?' --await
+alice-workspace issue ask --id <issueName> --run-id <taskId> \
+  --prompt 'What happened in this run?' --await
+
+# Lower-level escape hatches when there is no Inbox/Issue business object:
+alice-workspace conversation ask --resume-id <resumeId> \
+  --prompt 'Explain the missing context.' --await
 alice-workspace conversation ask --ws-id <ws> \
   --prompt 'Reconstruct why this artifact was produced.' --await
 alice-workspace conversation await --task-id <taskId>
 alice-workspace conversation read --task-id <taskId>
 ```
 
-Address with one flat form: `--resume-id` continues an exact known Session;
-`--issue-id` resolves Issue provenance (`--ws-id` scopes a peer Issue and
-defaults to this Workspace); `--ws-id` by itself recruits a fresh worker. Never
-construct or pass an internal target JSON object.
+Prefer the Inbox/Issue commands: they resolve provenance without making you
+extract `resumeId` or `wsId`. `issue ask` defaults to `--creator`; `--owner`
+requires a stable resume owner, while `--run-id` selects one exact run Session.
+Use the lower-level conversation command only when no business object already
+identifies whom to ask. Never construct or pass an internal target JSON object.
 
 For one question, start with `ask --await`: OpenAlice waits server-side and
 returns the final reply without making you guess a sleep duration. For several
