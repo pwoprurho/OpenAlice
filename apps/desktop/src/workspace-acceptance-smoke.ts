@@ -44,6 +44,7 @@ export async function runRendererWorkspaceAcceptanceSmoke(
     const shellIssueId = '${SHELL_ISSUE_ID}'
     const agentIssueId = '${AGENT_ISSUE_ID}'
     const shellMarker = '__OPENALICE_WORKSPACE_CLI_CONTRACT_OK__'
+    const shellFailureMarker = '__OPENALICE_WORKSPACE_CLI_STEP_FAILED__'
     const checks = {
       workspaceCreated: false,
       gitReady: false,
@@ -106,6 +107,10 @@ export async function runRendererWorkspaceAcceptanceSmoke(
         if (output.includes('__OPENALICE_CLI_ENV_OK__')) checks.cliEnvironmentInjected = true
         if (output.includes('__OPENALICE_CLI_MANIFESTS_OK__')) checks.allCliManifestsLoaded = true
         if (output.includes('__OPENALICE_GIT_OK__')) checks.gitReady = true
+        if (output.includes(shellFailureMarker)) {
+          clearTimeout(markerTimer)
+          markerReject(new Error('Workspace CLI contract step failed: ' + output.slice(-4000)))
+        }
         if (output.includes(shellMarker)) {
           clearTimeout(markerTimer)
           markerResolve(output)
@@ -127,10 +132,14 @@ export async function runRendererWorkspaceAcceptanceSmoke(
           'command -v traderhub >/dev/null',
           'command -v alice-uta >/dev/null',
           "printf '__OPENALICE_%s_OK__\\\\n' 'CLI_ENV'",
-          'alice --help >/dev/null',
-          'alice-workspace --help >/dev/null',
-          'traderhub --help >/dev/null',
-          'alice-uta --help >/dev/null',
+          // Capture a failing command's stderr and report it through stdout.
+          // Electron's Windows GUI binary can otherwise make a child stderr
+          // failure look like a silent PTY timeout.
+          "oa_step() { oa_label=\"$1\"; shift; oa_output=$(\"$@\" 2>&1); oa_status=$?; if test \"$oa_status\" -ne 0; then printf '__OPENALICE_WORKSPACE_CLI_STEP_FAILED__ %s %s\\\\n%s\\\\n' \"$oa_label\" \"$oa_status\" \"$oa_output\"; return \"$oa_status\"; fi; }",
+          'oa_step alice-manifest alice --help',
+          'oa_step alice-workspace-manifest alice-workspace --help',
+          'oa_step traderhub-manifest traderhub --help',
+          'oa_step alice-uta-manifest alice-uta --help',
           "printf '__OPENALICE_%s_OK__\\\\n' 'CLI_MANIFESTS'",
           'git rev-parse --is-inside-work-tree | grep -qx true',
           "printf '__OPENALICE_%s_OK__\\\\n' 'GIT'",

@@ -13,5 +13,6 @@ describe('Workspace acceptance renderer source', () => {
     for (const marker of ['CLI_ENV', 'CLI_MANIFESTS', 'GIT', 'WORKSPACE_CLI_CONTRACT']) {
       expect(source).toContain(`"printf '__OPENALICE_%s_OK__\\\\n' '${marker}'"`)
     }
+    expect(source).toContain('__OPENALICE_WORKSPACE_CLI_STEP_FAILED__ %s %s\\\\n%s\\\\n')
   })
 })
