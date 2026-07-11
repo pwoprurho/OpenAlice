@@ -225,6 +225,11 @@ function parseFlags(tokens, schema) {
       : Object.prototype.hasOwnProperty.call(properties, camelKey)
         ? camelKey
         : key
+    const propertySchema = properties[schemaKey]
+    if (propertySchema && propertySchema.type === 'boolean' && typeof val === 'string') {
+      if (val === 'true') val = true
+      else if (val === 'false') val = false
+    }
     if (schemaKey === 'meta') {
       // repeatable: --meta key=value -> metadataFilter
       const e = val.indexOf('=')
@@ -282,7 +287,8 @@ function printVerbHelp(group, verb, cmd) {
     const type = p.type || (p.enum ? 'enum' : '')
     const req = required.has(n) ? ' (required)' : ''
     const flag = n.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()
-    out(`  --${flag}${type ? ' <' + type + '>' : ''}${req}   ${firstLine(p.description || '')}`)
+    const valueHint = type && type !== 'boolean' ? ' <' + type + '>' : ''
+    out(`  --${flag}${valueHint}${req}   ${firstLine(p.description || '')}`)
   }
 }
 

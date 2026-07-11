@@ -1,12 +1,60 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 
-import type { WorkspaceToolFactory } from '../core/workspace-tool-center.js'
+import type {
+  WorkspaceConversationControl,
+  WorkspaceConversationTask,
+  WorkspaceToolFactory,
+} from '../core/workspace-tool-center.js'
 import type { HeadlessMessageBlock } from '../workspaces/headless-output.js'
 
 const DEFAULT_TIMEOUT_MS = 300_000
 const MAX_TIMEOUT_MS = 1_800_000
 const MAX_PROMPT_CHARS = 16_000
+const AWAIT_POLL_MS = 250
+
+function taskProjection(task: WorkspaceConversationTask, mode: 'summary' | 'detailed') {
+  const structured = task.structured
+  const tools = structured?.blocks
+    .filter((block): block is Extract<HeadlessMessageBlock, { type: 'tool' }> => block.type === 'tool')
+    .map((block) => ({ name: block.name, status: block.status })) ?? []
+  const errors = structured?.blocks
+    .filter((block): block is Extract<HeadlessMessageBlock, { type: 'error' }> => block.type === 'error')
+    .map((block) => block.message) ?? []
+  const compactError = task.error ?? errors.at(-1)
+  return {
+    taskId: task.taskId,
+    resumeId: task.resumeId,
+    workspaceId: task.workspaceId,
+    agent: task.agent,
+    status: task.status,
+    assistantText: structured?.assistantText ?? null,
+    ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}),
+    ...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
+    ...(compactError ? { error: compactError } : {}),
+    ...(mode === 'detailed' ? {
+      tools,
+      errors,
+      blocks: structured?.blocks ?? [],
+    } : {}),
+  }
+}
+
+async function awaitConversationTask(
+  conversation: WorkspaceConversationControl,
+  taskId: string,
+  timeoutMs: number,
+): Promise<WorkspaceConversationTask | null> {
+  const deadline = Date.now() + timeoutMs
+  let task = await conversation.read(taskId)
+  while (task?.status === 'running') {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return task
+    await new Promise((resolve) => setTimeout(resolve, Math.min(AWAIT_POLL_MS, remaining)))
+    task = await conversation.read(taskId)
+  }
+  return task
+}
 
 export const conversationAskFactory: WorkspaceToolFactory = {
   name: 'conversation_ask',
@@ -20,7 +68,9 @@ export const conversationAskFactory: WorkspaceToolFactory = {
         'The CLI exposes these as --resume-id, --issue-id, and --ws-id. It never requires',
         'callers to construct an internal target object.',
         '',
-        'The call is asynchronous and returns a short taskId. Poll with conversation_read.',
+        'Prefer --await for one question: the server waits without shell sleep loops.',
+        'Without --await the call returns a short taskId immediately, which lets several',
+        'questions run concurrently before conversation_await collects their replies.',
       ].join('\n'),
       inputSchema: z.object({
         prompt: z.string().trim().min(1).max(MAX_PROMPT_CHARS)
@@ -35,8 +85,10 @@ export const conversationAskFactory: WorkspaceToolFactory = {
           .describe('Optional runtime for reconstructed/fresh work only; exact Session runtime cannot be overridden.'),
         timeoutMs: z.coerce.number().int().positive().max(MAX_TIMEOUT_MS).optional()
           .describe(`Headless watchdog in milliseconds (default ${DEFAULT_TIMEOUT_MS}).`),
+        await: z.boolean().optional().default(false)
+          .describe('Wait server-side for the final reply; on timeout, return the taskId for later await/read.'),
       }),
-      execute: async ({ prompt, resumeId, wsId, issueId, agent, timeoutMs }) => {
+      execute: async ({ prompt, resumeId, wsId, issueId, agent, timeoutMs, await: shouldAwait = false }) => {
         if (!ctx.conversation) {
           return { ok: false as const, error: 'workspace conversation control is unavailable' }
         }
@@ -58,10 +110,11 @@ export const conversationAskFactory: WorkspaceToolFactory = {
             ? { kind: 'issue' as const, workspaceId: wsId ?? ctx.workspaceId, issueId }
             : { kind: 'workspace' as const, workspaceId: wsId! }
         try {
+          const effectiveTimeoutMs = timeoutMs ?? DEFAULT_TIMEOUT_MS
           const result = await ctx.conversation.ask({
             prompt,
             target,
-            timeoutMs: timeoutMs ?? DEFAULT_TIMEOUT_MS,
+            timeoutMs: effectiveTimeoutMs,
             ...(agent ? { agent } : {}),
           })
           if (result.status === 'unavailable') {
@@ -71,7 +124,7 @@ export const conversationAskFactory: WorkspaceToolFactory = {
               resolution: { mode: result.resolution.mode, reason: result.resolution.reason },
             }
           }
-          return {
+          const dispatched = {
             ok: true as const,
             status: 'running' as const,
             taskId: result.taskId,
@@ -82,6 +135,66 @@ export const conversationAskFactory: WorkspaceToolFactory = {
             resolution: result.resolution.mode === 'reconstructed'
               ? { mode: result.resolution.mode, reason: result.resolution.reason }
               : { mode: result.resolution.mode },
+          }
+          if (!shouldAwait) return dispatched
+          const task = await awaitConversationTask(ctx.conversation, result.taskId, effectiveTimeoutMs)
+          if (!task) {
+            return {
+              ok: false as const,
+              taskId: result.taskId,
+              error: `conversation task disappeared while awaiting: ${result.taskId}`,
+            }
+          }
+          return {
+            ...dispatched,
+            ...taskProjection(task, 'summary'),
+            awaited: task.status !== 'running',
+            ...(task.status === 'running'
+              ? { next: `alice-workspace conversation await --task-id ${task.taskId}` }
+              : {}),
+          }
+        } catch (err) {
+          return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+        }
+      },
+    })
+  },
+}
+
+export const conversationAwaitFactory: WorkspaceToolFactory = {
+  name: 'conversation_await',
+  build(ctx) {
+    return tool({
+      description: [
+        'Wait server-side for one conversation task to finish.',
+        '',
+        'Use after dispatching several conversation_ask calls so their headless runs execute',
+        'concurrently. This replaces hand-written sleep loops. If the wait budget expires,',
+        'the task remains running and can be awaited again or inspected with conversation_read.',
+      ].join('\n'),
+      inputSchema: z.object({
+        taskId: z.string().min(1).describe('Short taskId returned by conversation_ask.'),
+        timeoutMs: z.coerce.number().int().positive().max(MAX_TIMEOUT_MS).optional()
+          .describe(`Server-side wait budget in milliseconds (default ${DEFAULT_TIMEOUT_MS}).`),
+      }),
+      execute: async ({ taskId, timeoutMs }) => {
+        if (!ctx.conversation) {
+          return { ok: false as const, error: 'workspace conversation control is unavailable' }
+        }
+        try {
+          const task = await awaitConversationTask(
+            ctx.conversation,
+            taskId,
+            timeoutMs ?? DEFAULT_TIMEOUT_MS,
+          )
+          if (!task) return { ok: false as const, error: `conversation task not found: ${taskId}` }
+          return {
+            ok: true as const,
+            ...taskProjection(task, 'summary'),
+            awaited: task.status !== 'running',
+            ...(task.status === 'running'
+              ? { next: `alice-workspace conversation read --task-id ${task.taskId}` }
+              : {}),
           }
         } catch (err) {
           return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
@@ -113,30 +226,9 @@ export const conversationReadFactory: WorkspaceToolFactory = {
         try {
           const task = await ctx.conversation.read(taskId)
           if (!task) return { ok: false as const, error: `conversation task not found: ${taskId}` }
-          const structured = task.structured
-          const tools = structured?.blocks
-            .filter((block): block is Extract<HeadlessMessageBlock, { type: 'tool' }> => block.type === 'tool')
-            .map((block) => ({ name: block.name, status: block.status })) ?? []
-          const errors = structured?.blocks
-            .filter((block): block is Extract<HeadlessMessageBlock, { type: 'error' }> => block.type === 'error')
-            .map((block) => block.message) ?? []
-          const compactError = task.error ?? errors.at(-1)
           return {
             ok: true as const,
-            taskId: task.taskId,
-            resumeId: task.resumeId,
-            workspaceId: task.workspaceId,
-            agent: task.agent,
-            status: task.status,
-            assistantText: structured?.assistantText ?? null,
-            ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}),
-            ...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
-            ...(compactError ? { error: compactError } : {}),
-            ...(mode === 'detailed' ? {
-              tools,
-              errors,
-              blocks: structured?.blocks ?? [],
-            } : {}),
+            ...taskProjection(task, mode),
           }
         } catch (err) {
           return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
@@ -148,5 +240,6 @@ export const conversationReadFactory: WorkspaceToolFactory = {
 
 export const conversationToolFactories: WorkspaceToolFactory[] = [
   conversationAskFactory,
+  conversationAwaitFactory,
   conversationReadFactory,
 ]

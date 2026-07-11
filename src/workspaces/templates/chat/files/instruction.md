@@ -17,6 +17,11 @@ Default working habit:
 - If a ticker, topic, thesis, or issue should accumulate memory across time,
   register/reuse a tracked entity and link it with `[[name]]` in notes and issue
   bodies.
+- If an Issue or Inbox result lacks enough context, do not reconstruct the
+  author's reasoning alone. Follow its `resumeId` or Issue/Workspace provenance,
+  ask the responsible Session, and separate its answer from your own judgment.
+  When several peers may know different parts, ask them concurrently and
+  synthesize only after their replies arrive.
 
 OpenAlice's tools are on your shell PATH as four CLIs — that's how you reach the
 trading engine, market data, research surfaces, and the user's inbox. They're
@@ -28,7 +33,7 @@ Discover any command live with `<cli> --help` and `<cli> <group> <verb> --help`
 |---|---|---|
 | `alice` | **Research & data** — collected-RSS archive, symbol search (barIds), quant analysis | `alice` |
 | `alice-uta` | **Trading** — accounts, portfolio, orders, positions, trading-as-git approval (MUTATES real broker state) | `alice-uta` |
-| `alice-workspace` | **Collaboration** — push/read Inbox, locate peer files (`peer path`) and product Sessions (`peer sessions`), track entities, the shared issue board | `alice-workspace` |
+| `alice-workspace` | **Collaboration** — push/read Inbox, locate and ask peer Sessions, await replies, track entities, the shared issue board | `alice-workspace` |
 | `traderhub` | **Low-frequency market data** — fundamentals, macro series, calendars, ETF, boards, shipping, Fed | `traderhub` |
 
 ```bash
@@ -96,6 +101,30 @@ When an artifact already identifies a `resumeId`, inspect that workspace with
 OpenAlice's product Session handle, never a runtime-native session id. If the
 artifact has no exact owner, do not pick an arbitrary old Session; the later
 collaboration flow must recruit a fresh Session at that Workspace.
+
+## Ask peers instead of guessing their context
+
+Issue and Inbox entries are starting points, not always complete explanations.
+When the reason behind one is unclear, ask the attributable Session directly:
+
+```bash
+# One known author: server-side wait is the default recommendation.
+alice-workspace conversation ask --resume-id <resumeId> \
+  --prompt 'What evidence and tradeoffs led to this result?' --await
+
+# Issue provenance: scope a peer Issue with its Workspace when needed.
+alice-workspace conversation ask --issue-id <issueId> --ws-id <workspaceId> \
+  --prompt 'Why was this Issue created, and what would invalidate it?' --await
+```
+
+For several independent peers, dispatch every question first without `--await`;
+each call returns a short task id and all runs proceed concurrently. Then collect
+them with `alice-workspace conversation await --task-id <taskId>` and compare the
+answers before reporting a conclusion. Do not write shell `sleep` loops. If an
+await call exhausts its wait budget and still reports `running`, continue useful
+work and later use `conversation await` again or a one-shot `conversation read`.
+`read --mode detailed` is diagnostic-only; normal collaboration needs the final
+reply, not the peer's complete tool trace.
 
 ## Issues — your standing work list
 

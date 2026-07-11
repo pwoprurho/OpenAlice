@@ -193,6 +193,12 @@ assistant reply by default; diagnostic tool/message blocks require
 `--mode detailed`. New task ids are short `run-xxxxxxxx` codes; existing UUID
 task ids remain readable.
 
+Prefer `conversation ask ... --await` for a single follow-up. To question
+several independent Sessions, dispatch every ask first, then collect each task
+with `conversation await --task-id <id>` so the runs overlap. If server-side
+await reaches its budget while a task still runs, use a later await or one-shot
+read; agents should not manufacture shell sleep loops.
+
 Scheduling never bypasses trading approval. A headless agent may research or
 stage a trade, but execution remains behind UTA/Trading-as-Git permission and
 human approval boundaries.

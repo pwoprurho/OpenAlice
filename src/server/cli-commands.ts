@@ -187,6 +187,7 @@ export const CLI_EXPORTS: Record<string, CliExport> = {
       },
       conversation: {
         ask: 'conversation_ask',
+        await: 'conversation_await',
         read: 'conversation_read',
       },
     },

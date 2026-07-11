@@ -154,6 +154,7 @@ describe('CLI launchers and payload', () => {
               properties: {
                 issueId: { type: 'string' },
                 accountId: { type: 'string' },
+                await: { type: 'boolean' },
               },
             },
           },
@@ -187,14 +188,16 @@ describe('CLI launchers and payload', () => {
     try {
       const help = await runCli('alice-workspace', ['provenance', 'show', '--help'], env)
       expect(help.stdout).toContain('--issue-id')
+      expect(help.stdout).toContain('--await')
+      expect(help.stdout).not.toContain('--await <boolean>')
       expect(help.stdout).not.toContain('--issueId')
 
       await runCli('alice-workspace', [
-        'provenance', 'show', '--issue-id', 'audit', '--account-id', 'alpaca-paper',
+        'provenance', 'show', '--issue-id', 'audit', '--account-id', 'alpaca-paper', '--await',
       ], env)
       expect(invocation).toEqual({
         tool: 'provenance_show',
-        args: { issueId: 'audit', accountId: 'alpaca-paper' },
+        args: { issueId: 'audit', accountId: 'alpaca-paper', await: true },
       })
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))

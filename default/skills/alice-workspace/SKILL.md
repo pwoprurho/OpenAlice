@@ -5,13 +5,15 @@ description: >
   finished work to the user's Inbox (`inbox push`, with repeatable `--doc`
   file attachments), read the inbox back (`inbox read`, `--self` for your own
   pushes), locate a peer workspace's files (`peer path`) and product Sessions
-  (`peer sessions`),
+  (`peer sessions`), ask attributable peer Sessions and await their replies
+  (`conversation ask` / `conversation await`),
   track entities across workspaces (`track`), and read & manage the
   cross-workspace issue board (`issue list`/`show`/`create`/`update`/`comment`).
   Use for: "push my findings to the inbox", "surface this report to the user",
   "what did I already report?", "read the file another workspace sent", "track
   this ticker", "what's on the issue board?", "what was I working on?", "add or
-  update an issue". Workspaces collaborate through git — commit before you push,
+  update an issue", "ask the agent who produced this Inbox result", "why was
+  this Issue created?". Workspaces collaborate through git — commit before you push,
   and commit after you edit a peer's files. Discover flags with
   `alice-workspace --help` — do NOT guess.
 ---
@@ -85,12 +87,13 @@ headless follow-up without leaving the embedded Workspace CLI:
 ```bash
 alice-workspace conversation ask \
   --issue-id <id> --ws-id <ws> \
-  --prompt 'Why did you create this issue?'
+  --prompt 'Why did you create this issue?' --await
 alice-workspace conversation ask \
   --resume-id <resumeId> \
-  --prompt 'Why did you send this result?'
-alice-workspace conversation ask \
-  --ws-id <ws> --prompt 'Reconstruct why this artifact was produced.'
+  --prompt 'Why did you send this result?' --await
+alice-workspace conversation ask --ws-id <ws> \
+  --prompt 'Reconstruct why this artifact was produced.' --await
+alice-workspace conversation await --task-id <taskId>
 alice-workspace conversation read --task-id <taskId>
 ```
 
@@ -98,6 +101,13 @@ Address with one flat form: `--resume-id` continues an exact known Session;
 `--issue-id` resolves Issue provenance (`--ws-id` scopes a peer Issue and
 defaults to this Workspace); `--ws-id` by itself recruits a fresh worker. Never
 construct or pass an internal target JSON object.
+
+For one question, start with `ask --await`: OpenAlice waits server-side and
+returns the final reply without making you guess a sleep duration. For several
+independent peers, issue every `ask` first without `--await` so all tasks run
+concurrently, then collect each short task id with `conversation await`. If an
+await returns `status: running`, do other useful work and await again later or
+use one-shot `conversation read`; never build a shell `sleep` polling loop.
 
 Inspect `resolution.mode` on the ask result:
 
@@ -108,7 +118,8 @@ Inspect `resolution.mode` on the ask result:
 - `unavailable` means an attributed Session cannot resume, or no safe
   Workspace target exists. Do not work around it by picking another old
 Session. Poll `conversation read` until `status` leaves `running`; its default
-output keeps the final `assistantText` and a compact error when needed. Use
+output keeps the final `assistantText` and a compact error when needed. Prefer
+the server-side await flow above; use `read` as the fallback snapshot. Use
 `--mode detailed` only for diagnostics that genuinely need tool/message blocks.
 
 > **Editing a peer is interactive-only.** Reading another workspace is always OK.
