@@ -81,9 +81,12 @@ describe('buildPackagedToolchainSmokePlan', () => {
         'managed git.exe',
         'managed bash.exe',
         'managed sh.exe can resolve git and bash on PATH',
+        'Workspace CLI launcher through managed Git Bash',
       ])
       expect(plan.commands[3].command.replaceAll('\\', '/')).toContain('vendor/git/win32-x64/cmd/git.exe')
       expect(plan.commands[5].env?.PATH.replaceAll('\\', '/')).toContain('vendor/git/win32-x64/mingw64/bin')
+      expect(plan.commands[6].env?.OPENALICE_MANAGED_PI_NODE_PATH.replaceAll('\\', '/'))
+        .toContain('win-unpacked/OpenAlice.exe')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

@@ -48,6 +48,7 @@ describe('CLI launchers and payload', () => {
     expect(src).toContain('OPENALICE_MANAGED_PI_NODE_PATH')
     expect(src).toContain('cygpath -u "$launcher"')
     expect(src).toContain('cygpath -u "$managed_node"')
+    expect(src).toContain('cygpath -w "$payload"')
     expect(src).toContain('openalice-cli.cjs')
     expect(src).not.toContain('/usr/bin/env node')
   })

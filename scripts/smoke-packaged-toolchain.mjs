@@ -58,13 +58,15 @@ export function buildPackagedToolchainSmokePlan(packageResult) {
     const gitExe = join(gitRoot, git.gitBin)
     const bashExe = join(gitRoot, git.shellPath)
     const shExe = join(gitRoot, git.shPath)
+    const workspaceCliDir = join(packageResult.appRoot, 'src', 'workspaces', 'cli', 'bin')
     const toolchainPath = (Array.isArray(git.toolchainPaths) ? git.toolchainPaths : ['cmd', 'bin', 'usr/bin'])
       .map((entry) => join(gitRoot, entry))
       .join(delimiter)
     const winEnv = {
-      PATH: [toolchainPath, process.env['PATH']].filter(Boolean).join(delimiter),
+      PATH: [workspaceCliDir, toolchainPath, process.env['PATH']].filter(Boolean).join(delimiter),
       CHERE_INVOKING: '1',
       MSYSTEM: packageResult.platformArch.endsWith('arm64') ? 'CLANGARM64' : 'MINGW64',
+      OPENALICE_MANAGED_PI_NODE_PATH: electron,
     }
 
     commands.push({
@@ -88,6 +90,14 @@ export function buildPackagedToolchainSmokePlan(packageResult) {
       ],
       env: winEnv,
       expectStdout: /OPENALICE_SH_OK[\s\S]*git version [\s\S]*GNU bash/,
+    })
+    commands.push({
+      label: 'Workspace CLI launcher through managed Git Bash',
+      command: bashExe,
+      args: ['--noprofile', '--norc', '-c', 'alice --help'],
+      env: winEnv,
+      expectStatus: 1,
+      expectStderr: /alice: AQ_WS_ID is not set/,
     })
   }
 

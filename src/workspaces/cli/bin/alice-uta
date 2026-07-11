@@ -44,7 +44,15 @@ if [ -n "${OPENALICE_MANAGED_PI_NODE_PATH:-}" ]; then
   esac
   ELECTRON_RUN_AS_NODE=1
   export ELECTRON_RUN_AS_NODE
-  exec "$managed_node" "$launcher_dir/openalice-cli.cjs" "$@"
+  payload=$launcher_dir/openalice-cli.cjs
+  if command -v cygpath >/dev/null 2>&1; then
+    # Electron is a native Windows process. Give it a native payload path
+    # explicitly instead of relying on MSYS' executable-name heuristics to
+    # translate the first argument for a renamed OpenAlice.exe.
+    converted=$(cygpath -w "$payload" 2>/dev/null || true)
+    if [ -n "$converted" ]; then payload=$converted; fi
+  fi
+  exec "$managed_node" "$payload" "$@"
 fi
 
 exec node "$launcher_dir/openalice-cli.cjs" "$@"
