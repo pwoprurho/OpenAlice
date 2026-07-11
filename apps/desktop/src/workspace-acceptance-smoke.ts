@@ -123,6 +123,7 @@ export async function runRendererWorkspaceAcceptanceSmoke(
       })
       try {
         await attached
+        const stepHelper = 'oa_step() { oa_label="$1"; shift; oa_output=$("$@" 2>&1); oa_status=$?; if test "$oa_status" -ne 0; then printf "__OPENALICE_WORKSPACE_%s_FAILED__ %s %s\\\\n%s\\\\n" "CLI_STEP" "$oa_label" "$oa_status" "$oa_output"; return "$oa_status"; fi; }'
         const command = [
           'test "$AQ_WS_ID" = "' + workspaceId + '"',
           'test -n "$OPENALICE_TOOL_URL"',
@@ -135,9 +136,6 @@ export async function runRendererWorkspaceAcceptanceSmoke(
           // Capture a failing command's stderr and report it through stdout.
           // Electron's Windows GUI binary can otherwise make a child stderr
           // failure look like a silent PTY timeout.
-          // Split the failure sentinel too, so terminal command echo cannot
-          // reject the contract before the helper has executed.
-          'oa_step() { oa_label="$1"; shift; oa_output=$("$@" 2>&1); oa_status=$?; if test "$oa_status" -ne 0; then printf "__OPENALICE_WORKSPACE_%s_FAILED__ %s %s\\\\n%s\\\\n" "CLI_STEP" "$oa_label" "$oa_status" "$oa_output"; return "$oa_status"; fi; }',
           'oa_step alice-manifest alice --help',
           'oa_step alice-workspace-manifest alice-workspace --help',
           'oa_step traderhub-manifest traderhub --help',
@@ -150,6 +148,10 @@ export async function runRendererWorkspaceAcceptanceSmoke(
           // Split the sentinel so terminal command echo cannot satisfy it.
           "printf '__OPENALICE_%s_OK__\\\\n' 'WORKSPACE_CLI_CONTRACT'",
         ].join(' && ')
+        // Keep each PTY write below the Windows ConPTY input boundary. The
+        // helper is a separate shell line so adding diagnostics cannot
+        // truncate the contract's trailing carriage return.
+        bridge.send(connectionId, new TextEncoder().encode(stepHelper + '\\r'))
         bridge.send(connectionId, new TextEncoder().encode(command + '\\r'))
         await marker
         checks.shellCliRoundTrip = true
