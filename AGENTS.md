@@ -70,14 +70,22 @@ for current ownership and entry points.
 
 Choose delivery authority before implementation:
 
-| Mode | Trigger | After a green PR to `dev` |
+| Mode | Trigger | Delivery to `dev` |
 |---|---|---|
-| Serial / interactive | Default: the user is actively requesting and steering concrete work | Merge it, delete the feature branch, and return to updated `dev` unless the user says to pause |
+| Serial / interactive | Default: the user is actively requesting and steering concrete work | After proportional local verification, open and merge the PR without waiting for pending remote CI; delete the feature branch and return to updated `dev` unless the user says to pause |
 | Parallel / contribution | Explicit `/goal` or direct request to autonomously find and contribute improvements | Leave each PR open for later review, return to `dev`, and continue from a fresh branch |
 
 A later interactive message does not retroactively authorize merging a parallel
-PR queue. Detailed branch, PR, promotion, hotfix, and external-contribution
-procedures live in [[docs/development-workflow.md]]
+PR queue. Parallel work is already non-blocking because opening a PR does not
+pause the next contribution. In serial work the PR exists to durably integrate
+each completed increment into `dev`, so pending CI must not turn it into a
+synchronous lock. Before publishing the next serial increment, inspect the
+previous increment's PR checks and post-merge `dev` run. A known failure blocks
+further stacking until repaired; a still-pending run does not by itself block
+serial work. `master` promotions, releases, explicit review pauses, and
+untrusted contributions keep their full synchronous gates. Detailed branch,
+PR, promotion, hotfix, and external-contribution procedures live in
+[[docs/development-workflow.md]]
 ([Development workflow](docs/development-workflow.md)).
 
 ## Verification
