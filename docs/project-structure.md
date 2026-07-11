@@ -5,8 +5,8 @@ and persistent-state layout. Update it when a top-level subsystem moves or a
 new long-lived process, package, or state root is introduced.
 
 Related guides: [[docs/managed-workspace-runtime.md]],
-[[docs/workspace-issues-and-scheduling.md]], and
-[[docs/market-data-architecture.md]].
+[[docs/workspace-issues-and-scheduling.md]],
+[[docs/conversation-provenance.md]], and [[docs/market-data-architecture.md]].
 
 ## Runtime Topology
 
@@ -123,12 +123,13 @@ Load-bearing paths:
 Conversation execution has four deliberately separate identities, plus one
 provenance link:
 
-- `SessionRecord.id` is Alice's durable UI/runtime key. Tabs, PTY attachment,
-  pause/resume routes, and Inbox links use it.
+- `resumeId` is Alice's canonical product Session identity across headless and
+  interactive turns. Product APIs, artifact provenance, and follow-up flows
+  identify the same stateful Session by this id.
 - `taskId` identifies one headless execution. Every follow-up turn gets a new
   task id, so run history remains append-only.
-- `resumeId` is Alice's stable conversation identity across headless and
-  interactive turns. Product APIs and frontend code resume only by this id.
+- `SessionRecord.id` is Alice's durable interactive materialization key. Tabs,
+  PTY attachment, and pause/resume routes use it; it is not Session identity.
 - `agentSessionId` is the backend-only native CLI conversation id. The
   `ResumeRegistry` maps `resumeId` to this adapter-specific value; it must not
   appear in frontend resume requests or Inbox provenance.
@@ -136,9 +137,13 @@ provenance link:
   as an interactive Session and preserves execution provenance.
 
 Do not use a headless task id directly as a PTY/session id, and do not create a
-new Alice Session every time the same `resumeId` is opened. The run is
-execution provenance; `resumeId` is the conversation; the Session is its
-durable interactive surface.
+new interactive materialization every time the same `resumeId` is opened. The
+run is execution provenance; `resumeId` is the product Session; the
+`SessionRecord` is one durable interactive surface.
+
+For the broader “ask the agent who produced this” model — including mutable
+Issues, Inbox deliveries, document revisions, reconstruction fallback, and
+trade-decision attribution — follow [[docs/conversation-provenance.md]].
 
 Built-in templates use cross-platform `bootstrap.mjs` files and route git
 through `src/workspaces/templates/_common.mjs`. Do not add new Bash bootstraps

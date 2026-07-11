@@ -135,6 +135,7 @@ Read the relevant guide before editing its subsystem:
   packaging, managed Pi, PortableGit/Bash, runtime profiles, and Workspace PATH.
 - [[docs/uta-live-testing.md]] — [UTA live testing](docs/uta-live-testing.md): broker/trading acceptance loops.
 - [[docs/workspace-issues-and-scheduling.md]] — [Workspace issues and scheduling](docs/workspace-issues-and-scheduling.md): Issue board, schedules, headless runs, and Inbox delivery.
+- [[docs/conversation-provenance.md]] — [Workspace Session and artifact provenance](docs/conversation-provenance.md): `resumeId` identity, artifact trails, Issue responsibility, and the provenance-before-collaboration delivery order.
 - [[docs/event-system.md]] — [Event-system retirement note](docs/event-system.md): removed Alice event-bus scheduler; UTA journal utility only.
 - [[docs/market-data-architecture.md]] — [Market data architecture](docs/market-data-architecture.md): TraderHub, K-line providers, and the private compatibility package.
 - `src/migrations/INDEX.md` — generated migration inventory and affected paths.
