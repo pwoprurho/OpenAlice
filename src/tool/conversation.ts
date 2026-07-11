@@ -8,63 +8,55 @@ const DEFAULT_TIMEOUT_MS = 300_000
 const MAX_TIMEOUT_MS = 1_800_000
 const MAX_PROMPT_CHARS = 16_000
 
-const targetSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('resume'), resumeId: z.string().min(1) }),
-  z.object({ kind: z.literal('workspace'), workspaceId: z.string().min(1) }),
-  z.object({
-    kind: z.literal('inbox'),
-    inboxEntryId: z.string().min(1),
-    workspaceId: z.string().min(1).optional(),
-  }),
-  z.object({
-    kind: z.literal('issue'),
-    workspaceId: z.string().min(1),
-    issueId: z.string().min(1),
-    action: z.enum(['created', 'updated', 'commented']).optional(),
-  }),
-  z.object({
-    kind: z.literal('report'),
-    workspaceId: z.string().min(1),
-    path: z.string().min(1),
-    revision: z.string().min(1).optional(),
-    action: z.enum(['created', 'updated', 'sent']).optional(),
-  }),
-  z.object({
-    kind: z.literal('trade-decision'),
-    accountId: z.string().min(1),
-    decisionId: z.string().min(1),
-    workspaceId: z.string().min(1).optional(),
-  }),
-])
-
 export const conversationAskFactory: WorkspaceToolFactory = {
   name: 'conversation_ask',
   build(ctx) {
     return tool({
       description: [
-        'Ask the agent responsible for a business artifact through embedded headless dispatch.',
+        'Ask a known product Session, an Issue owner, or a fresh worker in one Workspace.',
         '',
-        'Pass a typed target object. Issue/Inbox/report/trade targets resolve immutable',
-        'provenance first. A known Session is resumed exactly. If no Session origin exists',
-        'but the target carries a live Workspace, a fresh worker reconstructs the answer and',
-        'the result says mode=reconstructed. An attributed but unavailable Session is never',
-        'silently replaced. Direct resume/workspace targets are the explicit low-level forms.',
+        'Use exactly one addressing form: resumeId for an exact Session; issueId (optionally',
+        'scoped by wsId) for Issue provenance; or wsId alone to recruit a fresh worker.',
+        'The CLI exposes these as --resume-id, --issue-id, and --ws-id. It never requires',
+        'callers to construct an internal target object.',
         '',
-        'The call is asynchronous and returns taskId. Poll with conversation_read.',
+        'The call is asynchronous and returns a short taskId. Poll with conversation_read.',
       ].join('\n'),
       inputSchema: z.object({
         prompt: z.string().trim().min(1).max(MAX_PROMPT_CHARS)
           .describe('Question for the responsible Session or reconstructing worker.'),
-        target: targetSchema.describe('Typed business target or explicit resume/workspace target.'),
+        resumeId: z.string().min(1).optional()
+          .describe('Exact product Session to continue. Cannot be combined with wsId or issueId.'),
+        wsId: z.string().min(1).optional()
+          .describe('Workspace for a fresh worker, or optional scope for issueId.'),
+        issueId: z.string().min(1).optional()
+          .describe('Issue whose attributable Session should answer. Defaults to the current Workspace.'),
         agent: z.string().min(1).optional()
           .describe('Optional runtime for reconstructed/fresh work only; exact Session runtime cannot be overridden.'),
         timeoutMs: z.coerce.number().int().positive().max(MAX_TIMEOUT_MS).optional()
           .describe(`Headless watchdog in milliseconds (default ${DEFAULT_TIMEOUT_MS}).`),
       }),
-      execute: async ({ prompt, target, agent, timeoutMs }) => {
+      execute: async ({ prompt, resumeId, wsId, issueId, agent, timeoutMs }) => {
         if (!ctx.conversation) {
           return { ok: false as const, error: 'workspace conversation control is unavailable' }
         }
+        if (resumeId && (wsId || issueId)) {
+          return {
+            ok: false as const,
+            error: 'choose one target: --resume-id, --issue-id [--ws-id], or --ws-id',
+          }
+        }
+        if (!resumeId && !issueId && !wsId) {
+          return {
+            ok: false as const,
+            error: 'provide --resume-id, --issue-id [--ws-id], or --ws-id',
+          }
+        }
+        const target = resumeId
+          ? { kind: 'resume' as const, resumeId }
+          : issueId
+            ? { kind: 'issue' as const, workspaceId: wsId ?? ctx.workspaceId, issueId }
+            : { kind: 'workspace' as const, workspaceId: wsId! }
         try {
           const result = await ctx.conversation.ask({
             prompt,
@@ -73,7 +65,11 @@ export const conversationAskFactory: WorkspaceToolFactory = {
             ...(agent ? { agent } : {}),
           })
           if (result.status === 'unavailable') {
-            return { ok: false as const, status: result.status, resolution: result.resolution }
+            return {
+              ok: false as const,
+              status: result.status,
+              resolution: { mode: result.resolution.mode, reason: result.resolution.reason },
+            }
           }
           return {
             ok: true as const,
@@ -83,7 +79,9 @@ export const conversationAskFactory: WorkspaceToolFactory = {
             workspaceId: result.workspaceId,
             workspace: result.workspace,
             agent: result.agent,
-            resolution: result.resolution,
+            resolution: result.resolution.mode === 'reconstructed'
+              ? { mode: result.resolution.mode, reason: result.resolution.reason }
+              : { mode: result.resolution.mode },
           }
         } catch (err) {
           return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
@@ -100,8 +98,9 @@ export const conversationReadFactory: WorkspaceToolFactory = {
       description: [
         'Read one headless follow-up started by conversation_ask.',
         '',
-        'Summary returns the latest assistant reply plus compact tool/error activity.',
-        'Detailed mode includes normalized message blocks. Running tasks may have partial output.',
+        'Summary returns the latest assistant reply and one compact failure when present.',
+        'Tool activity and normalized message blocks are available only in detailed mode.',
+        'Running tasks may have partial output.',
       ].join('\n'),
       inputSchema: z.object({
         taskId: z.string().min(1).describe('taskId returned by conversation_ask.'),
@@ -121,6 +120,7 @@ export const conversationReadFactory: WorkspaceToolFactory = {
           const errors = structured?.blocks
             .filter((block): block is Extract<HeadlessMessageBlock, { type: 'error' }> => block.type === 'error')
             .map((block) => block.message) ?? []
+          const compactError = task.error ?? errors.at(-1)
           return {
             ok: true as const,
             taskId: task.taskId,
@@ -129,12 +129,14 @@ export const conversationReadFactory: WorkspaceToolFactory = {
             agent: task.agent,
             status: task.status,
             assistantText: structured?.assistantText ?? null,
-            tools,
-            errors,
             ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}),
             ...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
-            ...(task.error ? { error: task.error } : {}),
-            ...(mode === 'detailed' ? { blocks: structured?.blocks ?? [] } : {}),
+            ...(compactError ? { error: compactError } : {}),
+            ...(mode === 'detailed' ? {
+              tools,
+              errors,
+              blocks: structured?.blocks ?? [],
+            } : {}),
           }
         } catch (err) {
           return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
@@ -148,4 +150,3 @@ export const conversationToolFactories: WorkspaceToolFactory[] = [
   conversationAskFactory,
   conversationReadFactory,
 ]
-

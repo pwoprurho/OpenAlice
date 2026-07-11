@@ -19,7 +19,7 @@ function context(over: Partial<WorkspaceToolContext> = {}): WorkspaceToolContext
 }
 
 describe('conversation_ask', () => {
-  it('passes a typed business target to embedded conversation control', async () => {
+  it('turns flat Issue flags into the internal conversation target', async () => {
     const ask = vi.fn(async () => ({
       status: 'dispatched' as const,
       taskId: 'task-1', resumeId: 'resume-1', workspaceId: 'ws-peer',
@@ -35,7 +35,7 @@ describe('conversation_ask', () => {
     }))
     const target = { kind: 'issue' as const, workspaceId: 'ws-peer', issueId: 'audit' }
 
-    await expect(run(tool, { prompt: 'why?', target })).resolves.toMatchObject({
+    await expect(run(tool, { prompt: 'why?', wsId: 'ws-peer', issueId: 'audit' })).resolves.toMatchObject({
       ok: true, status: 'running', taskId: 'task-1', resolution: { mode: 'exact' },
     })
     expect(ask).toHaveBeenCalledWith({ prompt: 'why?', target, timeoutMs: 300_000 })
@@ -52,11 +52,25 @@ describe('conversation_ask', () => {
       },
     }))
     await expect(run(tool, {
-      prompt: 'why?', target: { kind: 'resume', resumeId: 'resume-old' },
+      prompt: 'why?', resumeId: 'resume-old',
     })).resolves.toEqual({
       ok: false,
       status: 'unavailable',
       resolution: { mode: 'unavailable', reason: 'missing-native-session' },
+    })
+  })
+
+  it('rejects ambiguous or missing addressing flags', async () => {
+    const tool = conversationAskFactory.build(context({
+      conversation: { ask: vi.fn(), read: vi.fn() },
+    }))
+    await expect(run(tool, { prompt: 'why?' })).resolves.toMatchObject({
+      ok: false, error: expect.stringContaining('provide --resume-id'),
+    })
+    await expect(run(tool, {
+      prompt: 'why?', resumeId: 'resume-1', wsId: 'ws-peer',
+    })).resolves.toMatchObject({
+      ok: false, error: expect.stringContaining('choose one target'),
     })
   })
 })
@@ -85,9 +99,10 @@ describe('conversation_read', () => {
     expect(result).toMatchObject({
       ok: true,
       assistantText: 'The report followed the issue rule.',
-      tools: [{ name: 'Read', status: 'completed' }],
     })
     expect(result).not.toHaveProperty('blocks')
+    expect(result).not.toHaveProperty('tools')
+    expect(result).not.toHaveProperty('errors')
   })
 
   it('returns normalized blocks only in detailed mode', async () => {
@@ -95,7 +110,9 @@ describe('conversation_read', () => {
       conversation: { ask: vi.fn(), read: vi.fn(async () => task) },
     }))
     await expect(run(tool, { taskId: task.taskId, mode: 'detailed' }))
-      .resolves.toMatchObject({ blocks: task.structured.blocks })
+      .resolves.toMatchObject({
+        tools: [{ name: 'Read', status: 'completed' }],
+        blocks: task.structured.blocks,
+      })
   })
 })
-

@@ -382,6 +382,8 @@ approval state, routing, fills, and slippage.
 13. Provenance is stamped from authoritative context, not asserted by an agent.
 14. Existing UUID `resumeId`s remain valid; readable ids apply only to new
     Sessions.
+15. New `taskId`s are short opaque run codes. Existing UUID task ids remain
+    valid, and no second alias id is introduced.
 
 ## Delivery Order: Leave the Trail, Then Collaborate
 
@@ -430,16 +432,19 @@ Phase 2 consumes Phase 1; it does not infer provenance independently. It owns:
 The embedded generic entry point is:
 
 ```bash
-alice-workspace conversation ask --target '<typed JSON target>' --prompt '<question>'
+alice-workspace conversation ask --resume-id <resumeId> --prompt '<question>'
+alice-workspace conversation ask --issue-id <issueId> [--ws-id <workspaceId>] --prompt '<question>'
+alice-workspace conversation ask --ws-id <workspaceId> --prompt '<question>'
 alice-workspace conversation read --task-id <taskId>
 ```
 
-`target.kind` supports `resume`, `workspace`, `inbox`, `issue`, `report`, and
-`trade-decision`. Artifact targets always consult the Phase 1 index. The ask
-result reports `resolution.mode`; read returns normalized assistant text,
-compact tool/error activity, and the real runtime status. A response may carry
-usable assistant text and runtime errors together; consumers preserve both
-rather than rewriting failure into success.
+The public CLI accepts only flat identity flags. `resumeId` addresses one exact
+Session, `issueId` consults the Phase 1 index, and `wsId` recruits a fresh worker
+when there is no known owner. Rich Inbox/report/trade target structures stay
+inside the resolver and future business-specific convenience commands; agents
+never serialize them into `conversation ask`. The ask result reports a compact
+`resolution.mode`; read returns runtime status and the latest assistant text by
+default. Full tool/message blocks are diagnostic data behind `--mode detailed`.
 
 The first fresh reconstruction appends a `reconstructed` occurrence to the
 artifact. Later questions about that same otherwise-unattributed artifact

@@ -183,13 +183,15 @@ remain valid and are never renamed. `taskId` remains one execution, while
 rather than silently pruned.
 
 Internal agents use the same product handle through the embedded collaboration
-path. For example, `alice-workspace conversation ask --target
-'{"kind":"issue","workspaceId":"<ws>","issueId":"<id>"}' --prompt '<question>'`
+path. For example, `alice-workspace conversation ask --issue-id <id>
+--ws-id <ws> --prompt '<question>'`
 queries Issue provenance first: it resumes the exact attributable Session,
 reconstructs with a fresh worker only when the Workspace is known and no
 Session origin exists, or returns unavailable without substituting another
-agent. `alice-workspace conversation read --task-id <id>` exposes normalized
-assistant text plus tool/error activity.
+agent. `alice-workspace conversation read --task-id <id>` returns the latest
+assistant reply by default; diagnostic tool/message blocks require
+`--mode detailed`. New task ids are short `run-xxxxxxxx` codes; existing UUID
+task ids remain readable.
 
 Scheduling never bypasses trading approval. A headless agent may research or
 stage a trade, but execution remains behind UTA/Trading-as-Git permission and

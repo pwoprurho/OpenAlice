@@ -13,13 +13,19 @@
  * "running" from a previous Alice life. (Durable/detached runs are a later
  * upgrade; see project_workspace_automation_design.)
  */
-import { randomUUID } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import type { Logger } from './logger.js'
 
 export type HeadlessTaskStatus = 'running' | 'done' | 'failed' | 'interrupted'
+
+const TASK_ID_BYTES = 6
+
+function randomTaskId(): string {
+  return `run-${randomBytes(TASK_ID_BYTES).toString('base64url')}`
+}
 
 export interface HeadlessTaskOutputSummary {
   readonly hasAssistantReply: boolean
@@ -139,8 +145,10 @@ export class HeadlessTaskRegistry {
     /** Set only when an issue fired this run (scheduled scan); omitted for manual/external runs. */
     issueId?: string
   }): Promise<HeadlessTaskRecord> {
+    let taskId = randomTaskId()
+    while (this.tasks.some((task) => task.taskId === taskId)) taskId = randomTaskId()
     const rec: HeadlessTaskRecord = {
-      taskId: randomUUID(),
+      taskId,
       resumeId: input.resumeId,
       ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}),
       wsId: input.wsId,

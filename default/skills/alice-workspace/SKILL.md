@@ -84,16 +84,20 @@ headless follow-up without leaving the embedded Workspace CLI:
 
 ```bash
 alice-workspace conversation ask \
-  --target '{"kind":"issue","workspaceId":"<ws>","issueId":"<id>"}' \
+  --issue-id <id> --ws-id <ws> \
   --prompt 'Why did you create this issue?'
 alice-workspace conversation ask \
-  --target '{"kind":"inbox","inboxEntryId":"<id>","workspaceId":"<ws>"}' \
-  --prompt 'Why did you send this?'
+  --resume-id <resumeId> \
+  --prompt 'Why did you send this result?'
 alice-workspace conversation ask \
-  --target '{"kind":"trade-decision","accountId":"<account>","decisionId":"<commit>"}' \
-  --prompt 'What thesis justified this decision?'
+  --ws-id <ws> --prompt 'Reconstruct why this artifact was produced.'
 alice-workspace conversation read --task-id <taskId>
 ```
+
+Address with one flat form: `--resume-id` continues an exact known Session;
+`--issue-id` resolves Issue provenance (`--ws-id` scopes a peer Issue and
+defaults to this Workspace); `--ws-id` by itself recruits a fresh worker. Never
+construct or pass an internal target JSON object.
 
 Inspect `resolution.mode` on the ask result:
 
@@ -103,9 +107,9 @@ Inspect `resolution.mode` on the ask result:
   letting it impersonate the original author;
 - `unavailable` means an attributed Session cannot resume, or no safe
   Workspace target exists. Do not work around it by picking another old
-  Session. Poll `conversation read` until `status` leaves `running`; a runtime
-  may still return usable `assistantText` alongside error blocks, so preserve
-  both the status and the answer.
+Session. Poll `conversation read` until `status` leaves `running`; its default
+output keeps the final `assistantText` and a compact error when needed. Use
+`--mode detailed` only for diagnostics that genuinely need tool/message blocks.
 
 > **Editing a peer is interactive-only.** Reading another workspace is always OK.
 > *Editing* one means reaching outside your own workspace — only do that in an

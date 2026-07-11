@@ -48,6 +48,7 @@ describe('HeadlessTaskRegistry', () => {
     const a = await createTask(reg, { wsId: 'w1', agent: 'codex', prompt: 'do A', startedAt: 1 })
     const b = await createTask(reg, { wsId: 'w2', agent: 'pi', prompt: 'do B', startedAt: 2 })
     expect(a.status).toBe('running')
+    expect(a.taskId).toMatch(/^run-[A-Za-z0-9_-]{8}$/)
     expect(a.resumeId).toBe('resume-test-1')
     expect(reg.list().map((t) => t.taskId)).toEqual([b.taskId, a.taskId]) // newest-first
     expect(reg.runningCount()).toBe(2)
