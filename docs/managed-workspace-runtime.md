@@ -61,7 +61,9 @@ Workspace-facing OpenAlice commands (`alice`, `alice-workspace`, `traderhub`,
 and `alice-uta`) also do not depend on a host Node installation. Their POSIX
 and Windows launchers execute the explicit `openalice-cli.cjs` payload through
 the Electron executable recorded in `OPENALICE_MANAGED_PI_NODE_PATH`, with
-`ELECTRON_RUN_AS_NODE=1`. Source/dev falls back to `node` from the contributor
+`ELECTRON_RUN_AS_NODE=1`. When the POSIX launcher is reached from managed Git
+Bash, it normalizes Windows-native launcher and Electron paths through
+`cygpath` before execution. Source/dev falls back to `node` from the contributor
 environment. Keep the public commands as launchers: executing extensionless
 JavaScript directly makes behavior depend on the host Node version and the
 nearest `package.json` module type.

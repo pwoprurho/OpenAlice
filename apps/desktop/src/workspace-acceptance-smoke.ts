@@ -87,7 +87,7 @@ export async function runRendererWorkspaceAcceptanceSmoke(
         markerReject = reject
       })
       const attachedTimer = setTimeout(() => attachedReject(new Error('PTY attached timeout')), 10000)
-      const markerTimer = setTimeout(() => markerReject(new Error('Workspace CLI contract timeout: ' + output.slice(-4000))), 30000)
+      const markerTimer = setTimeout(() => markerReject(new Error('Workspace CLI contract timeout: ' + output.slice(-4000))), 20000)
       connectionId = bridge.connect({ sessionId, cols: 120, rows: 32 })
       const offMessage = bridge.onMessage(connectionId, (msg) => {
         if (msg.type === 'control') {
@@ -119,7 +119,6 @@ export async function runRendererWorkspaceAcceptanceSmoke(
       try {
         await attached
         const command = [
-          'set -e',
           'test "$AQ_WS_ID" = "' + workspaceId + '"',
           'test -n "$OPENALICE_TOOL_URL"',
           'test -n "$OPENALICE_TOOL_SOCKET"',
@@ -139,7 +138,7 @@ export async function runRendererWorkspaceAcceptanceSmoke(
           'alice-workspace issue show --id ' + shellIssueId + ' >/dev/null',
           // Split the sentinel so terminal command echo cannot satisfy it.
           "printf '__OPENALICE_%s_OK__\\\\n' 'WORKSPACE_CLI_CONTRACT'",
-        ].join('; ')
+        ].join(' && ')
         bridge.send(connectionId, new TextEncoder().encode(command + '\\r'))
         await marker
         checks.shellCliRoundTrip = true
