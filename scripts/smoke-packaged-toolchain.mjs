@@ -33,7 +33,19 @@ export function buildPackagedToolchainSmokePlan(packageResult) {
     command: electron,
     args: [piCli, '--version'],
     env: { ELECTRON_RUN_AS_NODE: '1' },
-    expectStdout: /\b0\.80\.3\b/,
+    expectStdout: /\b0\.80\.6\b/,
+  })
+
+  commands.push({
+    label: 'workspace CLI payload through packaged Electron Node',
+    command: electron,
+    args: [join(packageResult.appRoot, 'src', 'workspaces', 'cli', 'bin', 'openalice-cli.cjs')],
+    env: {
+      ELECTRON_RUN_AS_NODE: '1',
+      OPENALICE_CLI_BIN: 'traderhub',
+    },
+    expectStatus: 1,
+    expectStderr: /traderhub: AQ_WS_ID is not set/,
   })
 
   if (packageResult.platform === 'win32') {
@@ -46,13 +58,15 @@ export function buildPackagedToolchainSmokePlan(packageResult) {
     const gitExe = join(gitRoot, git.gitBin)
     const bashExe = join(gitRoot, git.shellPath)
     const shExe = join(gitRoot, git.shPath)
+    const workspaceCliDir = join(packageResult.appRoot, 'src', 'workspaces', 'cli', 'bin')
     const toolchainPath = (Array.isArray(git.toolchainPaths) ? git.toolchainPaths : ['cmd', 'bin', 'usr/bin'])
       .map((entry) => join(gitRoot, entry))
       .join(delimiter)
     const winEnv = {
-      PATH: [toolchainPath, process.env['PATH']].filter(Boolean).join(delimiter),
+      PATH: [workspaceCliDir, toolchainPath, process.env['PATH']].filter(Boolean).join(delimiter),
       CHERE_INVOKING: '1',
       MSYSTEM: packageResult.platformArch.endsWith('arm64') ? 'CLANGARM64' : 'MINGW64',
+      OPENALICE_MANAGED_PI_NODE_PATH: electron,
     }
 
     commands.push({
@@ -76,6 +90,28 @@ export function buildPackagedToolchainSmokePlan(packageResult) {
       ],
       env: winEnv,
       expectStdout: /OPENALICE_SH_OK[\s\S]*git version [\s\S]*GNU bash/,
+    })
+    commands.push({
+      label: 'Workspace CLI launcher through managed Git Bash',
+      command: bashExe,
+      args: ['--noprofile', '--norc', '-c', 'alice --help'],
+      env: winEnv,
+      expectStatus: 1,
+      expectStderr: /alice: AQ_WS_ID is not set/,
+    })
+    commands.push({
+      label: 'Workspace CLI transport env through managed Git Bash',
+      command: bashExe,
+      args: ['--noprofile', '--norc', '-c', 'alice --help'],
+      env: {
+        ...winEnv,
+        AQ_WS_ID: 'workspace-toolchain-smoke',
+        OPENALICE_TOOL_URL: '/cli',
+        OPENALICE_TOOL_SOCKET: '\\\\.\\pipe\\openalice-toolchain-missing',
+        OPENALICE_CLI_DEBUG: '1',
+      },
+      expectStatus: 1,
+      expectStdout: /"toolUrl":"\/cli"/,
     })
   }
 
@@ -104,11 +140,18 @@ function runCommand(repoRoot, appRoot, spec) {
   if (result.error) {
     throw new Error(`${spec.label} failed to start: ${result.error.message}`)
   }
-  if (result.status !== 0) {
-    throw new Error(`${spec.label} exited ${result.status ?? 'unknown'}${result.signal ? ` (${result.signal})` : ''}`)
+  const expectedStatus = spec.expectStatus ?? 0
+  if (result.status !== expectedStatus) {
+    throw new Error(
+      `${spec.label} exited ${result.status ?? 'unknown'} instead of ${expectedStatus}` +
+      `${result.signal ? ` (${result.signal})` : ''}`,
+    )
   }
   if (spec.expectStdout && !spec.expectStdout.test(stdout)) {
     throw new Error(`${spec.label} stdout did not match ${spec.expectStdout}: ${JSON.stringify(stdout)}`)
+  }
+  if (spec.expectStderr && !spec.expectStderr.test(stderr)) {
+    throw new Error(`${spec.label} stderr did not match ${spec.expectStderr}: ${JSON.stringify(stderr)}`)
   }
 }
 

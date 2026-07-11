@@ -7,7 +7,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -89,7 +89,7 @@ describe('injectWorkspaceContext — persona', () => {
 });
 
 describe('injectWorkspaceContext — skills', () => {
-  it('copies a bundled skill into all three CLI discovery paths', async () => {
+  it('copies a bundled skill into the canonical shared discovery paths', async () => {
     await injectWorkspaceContext({
       template: makeTemplate({ bundledSkills: ['scan-value-chain'] }),
       wsId: 'ws-abc',
@@ -97,8 +97,8 @@ describe('injectWorkspaceContext — skills', () => {
     });
     const expected = await readFile(defaultPath('skills', 'scan-value-chain', 'SKILL.md'), 'utf8');
     expect(await read('.claude/skills/scan-value-chain/SKILL.md')).toBe(expected);  // Claude Code
-    expect(await read('.agents/skills/scan-value-chain/SKILL.md')).toBe(expected);  // Codex (+ opencode default)
-    expect(await read('.pi/skills/scan-value-chain/SKILL.md')).toBe(expected);      // Pi
+    expect(await read('.agents/skills/scan-value-chain/SKILL.md')).toBe(expected);  // Codex + Pi
+    expect(existsSync(join(dir, '.pi/skills'))).toBe(false);                        // no Pi collision copy
   });
 
   it('injects the per-CLI playbooks (alice* + traderhub) for a tool-bearing template', async () => {
@@ -109,8 +109,9 @@ describe('injectWorkspaceContext — skills', () => {
     });
     for (const name of ['alice', 'alice-analysis', 'alice-uta', 'alice-workspace', 'traderhub', 'scan-value-chain']) {
       expect(existsSync(join(dir, '.claude/skills', name, 'SKILL.md')), name).toBe(true);
-      expect(existsSync(join(dir, '.pi/skills', name, 'SKILL.md')), name).toBe(true);
+      expect(existsSync(join(dir, '.agents/skills', name, 'SKILL.md')), name).toBe(true);
     }
+    expect(existsSync(join(dir, '.pi/skills'))).toBe(false);
   });
 
   it('does not inject CLI playbooks when the template is not tool-bearing', async () => {
@@ -131,6 +132,21 @@ describe('injectWorkspaceContext — skills', () => {
     });
     expect(existsSync(join(dir, '.claude/skills/self-scheduling/SKILL.md'))).toBe(true);
     expect(existsSync(join(dir, '.agents/skills/self-scheduling/SKILL.md'))).toBe(true);
-    expect(existsSync(join(dir, '.pi/skills/self-scheduling/SKILL.md'))).toBe(true);
+    expect(existsSync(join(dir, '.pi/skills/self-scheduling/SKILL.md'))).toBe(false);
+  });
+
+  it('leaves a legacy .pi/skills directory untouched', async () => {
+    const legacy = join(dir, '.pi/skills/custom/SKILL.md');
+    await mkdir(join(dir, '.pi/skills/custom'), { recursive: true });
+    await writeFile(legacy, 'legacy user skill\n');
+
+    await injectWorkspaceContext({
+      template: makeTemplate({ bundledSkills: ['scan-value-chain'] }),
+      wsId: 'ws-abc',
+      dir,
+    });
+
+    expect(await read('.pi/skills/custom/SKILL.md')).toBe('legacy user skill\n');
+    expect(existsSync(join(dir, '.pi/skills/scan-value-chain/SKILL.md'))).toBe(false);
   });
 });

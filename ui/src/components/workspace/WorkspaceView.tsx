@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { ReactElement } from 'react';
 import { MessageSquare } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import type { SessionRecord } from './api';
 import { FilesPanel } from './FilesPanel';
@@ -151,17 +152,18 @@ function EmptyState(props: {
   onSelectSession: (sessionId: string) => void;
   onSpawn: () => void;
 }): ReactElement {
+  const { t } = useTranslation();
   if (props.sessions.length === 0) {
     return (
       <div className="workspace-cta">
         <p className="workspace-cta-text">
-          No session yet — start one to begin a conversation in this workspace.
+          {t('workspace.emptyNoSession')}
         </p>
         <button type="button" className="workspace-cta-btn" onClick={props.onSpawn}>
-          Start a new session
+          {t('workspace.startNewSession')}
         </button>
         <p className="workspace-cta-hint">
-          <kbd>⌘T</kbd> works too.
+          {t('workspace.shortcutHint')}
         </p>
       </div>
     );
@@ -176,7 +178,7 @@ function EmptyState(props: {
 
   return (
     <div className="workspace-empty-state">
-      <h2 className="workspace-empty-heading">Pick up where you left off</h2>
+      <h2 className="workspace-empty-heading">{t('workspace.pickUp')}</h2>
       <ul className="workspace-empty-list">
         {ordered.map((s) => (
           <SessionCard
@@ -190,17 +192,17 @@ function EmptyState(props: {
         ))}
       </ul>
       <div className="workspace-empty-divider">
-        <span>or</span>
+        <span>{t('workspace.or')}</span>
       </div>
       <button
         type="button"
         className="workspace-empty-secondary-btn"
         onClick={props.onSpawn}
       >
-        + Start a new session
+        + {t('workspace.startNewSession')}
       </button>
       <p className="workspace-cta-hint">
-        <kbd>⌘T</kbd> works too.
+        {t('workspace.shortcutHint')}
       </p>
     </div>
   );
@@ -210,6 +212,7 @@ function SessionCard(props: {
   record: SessionRecord;
   onClick: () => void;
 }): ReactElement {
+  const { t } = useTranslation();
   const r = props.record;
   const isPaused = r.state === 'paused';
   return (
@@ -220,7 +223,7 @@ function SessionCard(props: {
       <div className="workspace-empty-card-meta">
         <span className="workspace-empty-card-name">{r.name}</span>
         <span className="workspace-empty-card-state">
-          {isPaused ? 'paused · ' : 'active · '}
+          {isPaused ? `${t('workspace.paused')} · ` : `${t('workspace.active')} · `}
           {formatRelativeTime(r.lastActiveAt)}
         </span>
       </div>
@@ -228,10 +231,10 @@ function SessionCard(props: {
         type="button"
         className="workspace-empty-card-btn"
         onClick={props.onClick}
-        aria-label={isPaused ? `Resume ${r.name}` : `Open ${r.name}`}
+        aria-label={isPaused ? t('workspace.resumeNamed', { name: r.name }) : t('workspace.openNamed', { name: r.name })}
       >
         <MessageSquare size={13} strokeWidth={2.25} aria-hidden="true" />
-        <span>Continue</span>
+        <span>{t('workspace.continue')}</span>
       </button>
     </li>
   );

@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { claudeAdapter } from './claude.js';
 import { codexAdapter } from './codex.js';
 import { opencodeAdapter } from './opencode.js';
-import { piAdapter } from './pi.js';
+import { piAdapter, syncPiWindowsShellPath } from './pi.js';
 
 let dir: string;
 
@@ -365,7 +365,7 @@ describe('composeHeadlessCommand (one-shot headless argv, prompt placed per-CLI)
 describe('piAdapter AI-config', () => {
   const mcpEnv = { OPENALICE_MCP_URL: 'http://127.0.0.1:47332/mcp', AQ_WS_ID: 'ws-abc' };
 
-  it('composeCommand: fresh is bare; resume uses top-level --continue / --session-id', () => {
+  it('composeCommand leaves project trust to Pi and the user', () => {
     expect(piAdapter.composeCommand(['ignored'], { cwd: dir, env: mcpEnv })).toEqual(['pi']);
     expect(piAdapter.composeCommand([], { cwd: dir, env: mcpEnv, resume: 'last' }))
       .toEqual(['pi', '--continue']);
@@ -377,7 +377,7 @@ describe('piAdapter AI-config', () => {
     const env = { ...mcpEnv, OPENALICE_MANAGED_PI_PATH: '/app/vendor/pi/pi' };
     expect(piAdapter.composeCommand(['ignored'], { cwd: dir, env })).toEqual(['/app/vendor/pi/pi']);
     expect(piAdapter.composeHeadlessCommand!([], { cwd: dir, env }, 'hello')).toEqual([
-      '/app/vendor/pi/pi', '-p', '--mode', 'json', 'hello',
+      '/app/vendor/pi/pi', '--approve', '-p', '--mode', 'json', 'hello',
     ]);
   });
 
@@ -394,6 +394,7 @@ describe('piAdapter AI-config', () => {
     expect(piAdapter.composeHeadlessCommand!([], { cwd: dir, env }, 'hello')).toEqual([
       '/Applications/OpenAlice.app/Contents/MacOS/OpenAlice',
       '/app/vendor/pi/node_modules/@earendil-works/pi-coding-agent/dist/cli.js',
+      '--approve',
       '-p',
       '--mode',
       'json',
@@ -401,10 +402,10 @@ describe('piAdapter AI-config', () => {
     ]);
   });
 
-  it('composeEnv sets PI_OFFLINE always; PI_CODING_AGENT_DIR only in override mode', async () => {
+  it('composeEnv leaves Pi startup networking to the base env and redirects only in override mode', async () => {
     // No .pi-agent yet → no redirect.
     const before = piAdapter.composeEnv!({ cwd: dir, env: mcpEnv });
-    expect(before['PI_OFFLINE']).toBe('1');
+    expect(before['PI_OFFLINE']).toBeUndefined();
     expect(before['PI_CODING_AGENT_DIR']).toBeUndefined();
     // After writing a provider override, the agent dir is redirected.
     await piAdapter.writeAiConfig!(dir, { baseUrl: 'https://cn.test/v1', apiKey: 'sk-p', model: 'deepseek-chat' });
@@ -427,10 +428,11 @@ describe('piAdapter AI-config', () => {
         },
       },
     });
-    expect(JSON.parse(await read('.pi-agent/settings.json'))).toEqual({
-      defaultProvider: 'workspace',
-      defaultModel: 'deepseek-chat',
-    });
+    const settings = JSON.parse(await read('.pi-agent/settings.json'));
+    expect(settings.defaultProvider).toBe('workspace');
+    expect(settings.defaultModel).toBe('deepseek-chat');
+    if (process.platform === 'win32') expect(settings.shellPath).toMatch(/bash\.exe$/i);
+    else expect(settings.shellPath).toBeUndefined();
   });
 
   it('writes managed shellPath into Pi settings when the runtime profile provides one', async () => {
@@ -450,6 +452,28 @@ describe('piAdapter AI-config', () => {
     } finally {
       if (before === undefined) delete process.env['OPENALICE_MANAGED_SHELL_PATH'];
       else process.env['OPENALICE_MANAGED_SHELL_PATH'] = before;
+    }
+  });
+
+  it('backfills the Windows shell path without overwriting Pi-owned settings', async () => {
+    await mkdir(join(dir, '.pi-agent'), { recursive: true });
+    await writeFile(join(dir, '.pi-agent', 'settings.json'), JSON.stringify({
+      defaultProvider: 'workspace',
+      theme: 'light',
+    }));
+    const customPath = 'D:\\PortableGit\\bin\\bash.exe';
+    const before = process.env['OPENALICE_WORKSPACE_SHELL_PATH'];
+    process.env['OPENALICE_WORKSPACE_SHELL_PATH'] = customPath;
+    try {
+      await syncPiWindowsShellPath(dir, 'win32');
+      expect(JSON.parse(await read('.pi-agent/settings.json'))).toEqual({
+        defaultProvider: 'workspace',
+        theme: 'light',
+        shellPath: customPath,
+      });
+    } finally {
+      if (before === undefined) delete process.env['OPENALICE_WORKSPACE_SHELL_PATH'];
+      else process.env['OPENALICE_WORKSPACE_SHELL_PATH'] = before;
     }
   });
 

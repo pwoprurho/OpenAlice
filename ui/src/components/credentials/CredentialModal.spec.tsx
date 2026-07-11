@@ -60,7 +60,7 @@ const onboardingTestPreset: Preset = {
     {
       id: 'local-mock',
       label: 'Local mock',
-      wires: { 'openai-chat': 'https://onboarding.openalice.test/openai-chat' },
+      wires: { 'openai-chat': 'http://127.0.0.1:0/v1' },
     },
   ],
 }

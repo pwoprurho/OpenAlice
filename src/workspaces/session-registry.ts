@@ -41,10 +41,19 @@ export interface SessionRecord {
    * Stored capped — we don't need the whole prompt for a one-line title.
    */
   readonly title?: string;
+  /**
+   * The headless run this launcher-owned Session was materialized from.
+   * Optional in the v2 registry because ordinary interactive Sessions have no
+   * source run. The loader still accepts v1 files during migration. This is the
+   * durable run -> Session index used by Inbox and automation surfaces to make
+   * repeated "continue this run" actions return to one conversation instead
+   * of spawning duplicate wrappers around the same agent transcript.
+   */
+  readonly sourceRunId?: string;
 }
 
 interface FileShape {
-  readonly version: 1;
+  readonly version: 2;
   readonly records: SessionRecord[];
 }
 
@@ -170,6 +179,16 @@ export class SessionRegistry {
     return undefined;
   }
 
+  /** Find the stable interactive Session materialized from a headless run. */
+  findBySourceRunId(wsId: string, sourceRunId: string): SessionRecord | undefined {
+    const records = this.byWs.get(wsId);
+    if (!records) return undefined;
+    for (const record of records.values()) {
+      if (record.sourceRunId === sourceRunId) return record;
+    }
+    return undefined;
+  }
+
   async create(record: SessionRecord): Promise<void> {
     await this.ensureLoaded(record.wsId);
     const records = this.byWs.get(record.wsId)!;
@@ -241,7 +260,7 @@ export class SessionRegistry {
     const records = this.byWs.get(wsId);
     if (!records) return;
     const payload: FileShape = {
-      version: 1,
+      version: 2,
       records: Array.from(records.values()),
     };
     const path = join(this.dir, `${wsId}.json`);
@@ -261,7 +280,7 @@ function validateFile(value: unknown): SessionRecord[] {
     throw new Error('sessions.json: root must be an object');
   }
   const v = value as Record<string, unknown>;
-  if (v['version'] !== 1) {
+  if (v['version'] !== 1 && v['version'] !== 2) {
     throw new Error(`sessions.json: unsupported version ${String(v['version'])}`);
   }
   if (!Array.isArray(v['records'])) {
@@ -297,6 +316,7 @@ function validateFile(value: unknown): SessionRecord[] {
       // it's written to disk by `flush`, so it must be read back here too, or
       // every server restart / registry reload reverts the row to the `c1` name.
       ...(typeof r['title'] === 'string' ? { title: r['title'] } : {}),
+      ...(typeof r['sourceRunId'] === 'string' ? { sourceRunId: r['sourceRunId'] } : {}),
     };
     const hint = r['resumeHint'];
     if (

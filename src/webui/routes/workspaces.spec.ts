@@ -278,6 +278,124 @@ describe('POST /:id/headless', () => {
   });
 });
 
+describe('POST /:id/headless/:taskId/session', () => {
+  function buildHeadlessSession(opts: { task?: any } = {}) {
+    const records = new Map<string, any>();
+    const live = new Map<string, any>();
+    const adapter = {
+      id: 'codex',
+      namePrefix: 'x',
+      capabilities: { resumeById: true, resumeLast: true },
+      bootstrap: vi.fn(async () => {}),
+    };
+    const task = opts.task ?? {
+      taskId: 'run-1',
+      wsId: 'ws-1',
+      agent: 'codex',
+      prompt: 'Investigate the earnings anomaly',
+      status: 'done',
+      agentSessionId: '019eb75e-0b1b-7fa2',
+    };
+    const spawn = vi.fn((_wsId: string, ctx: any) => {
+      const session = {
+        recordId: ctx.recordId,
+        wsId: 'ws-1',
+        name: ctx.recordName,
+        pid: 4242,
+        startedAt: 123,
+        agentSessionId: '019eb75e-0b1b-7fa2',
+      };
+      live.set(ctx.recordId, session);
+      return session;
+    });
+    const sessionRegistry = {
+      ensureLoaded: vi.fn(async () => {}),
+      findBySourceRunId: (_wsId: string, runId: string) =>
+        Array.from(records.values()).find((record) => record.sourceRunId === runId),
+      findById: (id: string) => records.get(id),
+      nextName: () => 'x1',
+      create: vi.fn(async (record: any) => { records.set(record.id, record); }),
+      get: (_wsId: string, id: string) => records.get(id),
+      remove: vi.fn(async (_wsId: string, id: string) => records.delete(id)),
+    };
+    const svc = {
+      registry: { get: (id: string) => id === 'ws-1' ? { id, dir: '/w', agents: ['codex'] } : undefined },
+      headlessTasks: { get: (id: string) => id === task.taskId ? task : null },
+      sessionRegistry,
+      adapters: { get: (id: string) => id === 'codex' ? adapter : undefined },
+      resolveAdapter: () => adapter,
+      getAgentRuntimeReadiness: () => ({
+        agents: { codex: { ready: true, source: 'global-login' } },
+      }),
+      config: { launcherRepoRoot: '/repo' },
+      pool: { get: (id: string) => live.get(id), spawn },
+    } as unknown as WorkspaceService;
+    return { app: createWorkspaceRoutes(svc), records, spawn };
+  }
+
+  it('materializes one persistent Session and reuses it on repeated opens', async () => {
+    const { app, records, spawn } = buildHeadlessSession();
+    const first = await post(app, '/ws-1/headless/run-1/session');
+    const second = await post(app, '/ws-1/headless/run-1/session');
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect(second.body.session.id).toBe(first.body.session.id);
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(Array.from(records.values())[0]).toMatchObject({
+      sourceRunId: 'run-1',
+      title: 'Investigate the earnings anomaly',
+      resumeHint: { kind: 'agent-session-id', value: '019eb75e-0b1b-7fa2' },
+    });
+  });
+
+  it('coalesces simultaneous opens so one native conversation gets one Session', async () => {
+    const { app, spawn } = buildHeadlessSession();
+    const [first, second] = await Promise.all([
+      post(app, '/ws-1/headless/run-1/session'),
+      post(app, '/ws-1/headless/run-1/session'),
+    ]);
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(first.body.session.id).toBe(second.body.session.id);
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it('uses server-stamped Inbox fallback identity after the bounded run log is pruned', async () => {
+    const { app } = buildHeadlessSession({ task: { taskId: 'different-run' } });
+    const opened = await post(app, '/ws-1/headless/pruned-run/session', {
+      agent: 'codex',
+      agentSessionId: '019eb75e-0b1b-7fa2',
+      title: 'Durable Inbox report',
+    });
+
+    expect(opened.status).toBe(201);
+    expect(opened.body.session).toMatchObject({
+      sourceRunId: 'pruned-run',
+      title: 'Durable Inbox report',
+    });
+  });
+
+  it('does not resume a headless run while it is still writing the conversation', async () => {
+    const { app, spawn } = buildHeadlessSession({
+      task: {
+        taskId: 'run-1',
+        wsId: 'ws-1',
+        agent: 'codex',
+        prompt: 'Still running',
+        status: 'running',
+        agentSessionId: '019eb75e-0b1b-7fa2',
+      },
+    });
+    const opened = await post(app, '/ws-1/headless/run-1/session');
+
+    expect(opened.status).toBe(409);
+    expect(opened.body.error).toBe('run_still_running');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
 describe('POST /:id/sessions/:sid/resume — concurrent coalescing (ANG-120)', () => {
   const TOKEN = 'claude-calm-amber-river';
 

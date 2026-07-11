@@ -44,6 +44,11 @@ export function WorkspacesSidebar() {
           openOrFocus({ kind: 'workspace', params: { wsId, sessionId } })
         }}
         onSpawn={(wsId, opts?: SpawnOpts) => void ctx.spawn(wsId, opts)}
+        onOpenHeadlessRun={(wsId, taskId, opts) => {
+          void ctx.openHeadlessRun(wsId, taskId, opts).catch((err) =>
+            console.error('workspaces.open_headless_run_failed', { wsId, taskId, err }),
+          )
+        }}
         onSetDefaultAgent={(agent) => void ctx.setDefaultAgent(agent)}
         onPauseSession={(wsId, id) => void ctx.pauseSession(wsId, id)}
         onResumeSession={(wsId, id) => void ctx.resumeSession(wsId, id)}

@@ -68,7 +68,7 @@ describe('interactive seed — composeCommand initialPrompt', () => {
     });
   });
 
-  describe('no prompt → unchanged base command', () => {
+  describe('no prompt → no seed argument', () => {
     it('claude', () => {
       expect(claudeAdapter.composeCommand(['claude'], ctx())).not.toContain(PROMPT);
     });

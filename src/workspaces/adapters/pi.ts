@@ -3,6 +3,7 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { runtimeProfileFromEnv } from '@/core/runtime-profile.js';
+import { resolveBashPath } from '@/core/shell-resolver.js';
 
 import type { CliAdapter, SpawnContext, WorkspaceAiCred } from '../cli-adapter.js';
 import { readWorkspaceFile, writeWorkspaceFile } from '../file-service.js';
@@ -10,11 +11,11 @@ import { readWorkspaceFile, writeWorkspaceFile } from '../file-service.js';
 // Pi's per-workspace provider override. `models.json` is read from Pi's AGENT
 // DIR, which has NO project-local layer — so we redirect the whole agent dir to
 // `<cwd>/.pi-agent` via PI_CODING_AGENT_DIR (composeEnv) and drop models.json
-// there. This is a DIFFERENT dir from `<cwd>/.pi` (Pi's project-local
-// extensions/skills discovery, keyed off cwd and unaffected by
-// PI_CODING_AGENT_DIR) — so the alice* CLI skills in `<cwd>/.pi/skills` still
-// resolve. Verified against pi 0.78.1 (`dist/core/model-registry.js:144-157`,
-// `dist/config.js:378,393-407`).
+// there. This does not affect project-resource discovery rooted at `cwd`: Pi
+// officially discovers shared project skills from `<cwd>/.agents/skills`
+// (walking ancestors to the repo root), so OpenAlice can use the same canonical
+// copy as Codex without maintaining a duplicate `<cwd>/.pi/skills` tree.
+// Verified against Pi 0.78.1 and the bundled 0.80.6.
 const PI_AGENT_DIR = '.pi-agent';
 const PI_MODELS_PATH = `${PI_AGENT_DIR}/models.json`;
 const PI_SETTINGS_PATH = `${PI_AGENT_DIR}/settings.json`;
@@ -24,11 +25,48 @@ function positiveNumber(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function piCommandHead(env: Readonly<Record<string, string>>): readonly string[] {
+function piCommandHead(env: Readonly<Record<string, string | undefined>>): readonly string[] {
   const profile = runtimeProfileFromEnv(env);
   if (!profile.managedPiPath) return ['pi'];
   if (profile.managedPiNodePath) return [profile.managedPiNodePath, profile.managedPiPath];
   return [profile.managedPiPath];
+}
+
+export async function syncPiWindowsShellPath(
+  cwd: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+  if (platform !== 'win32') return;
+  const agentDir = join(cwd, PI_AGENT_DIR);
+  if (!existsSync(agentDir)) return;
+  const shellPath = resolveBashPath(process.env, 'win32');
+  if (!shellPath) return;
+
+  const raw = await readWorkspaceFile(cwd, PI_SETTINGS_PATH);
+  let settings: Record<string, unknown> = {};
+  if (raw !== null) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return;
+      settings = parsed as Record<string, unknown>;
+    } catch {
+      // Pi owns this file too; do not overwrite a malformed/user-edited file.
+      return;
+    }
+  }
+  if (settings['shellPath'] === shellPath) return;
+  await writeWorkspaceFile(
+    cwd,
+    PI_SETTINGS_PATH,
+    JSON.stringify({ ...settings, shellPath }, null, 2) + '\n',
+  );
+}
+
+function piHeadlessApproveArgs(env: Readonly<Record<string, string | undefined>>): readonly string[] {
+  // The packaged app always uses OpenAlice's pinned managed Pi. Contributor
+  // dev intentionally uses whatever `pi` is on PATH; its install/version/trust
+  // policy belongs to that developer, so do not attach version-specific flags.
+  return runtimeProfileFromEnv(env).managedPiPath ? ['--approve'] : [];
 }
 
 /**
@@ -39,7 +77,8 @@ function piCommandHead(env: Readonly<Record<string, string>>): readonly string[]
  * TOOL ACCESS: Pi has no native MCP, and the launcher injects NO MCP into
  * workspaces at all — Pi reaches OpenAlice purely through the `alice*` CLI
  * shims on PATH (`service.ts`) + the `alice*` / `traderhub` skills
- * copied to `<cwd>/.pi/skills` (`context-injector.ts`); Pi's built-in `bash`
+ * copied to the shared `<cwd>/.agents/skills` path (`context-injector.ts`);
+ * Pi's built-in `bash`
  * tool runs `alice` / `alice-uta` / `alice-workspace` / `traderhub`. This is
  * the full surface (data, trading, workspace, market) — same as every other
  * agent; only cron is unavailable (MCP-only by design, on no CLI). The old
@@ -81,10 +120,22 @@ export const piAdapter: CliAdapter = {
     headless: true,
   },
 
+  // Reconcile the derived Pi cache on every Windows launch so workspaces made
+  // before the global shell setting existed pick it up without requiring a
+  // credential rewrite. The helper returns before I/O on every other OS.
+  async bootstrap({ cwd }): Promise<void> {
+    await syncPiWindowsShellPath(cwd);
+  },
+
   composeCommand(_base: readonly string[], ctx: SpawnContext): readonly string[] {
-    // Tools come from the CLI-injection path (alice on PATH + .pi/skills), not
-    // flags — so the command head is just the binary + a resume flag (if any).
-    const head = piCommandHead(ctx.env);
+    // Tools come from the CLI-injection path (alice on PATH + shared
+    // .agents/skills), not flags — so the command head is just the binary + a
+    // resume flag (if any).
+    // Pi 0.79+ asks the user to trust project-local resources on interactive
+    // startup. Do not answer that security decision for them: the prompt makes
+    // the `.agents/skills` boundary visible, and omitting the flag also keeps
+    // external Pi 0.78.x runtimes (which predate `--approve`) compatible.
+    const head = [...piCommandHead(ctx.env)];
     // Quick-chat seed: `pi [--session-id <id>] <messages…>` opens the
     // interactive TUI seeded with that first message. UNLIKE the other adapters,
     // pi appends the seed REGARDLESS of the resume branch: pi assigns its own id
@@ -102,13 +153,22 @@ export const piAdapter: CliAdapter = {
   },
 
   // Headless: `pi -p <prompt>` is non-interactive and exits at the turn
-  // boundary. The MCP bridge + skills auto-load from `<cwd>/.pi` (process cwd =
-  // workspace), so the agent reaches inbox_push without any flag. NOTE: pi
+  // boundary, so there is nobody to answer Pi 0.79+'s project-trust prompt.
+  // The packaged app explicitly approves its pinned managed Pi; contributor
+  // dev leaves its external Pi untouched. Interactive sessions above always
+  // leave the decision to the user. NOTE: pi
   // REJECTS a `--` end-of-options terminator ("Unknown option: --", verified
   // 0.78.1), so the prompt is a bare trailing positional — a prompt literally
   // starting with `-`/`--` is unprotected on pi (rare for task prompts).
   composeHeadlessCommand(_base: readonly string[], _ctx: SpawnContext, prompt: string): readonly string[] {
-    return [...piCommandHead(_ctx.env), '-p', '--mode', 'json', prompt];
+    return [
+      ...piCommandHead(_ctx.env),
+      ...piHeadlessApproveArgs(_ctx.env),
+      '-p',
+      '--mode',
+      'json',
+      prompt,
+    ];
   },
 
   // pi `--mode json` line 1 is `{"type":"session","id":…,"cwd":…}` — pi mints
@@ -125,12 +185,35 @@ export const piAdapter: CliAdapter = {
     }
   },
 
+  extractHeadlessAssistantText(line: string): string | null {
+    try {
+      const evt = JSON.parse(line) as Record<string, unknown>;
+      if (evt['type'] !== 'message_end') return null;
+      const message = evt['message'];
+      if (!message || typeof message !== 'object') return null;
+      const record = message as Record<string, unknown>;
+      if (record['role'] !== 'assistant' || !Array.isArray(record['content'])) return null;
+      const text = record['content']
+        .flatMap((part) => {
+          if (!part || typeof part !== 'object') return [];
+          const content = part as Record<string, unknown>;
+          return content['type'] === 'text' && typeof content['text'] === 'string'
+            ? [content['text']]
+            : [];
+        })
+        .join('\n');
+      return text || null;
+    } catch {
+      return null;
+    }
+  },
+
   composeEnv(ctx: SpawnContext): Record<string, string> {
-    const env: Record<string, string> = {
-      // Disable startup-only network ops (version check / install ping). Does
-      // NOT block the `alice` CLI or the LLM call (verified pi 0.78.1).
-      PI_OFFLINE: '1',
-    };
+    // Do not force PI_OFFLINE. OpenAlice is a networked product and Pi may
+    // download missing runtime tools during startup. A user or launcher can
+    // still opt into Pi's offline behavior by setting PI_OFFLINE in the base
+    // process environment, which composeSpawnInputs preserves.
+    const env: Record<string, string> = {};
     // Override mode only: redirect the agent dir to the workspace's models.json.
     // Absent ⇒ unset ⇒ Pi uses the user's global ~/.pi/agent (its normal state).
     const piAgentDir = join(ctx.cwd, PI_AGENT_DIR);
@@ -181,7 +264,13 @@ export const piAdapter: CliAdapter = {
     // (rm .pi-agent) tears both down together.
     const settings: Record<string, unknown> = { defaultProvider: PI_PROVIDER_NAME };
     if (cred.model) settings['defaultModel'] = cred.model;
-    const shellPath = runtimeProfileFromEnv().managedShellPath;
+    // Windows has one installation-wide workspace-shell decision (managed Git
+    // Bash, auto-detected Git for Windows, or an explicit user override). Pi's
+    // settings file is a derived cache, refreshed whenever its workspace AI
+    // config is reconciled. Non-Windows behavior stays exactly as before.
+    const shellPath = process.platform === 'win32'
+      ? resolveBashPath(process.env, 'win32')
+      : runtimeProfileFromEnv().managedShellPath;
     if (shellPath) settings['shellPath'] = shellPath;
     await writeWorkspaceFile(cwd, PI_SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');
   },

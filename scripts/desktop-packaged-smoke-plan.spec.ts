@@ -11,6 +11,8 @@ describe('buildDesktopPackagedSmokePlan', () => {
       onboarding: false,
       realData: true,
       tempData: false,
+      tradingMode: false,
+      workspaceAcceptance: false,
     })
     expect(plan.buildEnv).toEqual({})
     expect(plan.launchEnv).toEqual({})
@@ -53,6 +55,71 @@ describe('buildDesktopPackagedSmokePlan', () => {
     const plan = buildDesktopPackagedSmokePlan(['--onboarding', '--real-data'])
 
     expect(plan.errors).toContain('[desktop-smoke] --onboarding always uses isolated temp data; drop --real-data')
+  })
+
+  it('makes the trading-mode lifecycle smoke isolated and self-terminating', () => {
+    const plan = buildDesktopPackagedSmokePlan(['--trading-mode'], {
+      OPENALICE_TRADING_MODE: 'pro',
+      OPENALICE_LITE_MODE: '1',
+    })
+
+    expect(plan.errors).toEqual([])
+    expect(plan.options).toMatchObject({
+      onboarding: false,
+      realData: false,
+      tempData: true,
+      tradingMode: true,
+    })
+    expect(plan.launchEnv).toEqual({
+      OPENALICE_MCP_ENABLED: '0',
+      OPENALICE_ELECTRON_SMOKE_TRADING_MODE: '1',
+      OPENALICE_ELECTRON_SMOKE_EXIT: '1',
+    })
+    expect(plan.unsetLaunchEnv).toEqual([
+      'OPENALICE_TRADING_MODE',
+      'OPENALICE_LITE_MODE',
+      'OPENALICE_UTA_DISABLED',
+    ])
+  })
+
+  it('rejects unsafe or contradictory trading-mode smoke flags', () => {
+    expect(buildDesktopPackagedSmokePlan(['--trading-mode', '--real-data']).errors)
+      .toContain('[desktop-smoke] --trading-mode always uses isolated temp data; drop --real-data')
+    expect(buildDesktopPackagedSmokePlan(['--trading-mode', '--onboarding']).errors)
+      .toContain('[desktop-smoke] choose only one automated smoke mode: --onboarding, --trading-mode, or --workspace-acceptance')
+  })
+
+  it('makes Workspace acceptance isolated, self-terminating, and provider-independent', () => {
+    const plan = buildDesktopPackagedSmokePlan(['--workspace-acceptance'], {
+      OPENALICE_TRADING_MODE: 'pro',
+    })
+
+    expect(plan.errors).toEqual([])
+    expect(plan.options).toMatchObject({
+      onboarding: false,
+      realData: false,
+      tempData: true,
+      tradingMode: false,
+      workspaceAcceptance: true,
+    })
+    expect(plan.buildEnv).toEqual({})
+    expect(plan.launchEnv).toEqual({
+      OPENALICE_MCP_ENABLED: '0',
+      OPENALICE_ELECTRON_SMOKE_WORKSPACE_ACCEPTANCE: '1',
+      OPENALICE_ELECTRON_SMOKE_EXIT: '1',
+    })
+    expect(plan.unsetLaunchEnv).toEqual([
+      'OPENALICE_TRADING_MODE',
+      'OPENALICE_LITE_MODE',
+      'OPENALICE_UTA_DISABLED',
+    ])
+  })
+
+  it('rejects unsafe or contradictory Workspace acceptance flags', () => {
+    expect(buildDesktopPackagedSmokePlan(['--workspace-acceptance', '--real-data']).errors)
+      .toContain('[desktop-smoke] --workspace-acceptance always uses isolated temp data; drop --real-data')
+    expect(buildDesktopPackagedSmokePlan(['--workspace-acceptance', '--onboarding']).errors)
+      .toContain('[desktop-smoke] choose only one automated smoke mode: --onboarding, --trading-mode, or --workspace-acceptance')
   })
 
   it('rejects contradictory data flags', () => {

@@ -1,11 +1,17 @@
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { dirname } from 'path'
+import {
+  acquireOpenAliceRuntimeLocks,
+  takeoverRequested,
+  type OpenAliceRuntimeLock,
+} from '@traderalice/guardian-runtime'
 // The in-process AI loop (AgentCenter, then GenerateRouter + AgentWork) is gone
 // as of 0.40 — the model loop runs inside the native workspace CLIs; autonomous
 // runs go through headless workspace dispatch (cron → workspace).
 import { loadConfig, readMarketDataConfig } from './core/config.js'
 import { printLegacyDataNotice } from './core/legacy-data-notice.js'
-import { dataPath, defaultPath } from '@/core/paths.js'
+import { dataPath, defaultPath, userDataHome } from '@/core/paths.js'
+import { resolveLauncherRoot } from '@/workspaces/config.js'
 import type { Plugin, EngineContext } from './core/types.js'
 import { McpPlugin } from './server/mcp.js'
 import { LocalToolGatewayPlugin } from './server/local-tool-gateway.js'
@@ -54,11 +60,7 @@ import { createEntityStore } from './core/entity-store.js'
 import { entityUpsertFactory } from './tool/entity-upsert.js'
 import { entitySearchFactory } from './tool/entity-search.js'
 import { issueToolFactories } from './tool/issue-tools.js'
-import { createEventLog } from './core/event-log.js'
 import { createToolCallLog } from './core/tool-call-log.js'
-import { createListenerRegistry } from './core/listener-registry.js'
-import { createEventBus } from './core/event-bus.js'
-import { createMetricsListener } from './task/metrics/index.js'
 import { NewsCollectorStore, NewsCollector } from './domain/news/index.js'
 import { createNewsArchiveTools } from './tool/news.js'
 
@@ -68,6 +70,13 @@ const PERSONA_FILE = dataPath('brain', 'persona.md')
 const PERSONA_DEFAULT = defaultPath('persona.default.md')
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+let runtimeLock: OpenAliceRuntimeLock | null = null
+
+async function releaseRuntimeLock(): Promise<void> {
+  const current = runtimeLock
+  runtimeLock = null
+  await current?.release()
+}
 
 /** Read a file, copying from default if it doesn't exist yet. */
 async function readWithDefault(target: string, defaultFile: string): Promise<string> {
@@ -88,15 +97,7 @@ async function main() {
 
   const config = await loadConfig()
 
-  // ==================== Event Log ====================
-
-  const eventLog = await createEventLog()
   const toolCallLog = await createToolCallLog()
-
-  // ==================== Listener Registry ====================
-  // Created early so producers can declare against it.
-
-  const listenerRegistry = createListenerRegistry(eventLog)
 
   // ==================== Tool Center (created early — UTAManager needs it) ====================
 
@@ -163,7 +164,7 @@ async function main() {
   })
   await newsStore.init()
 
-  // ==================== OpenBB Clients ====================
+  // ==================== Embedded Provider Clients ====================
 
   const { providers } = config.marketData
 
@@ -210,7 +211,7 @@ async function main() {
 
   const marketSearch = { symbolIndex, equityVendors: getEquityVendors, equityClient, cryptoClient, currencyClient, commodityCatalog }
 
-  // Federated bar layer — vendor (OpenTypeBB) + broker (UTA) OHLCV behind one
+  // Federated bar layer — embedded vendor adapters + broker (UTA) OHLCV behind one
   // barId-keyed interface. Vendor branch live now; UTA branch lands with Phase 1.
   const barService = createBarService({
     marketSearch,
@@ -297,16 +298,6 @@ async function main() {
   // drives the periodic equity-curve writes. The UTA service starts
   // its own scheduler at boot.
 
-  // ==================== Event Metrics (wildcard observer) ====================
-
-  const metricsListener = createMetricsListener({ registry: listenerRegistry })
-  await metricsListener.start()
-
-  // ==================== Activate Listeners ====================
-
-  await listenerRegistry.start()
-  console.log(`listener-registry: started (${listenerRegistry.list().length} listeners)`)
-
   // ==================== News Collector ====================
 
   let newsCollector: NewsCollector | null = null
@@ -387,10 +378,8 @@ async function main() {
   // ==================== Engine Context ====================
 
   const ctx: EngineContext = {
-    config, inboxStore, entityStore, eventLog, toolCallLog, toolCenter,
+    config, inboxStore, entityStore, toolCallLog, toolCenter,
     workspaceToolCenter,
-    listenerRegistry,
-    fire: createEventBus(eventLog),
     bbEngine: getSDKExecutor(),
     marketSearch,
     equityClient,
@@ -417,14 +406,12 @@ async function main() {
   const shutdown = async () => {
     stopped = true
     newsCollector?.stop()
-    metricsListener.stop()
-    await listenerRegistry.stop()
     for (const plugin of [...corePlugins, ...optionalPlugins.values()]) {
       await plugin.stop()
     }
     await newsStore.close()
     await toolCallLog.close()
-    await eventLog.close()
+    await releaseRuntimeLock()
     process.exit(0)
   }
   process.on('SIGINT', shutdown)
@@ -437,7 +424,38 @@ async function main() {
   }
 }
 
-main().catch((err) => {
+async function start(): Promise<void> {
+  const guardianPid = positiveInteger(process.env['OPENALICE_GUARDIAN_PID'])
+  const guardianStartedAt = positiveInteger(process.env['OPENALICE_GUARDIAN_STARTED_AT'])
+  runtimeLock = await acquireOpenAliceRuntimeLocks({
+    userDataHome,
+    launcherRoot: resolveLauncherRoot(),
+    launcher: process.env['OPENALICE_LAUNCHER'] ?? 'standalone',
+    takeover: takeoverRequested(),
+    ...(guardianPid ? { guardianPid } : {}),
+    ...(guardianStartedAt ? { guardianStartedAt } : {}),
+    onOwnershipLost: (err) => {
+      console.error('fatal: OpenAlice runtime ownership lost:', err)
+      try { process.kill(process.pid, 'SIGTERM') } catch { process.exit(1) }
+    },
+  })
+  try {
+    await main()
+  } catch (err) {
+    await releaseRuntimeLock().catch((releaseErr) => {
+      console.error('runtime lock release failed after startup error:', releaseErr)
+    })
+    throw err
+  }
+}
+
+function positiveInteger(raw: string | undefined): number | undefined {
+  if (!raw) return undefined
+  const value = Number(raw)
+  return Number.isInteger(value) && value > 0 ? value : undefined
+}
+
+start().catch((err) => {
   console.error('fatal:', err)
   process.exit(1)
 })

@@ -36,6 +36,7 @@ function result(overrides: Partial<HeadlessTaskResult>): HeadlessTaskResult {
     stdoutTail: '',
     stderrTail: '',
     agentSessionId: null,
+    assistantText: null,
     ...overrides,
   };
 }
@@ -49,13 +50,25 @@ describe('agent runtime readiness helpers', () => {
     expect(
       classifyRuntimeReadinessFailure(result({ stderrTail: 'missing API key provider config' })),
     ).toBe('provider_required');
+    expect(
+      classifyRuntimeReadinessFailure(result({
+        stderrTail: 'WARN plugin config ignored; model gpt-next is unsupported by this CLI version',
+      })),
+    ).toBe('failed');
     expect(classifyRuntimeReadinessFailure(result({ stderrTail: 'boom' }))).toBe('failed');
   });
 
-  it('requires a clean exit with non-empty output to count as ready', () => {
-    expect(runtimeProbeSucceeded(result({ exitCode: 0, stdoutTail: 'OPENALICE_READY' }))).toBe(true);
-    expect(runtimeProbeSucceeded(result({ exitCode: 0, stdoutTail: '' }))).toBe(false);
-    expect(runtimeProbeSucceeded(result({ exitCode: 1, stdoutTail: 'OPENALICE_READY' }))).toBe(false);
+  it('requires a clean exit with a decoded assistant reply to count as ready', () => {
+    expect(runtimeProbeSucceeded(result({ exitCode: 0, assistantText: 'Hello!' }))).toBe(true);
+    expect(runtimeProbeSucceeded(result({ exitCode: 0, stdoutTail: '{"type":"system"}' }))).toBe(false);
+    expect(runtimeProbeSucceeded(result({ exitCode: 1, assistantText: 'Hello!' }))).toBe(false);
+  });
+
+  it('distinguishes clean output OpenAlice cannot decode from a real reply', () => {
+    expect(classifyRuntimeReadinessFailure(result({
+      exitCode: 0,
+      stdoutTail: '{"type":"future_event","message":"started"}',
+    }))).toBe('output_unrecognized');
   });
 
   it('GET snapshot uses cached rows without inventing readiness', () => {

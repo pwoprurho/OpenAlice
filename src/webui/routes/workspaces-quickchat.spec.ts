@@ -13,6 +13,7 @@ import { createWorkspaceRoutes } from './workspaces.js';
 import { readCredentials, readWorkspaceDefaultAgent, setCredentialLastModel, type Credential } from '../../core/config.js';
 import type { WorkspaceService } from '../../workspaces/service.js';
 import type { WorkspaceAiCred } from '../../workspaces/cli-adapter.js';
+import { ChatWorkspaceResolver } from '../../workspaces/chat-workspace-resolver.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -30,8 +31,20 @@ const openaiKey: Credential = {
   vendor: 'openai', authType: 'api-key', apiKey: 'sk-oa', wires: { 'openai-chat': '' },
 };
 
-function build(opts: { workspaces?: any[]; opencodeConfig?: WorkspaceAiCred | null } = {}) {
-  const META = { id: 'ws-1', dir: '/w', agents: ['claude', 'opencode'], template: 'chat', tag: 'chat-x' };
+function build(opts: {
+  workspaces?: any[];
+  sessionsByWorkspace?: Record<string, any[]>;
+  recentChatWorkspaceId?: string | null;
+  opencodeConfig?: WorkspaceAiCred | null;
+} = {}) {
+  const META = {
+    id: 'ws-1',
+    dir: '/w',
+    agents: ['claude', 'opencode'],
+    template: 'chat',
+    tag: 'chat-x',
+    createdAt: '2026-07-01T00:00:00.000Z',
+  };
   const opencode = {
     id: 'opencode',
     namePrefix: 'o',
@@ -49,30 +62,51 @@ function build(opts: { workspaces?: any[]; opencodeConfig?: WorkspaceAiCred | nu
     agentSessionId: null,
     startedAt: 1,
   }));
-  const creator = { create: vi.fn(async () => ({ ok: true, workspace: META })) };
+  const creator = { create: vi.fn(async () => ({ ok: true as const, workspace: META })) };
+  const registry = {
+    list: () => opts.workspaces ?? [],
+    get: (id: string) => (opts.workspaces ?? []).find((w) => w.id === id) ?? (id === META.id ? META : undefined),
+  };
+  const sessionRegistry = {
+    ensureLoaded: vi.fn(async () => {}),
+    listFor: vi.fn((wsId: string) => opts.sessionsByWorkspace?.[wsId] ?? []),
+    findById: vi.fn(() => undefined),
+    nextName: () => 'o1',
+    create: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
+  };
+  const chatWorkspaceResolver = new ChatWorkspaceResolver({
+    registry: registry as any,
+    sessionRegistry: sessionRegistry as any,
+    creator,
+  });
   const svc = {
     // Default []: today's tag never matches → creator.create path. Tests that
     // exercise targetWsId pass the workspace in so registry resolves it by id.
-    registry: {
-      list: () => opts.workspaces ?? [],
-      get: (id: string) => (opts.workspaces ?? []).find((w) => w.id === id) ?? (id === META.id ? META : undefined),
-    },
+    registry,
     creator,
+    resolveOrCreateChatWorkspace: (preferredWorkspaceId?: string | null) =>
+      chatWorkspaceResolver.resolveOrCreate(preferredWorkspaceId),
     resolveAdapter: (_m: any, agentId?: string) => adapters[agentId ?? 'claude'] ?? claude,
     adapters: { get: (id: string) => adapters[id] },
-    sessionRegistry: {
-      ensureLoaded: vi.fn(async () => {}),
-      findById: vi.fn(() => undefined),
-      nextName: () => 'o1',
-      create: vi.fn(async () => {}),
-      remove: vi.fn(async () => {}),
-    },
+    sessionRegistry,
     pool: { spawn, get: vi.fn(() => undefined) },
     publicMeta: vi.fn(async () => META),
     config: { launcherRepoRoot: '/repo' },
     getAgentRuntimeReadiness: vi.fn(() => ({ agents: {}, overallReady: false, checkedAt: null })),
   } as unknown as WorkspaceService;
-  return { app: createWorkspaceRoutes(svc), opencode, spawn, creator };
+  const rememberRecentChatWorkspace = vi.fn(async (workspaceId: string | null) => ({
+    lastCredentialByAgent: {},
+    recentChatWorkspaceId: workspaceId,
+  }));
+  const app = createWorkspaceRoutes(svc, {
+    readQuickChatPreferences: vi.fn(async () => ({
+      lastCredentialByAgent: {},
+      recentChatWorkspaceId: opts.recentChatWorkspaceId ?? null,
+    })),
+    rememberRecentChatWorkspace,
+  });
+  return { app, opencode, spawn, creator, rememberRecentChatWorkspace };
 }
 
 async function quickChat(app: any, body: unknown) {
@@ -161,6 +195,60 @@ describe('POST /quick-chat — loginless credential injection', () => {
     expect(r.status).toBe(201);
     expect(vi.mocked(readCredentials)).not.toHaveBeenCalled();
     expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it('reuses the preferred recent Chat workspace across days', async () => {
+    const recent = {
+      id: 'ws-recent',
+      dir: '/recent',
+      agents: ['claude'],
+      template: 'chat',
+      tag: 'long-running-chat',
+      createdAt: '2026-06-01T00:00:00.000Z',
+    };
+    const { app, creator, spawn } = build({
+      workspaces: [recent],
+      recentChatWorkspaceId: recent.id,
+    });
+
+    const r = await quickChat(app, { prompt: 'continue yesterday', agent: 'claude' });
+    expect(r.status).toBe(201);
+    expect(creator.create).not.toHaveBeenCalled();
+    expect((spawn.mock.calls[0] as any[])[0]).toBe(recent.id);
+  });
+
+  it('falls back to the most recently active Chat workspace and remembers it', async () => {
+    const older = {
+      id: 'ws-older', dir: '/older', agents: ['claude'], template: 'chat', tag: 'older',
+      createdAt: '2026-07-09T00:00:00.000Z',
+    };
+    const active = {
+      id: 'ws-active', dir: '/active', agents: ['claude'], template: 'chat', tag: 'active',
+      createdAt: '2026-07-01T00:00:00.000Z',
+    };
+    const { app, creator, spawn, rememberRecentChatWorkspace } = build({
+      workspaces: [older, active],
+      recentChatWorkspaceId: 'deleted-workspace',
+      sessionsByWorkspace: {
+        [older.id]: [{ lastActiveAt: '2026-07-09T01:00:00.000Z' }],
+        [active.id]: [{ lastActiveAt: '2026-07-10T01:00:00.000Z' }],
+      },
+    });
+
+    const r = await quickChat(app, { prompt: 'pick up the active desk', agent: 'claude' });
+    expect(r.status).toBe(201);
+    expect(creator.create).not.toHaveBeenCalled();
+    expect((spawn.mock.calls[0] as any[])[0]).toBe(active.id);
+    expect(rememberRecentChatWorkspace).toHaveBeenCalledWith(active.id);
+  });
+
+  it('creates one stable starter Chat workspace when none exists', async () => {
+    const { app, creator, rememberRecentChatWorkspace } = build();
+    const r = await quickChat(app, { prompt: 'first chat', agent: 'claude' });
+
+    expect(r.status).toBe(201);
+    expect(creator.create).toHaveBeenCalledWith('chat', 'chat');
+    expect(rememberRecentChatWorkspace).toHaveBeenCalledWith('ws-1');
   });
 
   // targetWsId — the chat sidebar's per-workspace "+": spawn INTO the given

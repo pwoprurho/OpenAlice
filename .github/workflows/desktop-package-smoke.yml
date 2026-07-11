@@ -8,16 +8,27 @@ on:
       - ".github/workflows/desktop-package-smoke.yml"
       - ".github/workflows/release.yml"
       - "apps/desktop/**"
+      - "packages/guardian-runtime/**"
       - "build/entitlements*.plist"
       - "package.json"
       - "pnpm-lock.yaml"
       - "scripts/assert-desktop-package.mjs"
       - "scripts/desktop-packaged-smoke.mjs"
       - "scripts/desktop-packaged-smoke-plan.mjs"
+      - "scripts/guardian/**"
+      - "scripts/prepare-desktop-release-assets.mjs"
       - "scripts/smoke-packaged-toolchain.mjs"
+      - "scripts/workspace-acceptance-ai-mock.mjs"
       - "scripts/vendor-managed-runtime.mjs"
-      - "src/core/paths.ts"
-      - "src/core/runtime-profile.ts"
+      - "default/**"
+      - "src/ai-providers/**"
+      - "src/core/**"
+      - "src/server/cli.ts"
+      - "src/server/cli-commands.ts"
+      - "src/tool/**"
+      - "src/webui/plugin.ts"
+      - "src/webui/routes/issues.ts"
+      - "src/webui/routes/workspaces.ts"
       - "src/workspaces/**"
       - "services/uta/**"
   push:
@@ -28,16 +39,27 @@ on:
       - ".github/workflows/desktop-package-smoke.yml"
       - ".github/workflows/release.yml"
       - "apps/desktop/**"
+      - "packages/guardian-runtime/**"
       - "build/entitlements*.plist"
       - "package.json"
       - "pnpm-lock.yaml"
       - "scripts/assert-desktop-package.mjs"
       - "scripts/desktop-packaged-smoke.mjs"
       - "scripts/desktop-packaged-smoke-plan.mjs"
+      - "scripts/guardian/**"
+      - "scripts/prepare-desktop-release-assets.mjs"
       - "scripts/smoke-packaged-toolchain.mjs"
+      - "scripts/workspace-acceptance-ai-mock.mjs"
       - "scripts/vendor-managed-runtime.mjs"
-      - "src/core/paths.ts"
-      - "src/core/runtime-profile.ts"
+      - "default/**"
+      - "src/ai-providers/**"
+      - "src/core/**"
+      - "src/server/cli.ts"
+      - "src/server/cli-commands.ts"
+      - "src/tool/**"
+      - "src/webui/plugin.ts"
+      - "src/webui/routes/issues.ts"
+      - "src/webui/routes/workspaces.ts"
       - "src/workspaces/**"
       - "services/uta/**"
 
@@ -49,7 +71,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-latest]
+        include:
+          - os: macos-14
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+          - os: windows-latest
+            arch: x64
 
     steps:
       - uses: actions/checkout@v4
@@ -75,6 +103,10 @@ jobs:
       - name: Build Alice + UTA + desktop shell
         run: pnpm electron:build
 
+      - name: Smoke Guardian takeover through Electron
+        run: pnpm electron:smoke:guardian-recovery --skip-build
+        timeout-minutes: 5
+
       - name: Vendor managed workspace runtime
         run: pnpm vendor:runtime
 
@@ -90,10 +122,24 @@ jobs:
             ulimit -n 65536 || ulimit -n 32768 || ulimit -n 16384 || ulimit -n 10240
             echo "open files limit: $(ulimit -n)"
           fi
-          pnpm -F @traderalice/desktop exec electron-builder --dir --projectDir ../.. --publish never
+          pnpm -F @traderalice/desktop exec electron-builder --dir --projectDir ../.. --publish never --${{ matrix.arch }}
 
       - name: Assert packaged resource layout
         run: pnpm electron:assert-package
 
       - name: Smoke packaged managed toolchain
         run: pnpm electron:smoke-toolchain
+
+      - name: Prove packaged Workspace CLI acceptance
+        run: pnpm electron:smoke:workspace --skip-build --skip-pack
+        timeout-minutes: 5
+        env:
+          OPENALICE_SMOKE_RECEIPT_PATH: ${{ runner.temp }}/openalice-workspace-acceptance.json
+
+      - name: Upload Workspace acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-acceptance-${{ matrix.os }}
+          path: ${{ runner.temp }}/openalice-workspace-acceptance.json
+          if-no-files-found: warn

@@ -36,8 +36,16 @@ interface ConfigRouteOpts {
 export const ONBOARDING_TEST_CREDENTIAL = {
   apiKey: 'oa_test_ok',
   model: 'openalice-onboarding-test',
-  baseUrl: 'https://onboarding.openalice.test/openai-chat',
+  baseUrl: 'http://127.0.0.1:0/v1',
   wireShape: 'openai-chat' as const satisfies WireShape,
+}
+
+function onboardingTestCredential(env: NodeJS.ProcessEnv = process.env) {
+  return {
+    ...ONBOARDING_TEST_CREDENTIAL,
+    baseUrl: env['OPENALICE_ONBOARDING_AI_BASE_URL']?.trim()
+      || ONBOARDING_TEST_CREDENTIAL.baseUrl,
+  }
 }
 
 function onboardingMockCredentialTestEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -51,13 +59,14 @@ function maybeHandleOnboardingMockCredentialTest(body: {
   model: string
 }): { ok: boolean; response?: string; error?: string } | null {
   if (!onboardingMockCredentialTestEnabled()) return null
+  const credential = onboardingTestCredential()
   const isMockEndpoint =
-    body.wireShape === ONBOARDING_TEST_CREDENTIAL.wireShape &&
-    body.baseUrl?.trim() === ONBOARDING_TEST_CREDENTIAL.baseUrl &&
-    body.model.trim() === ONBOARDING_TEST_CREDENTIAL.model
+    body.wireShape === credential.wireShape &&
+    body.baseUrl?.trim() === credential.baseUrl &&
+    body.model.trim() === credential.model
   if (!isMockEndpoint) return null
-  if (body.apiKey.trim() !== ONBOARDING_TEST_CREDENTIAL.apiKey) {
-    return { ok: false, error: `Use the onboarding test key "${ONBOARDING_TEST_CREDENTIAL.apiKey}".` }
+  if (body.apiKey.trim() !== credential.apiKey) {
+    return { ok: false, error: `Use the onboarding test key "${credential.apiKey}".` }
   }
   return { ok: true, response: 'OpenAlice onboarding mock credential is ready.' }
 }
@@ -311,7 +320,7 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
       const body = await c.req.json()
       const validated = await writeConfigSection(section, body)
       // Keep the in-memory ctx.config in sync with disk so any code path
-      // reading it (opentypebb resolver, market-data helpers, …) picks up
+      // reading it (provider resolver, market-data helpers, …) picks up
       // edits without a restart. Object.assign preserves ctx.config's
       // object identity — we just swap its contents.
       if (opts?.ctx) {
@@ -325,7 +334,7 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
       if (section === 'trading') {
         triggerUTARestart().catch(() => { /* surfaced via health badges */ })
       }
-      // marketData edits are picked up lazily by the opentypebb resolver
+      // marketData edits are picked up lazily by the provider resolver
       // (it reads ctx.config per request), so no explicit hot-reload hook
       // is needed. The old connector hot-reload path was removed with the
       // legacy connector cluster.

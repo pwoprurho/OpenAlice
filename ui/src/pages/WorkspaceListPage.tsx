@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { useWorkspaces } from '../contexts/workspaces-context'
 import { useWorkspace } from '../tabs/store'
@@ -54,6 +55,7 @@ const UNKNOWN_KEY = '__unknown__'
 function buildSections(
   workspaces: readonly Workspace[],
   templates: readonly TemplateInfo[],
+  otherTitle: string,
 ): Section[] {
   // Bucket workspaces by template name; unknown / missing → "Other".
   const knownTemplateNames = new Set(templates.map((t) => t.name))
@@ -89,12 +91,13 @@ function buildSections(
   const others = buckets.get(UNKNOWN_KEY)
   if (others && others.length > 0) {
     const sorted = [...others].sort((a, b) => lastActivityMs(b) - lastActivityMs(a))
-    sections.push({ key: UNKNOWN_KEY, title: 'Other', workspaces: sorted })
+    sections.push({ key: UNKNOWN_KEY, title: otherTitle, workspaces: sorted })
   }
   return sections
 }
 
 export function WorkspaceListPage() {
+  const { t } = useTranslation()
   const { workspaces, templates, openAgentConfig } = useWorkspaces()
   const openOrFocus = useWorkspace((s) => s.openOrFocus)
 
@@ -126,18 +129,16 @@ export function WorkspaceListPage() {
   }, [idsKey, workspaces])
 
   const sections = useMemo(
-    () => buildSections(workspaces, templates),
-    [workspaces, templates],
+    () => buildSections(workspaces, templates, t('workspace.other')),
+    [workspaces, templates, t],
   )
 
   if (workspaces.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-text-muted px-6">
-        <h2 className="text-lg font-medium text-text mb-2">Workspaces</h2>
+        <h2 className="text-lg font-medium text-text mb-2">{t('workspace.emptyTitle')}</h2>
         <p className="text-sm max-w-md text-center">
-          No workspaces yet. Create one from the sidebar — each is an isolated git
-          directory with a persistent terminal session attached, wired to OpenAlice
-          over MCP.
+          {t('workspace.emptyBody')}
         </p>
       </div>
     )
@@ -147,9 +148,11 @@ export function WorkspaceListPage() {
     <div className="h-full overflow-y-auto">
       <div className="max-w-5xl mx-auto px-6 py-6">
         <div className="mb-6 flex items-baseline justify-between gap-4">
-          <h2 className="text-[18px] font-semibold text-text">Workspaces Overview</h2>
+          <h2 className="text-[18px] font-semibold text-text">{t('workspace.overviewTitle')}</h2>
           <span className="text-[12px] text-text-muted">
-            {workspaces.length} workspace{workspaces.length === 1 ? '' : 's'}
+            {t(workspaces.length === 1 ? 'workspace.workspaceSingular' : 'workspace.workspacePlural', {
+              count: workspaces.length,
+            })}
           </span>
         </div>
 

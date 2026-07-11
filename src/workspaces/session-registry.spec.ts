@@ -108,4 +108,24 @@ describe('SessionRegistry persistence', () => {
       'Legacy workspace still opens',
     )
   })
+
+  it('round-trips and indexes the headless run that produced a session', async () => {
+    const reg = await SessionRegistry.load(root, noopLogger)
+    await reg.create(rec({
+      id: 'codex-steady-copper-harbor',
+      agent: 'codex',
+      name: 'x1',
+      sourceRunId: 'run-2026-07-11',
+      resumeHint: { kind: 'agent-session-id', value: '019eb75e-0b1b-7fa2' },
+    }))
+
+    const reloaded = await SessionRegistry.load(root, noopLogger)
+    await reloaded.ensureLoaded(WS)
+
+    expect(reloaded.findBySourceRunId(WS, 'run-2026-07-11')).toMatchObject({
+      id: 'codex-steady-copper-harbor',
+      sourceRunId: 'run-2026-07-11',
+      resumeHint: { kind: 'agent-session-id', value: '019eb75e-0b1b-7fa2' },
+    })
+  })
 })

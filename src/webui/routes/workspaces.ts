@@ -38,6 +38,12 @@ import {
   getAgentCredentialReadiness,
 } from '../../workspaces/agent-credential-readiness.js';
 import { isTerminalThemeVariant, type TerminalThemeVariant } from '../../workspaces/terminal-theme.js';
+import {
+  readQuickChatPreferences,
+  rememberRecentChatWorkspace,
+  type QuickChatPreferences,
+} from '../../core/preferences.js';
+import { CHAT_WORKSPACE_TEMPLATE } from '../../workspaces/chat-workspace-resolver.js';
 
 // The spawn body's `resume` value is an AGENT-side session id, whose shape is
 // adapter-native: uuid for claude/codex/pi, `ses_<base62>` for opencode. This
@@ -57,22 +63,15 @@ const MAX_SEED_PROMPT = 16000;
 const resumeInFlight = new Map<string, Promise<unknown>>();
 
 /** The template quick-chat reuses-or-creates its workspace from. */
-const QUICK_CHAT_TEMPLATE = 'chat';
-
-const MONTH_ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'] as const;
-
-/**
- * Tag for TODAY's chat workspace — `chat-<mon><day>` (e.g. `chat-jun15`).
- * Quick-chat is one-workspace-per-DAY: today's conversations are sessions inside
- * today's workspace. The format mirrors the frontend's `defaultTagFor`
- * (`<template>-<month><day>`, en-US short month lowercased) so a quick-chat-
- * created daily workspace is byte-identical to one created from the form on the
- * same day — the two converge on the same workspace instead of duplicating.
- */
-function todayChatTag(): string {
-  const now = new Date();
-  return `${QUICK_CHAT_TEMPLATE}-${MONTH_ABBR[now.getMonth()]}${now.getDate()}`;
+interface QuickChatWorkspacePreferenceDeps {
+  readQuickChatPreferences(): Promise<QuickChatPreferences>;
+  rememberRecentChatWorkspace(workspaceId: string | null): Promise<QuickChatPreferences>;
 }
+
+const defaultQuickChatWorkspacePreferenceDeps: QuickChatWorkspacePreferenceDeps = {
+  readQuickChatPreferences: () => readQuickChatPreferences(),
+  rememberRecentChatWorkspace: (workspaceId) => rememberRecentChatWorkspace(workspaceId),
+};
 
 /**
  * Validate an optional quick-chat seed prompt (the first message a fresh
@@ -118,12 +117,35 @@ interface SpawnedSessionBody {
   readonly title: string | null;
 }
 
+interface PublicSessionBody {
+  readonly id: string;
+  readonly wsId: string;
+  readonly agent: string;
+  readonly name: string;
+  readonly createdAt: string;
+  readonly lastActiveAt: string;
+  readonly state: 'running' | 'paused';
+  readonly agentSessionId: string | null;
+  readonly pid: number | null;
+  readonly startedAt: number | null;
+  readonly title: string | null;
+  readonly sourceRunId: string | null;
+}
+
+type OpenHeadlessSessionResult =
+  | { readonly ok: true; readonly created: boolean; readonly session: PublicSessionBody }
+  | { readonly ok: false; readonly status: 400 | 404 | 409 | 500; readonly body: { error: string; message?: string } };
+
 type SpawnSessionResult =
   | { readonly ok: true; readonly session: SpawnedSessionBody }
   | { readonly ok: false; readonly status: number; readonly body: { error: string; message?: string } };
 
-export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
+export function createWorkspaceRoutes(
+  svc: WorkspaceService,
+  quickChatPreferences: QuickChatWorkspacePreferenceDeps = defaultQuickChatWorkspacePreferenceDeps,
+): Hono {
   const app = new Hono();
+  const headlessSessionInFlight = new Map<string, Promise<OpenHeadlessSessionResult>>();
 
   const resolveDefaultAgentId = async (meta: WorkspaceMeta): Promise<string | undefined> => {
     const configured = await readWorkspaceDefaultAgent().catch(() => null);
@@ -151,6 +173,8 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
       readonly agentId?: string;
       readonly resume?: SessionFactoryContext['resume'];
       readonly initialPrompt?: string;
+      readonly title?: string;
+      readonly sourceRunId?: string;
       readonly credentialSlug?: string;
       readonly terminalTheme?: TerminalThemeVariant;
     },
@@ -206,7 +230,8 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
     });
     const recordName = svc.sessionRegistry.nextName(id, adapter.id, prefix);
     const nowIso = new Date().toISOString();
-    const title = initialPrompt ? initialPrompt.slice(0, MAX_SESSION_TITLE) : undefined;
+    const titleSource = opts.title?.trim() || initialPrompt;
+    const title = titleSource ? titleSource.slice(0, MAX_SESSION_TITLE) : undefined;
     const record: SessionRecord = {
       id: recordId,
       wsId: id,
@@ -216,6 +241,10 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
       lastActiveAt: nowIso,
       state: 'running',
       ...(title !== undefined ? { title } : {}),
+      ...(opts.sourceRunId ? { sourceRunId: opts.sourceRunId } : {}),
+      ...(resume && resume !== 'last'
+        ? { resumeHint: { kind: 'agent-session-id' as const, value: resume.sessionId } }
+        : {}),
     };
     try {
       await svc.sessionRegistry.create(record);
@@ -262,53 +291,90 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
     }
   }
 
-  // TODAY's chat workspace, by its daily tag (`chat-jun15`). A workspace someone
-  // happened to tag `chat-jun15` with a non-chat template doesn't count — the
-  // daily bucket is a chat-template workspace.
-  const findTodaysChat = (): WorkspaceMeta | undefined => {
-    const tag = todayChatTag();
-    return svc.registry.list().find((w) => w.template === QUICK_CHAT_TEMPLATE && w.tag === tag);
+  const publicSession = (record: SessionRecord): PublicSessionBody => {
+    const live = svc.pool.get(record.id);
+    return {
+      id: record.id,
+      wsId: record.wsId,
+      agent: record.agent,
+      name: record.name,
+      createdAt: record.createdAt,
+      lastActiveAt: record.lastActiveAt,
+      state: record.state === 'running' && live ? 'running' : 'paused',
+      agentSessionId: live?.agentSessionId ?? record.resumeHint?.value ?? null,
+      pid: live?.pid ?? null,
+      startedAt: live?.startedAt ?? null,
+      title: record.title ?? null,
+      sourceRunId: record.sourceRunId ?? null,
+    };
   };
 
-  // Serializes quick-chat's find-or-create so two concurrent FIRST-OF-DAY
-  // launches don't both bootstrap today's workspace — the loser's `registry.add`
-  // would throw on the duplicate tag and leak an orphaned bootstrap dir.
-  // In-process chain (quick-chat is low-frequency, single-process); the `.catch`
-  // keeps a failed run from poisoning the gate forever.
-  let chatWsGate: Promise<unknown> = Promise.resolve();
+  const openHeadlessRunAsSession = async (
+    meta: WorkspaceMeta,
+    taskId: string,
+    fallback: { agent?: string; agentSessionId?: string; title?: string } = {},
+  ): Promise<OpenHeadlessSessionResult> => {
+    await svc.sessionRegistry.ensureLoaded(meta.id);
+    const existing = svc.sessionRegistry.findBySourceRunId(meta.id, taskId);
+    if (existing) return { ok: true, created: false, session: publicSession(existing) };
 
-  const findOrCreateChatWorkspace = async (): Promise<
-    { ok: true; meta: WorkspaceMeta } | { ok: false; status: number; body: { error: string; message?: string } }
-  > => {
-    const existing = findTodaysChat();
-    if (existing) return { ok: true, meta: existing };
-    let created: Awaited<ReturnType<typeof svc.creator.create>>;
+    const task = svc.headlessTasks.get(taskId);
+    if (task && task.wsId !== meta.id) {
+      return { ok: false, status: 404, body: { error: 'run_not_found' } };
+    }
+    if (task?.status === 'running') {
+      return {
+        ok: false,
+        status: 409,
+        body: { error: 'run_still_running', message: 'wait for the headless run to finish before continuing it interactively' },
+      };
+    }
+
+    const agent = task?.agent ?? fallback.agent;
+    const agentSessionId = task?.agentSessionId ?? fallback.agentSessionId;
+    if (!agent || !agentSessionId || !AGENT_SESSION_ID_RE.test(agentSessionId)) {
+      return {
+        ok: false,
+        status: 409,
+        body: { error: 'session_unavailable', message: 'this run did not capture a resumable agent session id' },
+      };
+    }
+    const adapter = svc.adapters.get(agent);
+    if (!adapter || !adapter.capabilities.resumeById) {
+      return {
+        ok: false,
+        status: 409,
+        body: { error: 'resume_unsupported', message: `${agent} cannot resume this run by session id` },
+      };
+    }
+
+    const spawned = await spawnInteractiveSession(meta, {
+      agentId: agent,
+      resume: { sessionId: agentSessionId },
+      title: task?.prompt ?? fallback.title ?? `Headless run ${taskId}`,
+      sourceRunId: taskId,
+    });
+    if (!spawned.ok) {
+      return {
+        ok: false,
+        status: spawned.status === 400 ? 400 : 500,
+        body: spawned.body,
+      };
+    }
+    const record = svc.sessionRegistry.get(meta.id, spawned.session.sessionId);
+    if (!record) {
+      return { ok: false, status: 500, body: { error: 'registry_failed', message: 'spawned session record is missing' } };
+    }
+    return { ok: true, created: true, session: publicSession(record) };
+  };
+
+  const rememberRecentChat = async (meta: WorkspaceMeta): Promise<void> => {
+    if (meta.template !== CHAT_WORKSPACE_TEMPLATE) return;
     try {
-      created = await svc.creator.create(todayChatTag(), QUICK_CHAT_TEMPLATE);
+      await quickChatPreferences.rememberRecentChatWorkspace(meta.id);
     } catch (err) {
-      // e.g. a concurrent create committed today's tag first. Re-find — the
-      // winner's workspace now exists.
-      const after = findTodaysChat();
-      if (after) return { ok: true, meta: after };
-      launcherLogger.error('quick_chat.create_threw', { err });
-      return { ok: false, status: 500, body: { error: 'create_failed', message: (err as Error).message } };
+      launcherLogger.warn('quick_chat.preference_write_failed', { id: meta.id, err });
     }
-    if (!created.ok) {
-      // tag_in_use means today's workspace was created concurrently — re-find it.
-      if (created.code === 'tag_in_use') {
-        const after = findTodaysChat();
-        if (after) return { ok: true, meta: after };
-      }
-      const status =
-        created.code === 'tag_in_use' ? 409
-        : created.code === 'unknown_template' ? 400
-        : created.code === 'invalid_tag' ? 400
-        : created.code === 'unknown_agent' ? 400
-        : 500;
-      launcherLogger.error('quick_chat.create_failed', { code: created.code, message: created.message });
-      return { ok: false, status, body: { error: created.code, message: created.message } };
-    }
-    return { ok: true, meta: created.workspace };
   };
 
   // Detect which vault credential a workspace's loginless agent is currently
@@ -618,6 +684,46 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
 
   // ── sessions ─────────────────────────────────────────────────────────────
 
+  // Materialize a finished headless run as one stable interactive Session.
+  // The sourceRunId index makes this idempotent across Inbox, Automation, the
+  // Workspace sidebar, reloads, and server restarts. New Inbox entries carry a
+  // server-stamped native session id as a fallback after the bounded run log is
+  // pruned; recent/legacy entries resolve from HeadlessTaskRegistry instead.
+  app.post('/:id/headless/:taskId/session', async (c) => {
+    const id = c.req.param('id');
+    const taskId = c.req.param('taskId');
+    if (!validId(id) || !validId(taskId)) return c.json({ error: 'not_found' }, 404);
+    const meta = svc.registry.get(id);
+    if (!meta) return c.json({ error: 'workspace_not_found' }, 404);
+
+    const body = await safeJson(c).catch(() => null);
+    const fields = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+    const fallback = {
+      ...(typeof fields['agent'] === 'string' ? { agent: fields['agent'] } : {}),
+      ...(typeof fields['agentSessionId'] === 'string'
+        ? { agentSessionId: fields['agentSessionId'] }
+        : {}),
+      ...(typeof fields['title'] === 'string' ? { title: fields['title'] } : {}),
+    };
+
+    const key = `${id}::${taskId}`;
+    let run = headlessSessionInFlight.get(key);
+    if (!run) {
+      run = openHeadlessRunAsSession(meta, taskId, fallback);
+      headlessSessionInFlight.set(key, run);
+    }
+    try {
+      const result = await run;
+      if (!result.ok) return c.json(result.body, result.status);
+      return c.json(
+        { session: result.session, created: result.created },
+        result.created ? 201 : 200,
+      );
+    } finally {
+      if (headlessSessionInFlight.get(key) === run) headlessSessionInFlight.delete(key);
+    }
+  });
+
   app.post('/:id/sessions/spawn', async (c) => {
     const id = c.req.param('id');
     if (!validId(id)) return c.json({ error: 'not_found' }, 404);
@@ -663,10 +769,10 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
   });
 
   // Quick-chat launch — the "type a message → you're in" front door, decoupled
-  // from the multi-step create-workspace UI. Enters TODAY's chat workspace
-  // (creating it on the day's first use), then spawns a fresh interactive session
-  // seeded with the user's first message. One POST returns both the workspace
-  // and the live session, so the client can drop the user straight into the TUI.
+  // from the explicit create-workspace UI. Enters the recent Chat workspace (or
+  // creates one stable starter workspace when none exists), then spawns a fresh
+  // interactive session seeded with the user's first message. One POST returns
+  // both workspace and live session so the client can enter the TUI directly.
   // Body: { prompt: string; agent?: string }
   app.post('/quick-chat', async (c) => {
     let prompt: string;
@@ -698,25 +804,43 @@ export function createWorkspaceRoutes(svc: WorkspaceService): Hono {
       return c.json({ error: 'bad_request', message: (err as Error).message }, 400);
     }
 
-    // One chat workspace per DAY: enter today's if it exists, else create it.
-    // Each send is a new SESSION inside today's workspace (conversations =
-    // sessions, resumable from the chat sidebar) — closer to a traditional
-    // chatbot while staying aligned with the Workspace/Session model. Create is
-    // heavy (bash + git + skill injection) but happens at most once per day. The
-    // find-or-create runs through `chatWsGate` so concurrent first-of-day
-    // launches don't double-bootstrap.
+    // Each send is a new Session in a durable Chat Workspace. The explicit
+    // target wins; otherwise the resolver uses recentChatWorkspaceId, falls back
+    // to the most recently active Chat workspace, and creates only when none
+    // exists. The gate prevents concurrent first launches from double-bootstrap.
     let meta: WorkspaceMeta;
     if (targetWsId) {
       // Targeted: spawn a new session into the given existing workspace.
       const found = svc.registry.list().find((w) => w.id === targetWsId);
       if (!found) return c.json({ error: 'workspace_not_found' }, 404);
       meta = found;
+      await rememberRecentChat(meta);
     } else {
-      const run = chatWsGate.catch(() => undefined).then(() => findOrCreateChatWorkspace());
-      chatWsGate = run;
-      const target = await run;
-      if (!target.ok) return c.json(target.body, target.status as 400 | 409 | 500);
-      meta = target.meta;
+      const preference = await quickChatPreferences.readQuickChatPreferences().catch((err) => {
+        launcherLogger.warn('quick_chat.preference_read_failed', { err });
+        return null;
+      });
+      const target = await svc.resolveOrCreateChatWorkspace(
+        preference?.recentChatWorkspaceId,
+      );
+      if (!target.ok) {
+        const status =
+          target.code === 'tag_in_use' ? 409
+          : target.code === 'unknown_template' ? 400
+          : target.code === 'invalid_tag' ? 400
+          : target.code === 'unknown_agent' ? 400
+          : 500;
+        launcherLogger.error('quick_chat.create_failed', {
+          code: target.code,
+          message: target.message,
+        });
+        return c.json(
+          { error: target.code, message: target.message },
+          status as 400 | 409 | 500,
+        );
+      }
+      meta = target.workspace;
+      await rememberRecentChat(meta);
     }
 
     const spawn = await spawnInteractiveSession(meta, {

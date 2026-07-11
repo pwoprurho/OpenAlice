@@ -197,6 +197,19 @@ export interface CliAdapter {
    */
   extractHeadlessSessionId?(line: string): string | null;
 
+  /**
+   * Extract a completed assistant reply from one structured headless stdout
+   * line. This is intentionally adapter-owned: all four CLIs emit different
+   * JSONL event shapes, and raw stdout being non-empty only proves that the CLI
+   * logged something (startup/error events also produce output).
+   *
+   * Return a non-empty string only for an assistant-authored response. The
+   * runner keeps the latest extracted reply and exposes it on
+   * `HeadlessTaskResult`, allowing readiness checks to prove a real model turn
+   * without coupling the generic runner to vendor event schemas.
+   */
+  extractHeadlessAssistantText?(line: string): string | null;
+
   /** Optional per-CLI env adjustments on top of `spawn-env.ts`'s baseline. */
   envOverrides?(parent: NodeJS.ProcessEnv): EnvOverrides;
 

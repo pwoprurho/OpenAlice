@@ -10,6 +10,7 @@ import { PageLoading, EmptyState } from '../components/StateViews'
 import { useTranslation } from 'react-i18next'
 import { useLocale, useSetLocale, LOCALE_LABELS } from '../i18n/useLocale'
 import { useEditorTabsPref } from '../live/editor-tabs-pref'
+import { preferencesApi, type WorkspaceShellStatus } from '../api/preferences'
 
 // ==================== Appearance ====================
 
@@ -64,6 +65,107 @@ function LanguageSection() {
   )
 }
 
+// ==================== Windows workspace shell ====================
+
+function WorkspaceShellSection() {
+  const { t } = useTranslation()
+  const [status, setStatus] = useState<WorkspaceShellStatus | null>(null)
+  const [mode, setMode] = useState<'auto' | 'custom'>('auto')
+  const [customPath, setCustomPath] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    preferencesApi.getWorkspaceShell()
+      .then((next) => {
+        setStatus(next)
+        if (next.supported) {
+          setMode(next.mode)
+          setCustomPath(next.customPath ?? '')
+        }
+      })
+      .catch(() => setStatus({ supported: false }))
+  }, [])
+
+  if (!status?.supported) return null
+
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const next = await preferencesApi.saveWorkspaceShell({
+        mode,
+        ...(mode === 'custom' ? { customPath } : { customPath: null }),
+      })
+      setStatus(next)
+      if (next.supported) {
+        setMode(next.mode)
+        setCustomPath(next.customPath ?? '')
+      }
+    } catch {
+      setError(t('settings.workspaceShell.saveError'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <ConfigSection
+      title={t('settings.workspaceShell.title')}
+      description={t('settings.workspaceShell.description')}
+    >
+      <Field label={t('settings.workspaceShell.mode')}>
+        <select
+          className={inputClass}
+          value={mode}
+          onChange={(event) => setMode(event.target.value as 'auto' | 'custom')}
+        >
+          <option value="auto">{t('settings.workspaceShell.auto')}</option>
+          <option value="custom">{t('settings.workspaceShell.custom')}</option>
+        </select>
+      </Field>
+      {mode === 'custom' && (
+        <Field
+          label={t('settings.workspaceShell.path')}
+          description={t('settings.workspaceShell.pathDescription')}
+        >
+          <input
+            data-testid="workspace-shell-path"
+            className={`${inputClass} font-mono`}
+            value={customPath}
+            placeholder="C:\\Program Files\\Git\\bin\\bash.exe"
+            onChange={(event) => setCustomPath(event.target.value)}
+          />
+        </Field>
+      )}
+      <div className="rounded-lg border border-border/60 bg-bg-secondary/50 px-3 py-2.5 mb-3">
+        <p className="text-[11px] uppercase tracking-wide text-text-muted">
+          {t('settings.workspaceShell.resolved')}
+        </p>
+        <p className="mt-1 break-all font-mono text-[12px] text-text">
+          {status.resolvedPath ?? t('settings.workspaceShell.notFound')}
+        </p>
+        <p className={`mt-1 text-[11px] ${status.valid ? 'text-green' : 'text-red'}`}>
+          {status.valid
+            ? t('settings.workspaceShell.source', { source: status.source })
+            : status.message ?? t('settings.workspaceShell.notFound')}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="btn-primary-sm"
+          disabled={saving || (mode === 'custom' && customPath.trim().length === 0)}
+          onClick={() => void save()}
+        >
+          {saving ? t('settings.workspaceShell.saving') : t('settings.workspaceShell.save')}
+        </button>
+        {error && <span className="text-[11px] text-red">{error}</span>}
+      </div>
+    </ConfigSection>
+  )
+}
+
 // ==================== Settings Section ====================
 
 function SettingsSection() {
@@ -84,6 +186,9 @@ function SettingsSection() {
 
         {/* Language */}
         <LanguageSection />
+
+        {/* Windows-only workspace shell */}
+        <WorkspaceShellSection />
 
         {/* Persona */}
         <ConfigSection title={t('settings.persona.title')} description={t('settings.persona.description')}>

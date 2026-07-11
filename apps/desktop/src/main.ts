@@ -20,10 +20,22 @@
  * Out of scope (future iterations): tray icon, multi-window, native menus.
  */
 
-import { app, BrowserWindow, dialog, Menu, protocol } from 'electron'
+import { app, BrowserWindow, dialog, Menu, protocol, session } from 'electron'
+import { runRendererTradingModeSmoke } from './trading-mode-smoke.js'
+import { runRendererWorkspaceAcceptanceSmoke } from './workspace-acceptance-smoke.js'
+import { planUTATransition } from './uta-lifecycle.js'
+import {
+  acquireGuardianRuntime,
+  currentProcessStartedAt,
+  inspectOpenAliceInstance,
+  resolveGuardianTradingMode,
+  takeoverRequested,
+  type GuardianTradingModePlan,
+  type RuntimeProcessLock,
+} from '@traderalice/guardian-runtime'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
-import { mkdir, readFile, watch } from 'node:fs/promises'
+import { mkdir, readFile, watch, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
@@ -31,6 +43,7 @@ import { probeFreePort } from './probe-port.js'
 import { relocateLegacyData } from './relocate-data.js'
 import { configureAutoUpdate } from './auto-update.js'
 import { fetchAliceWebRequest, handleOpenAliceIpcMessage, registerOpenAliceIpc } from './ipc.js'
+import { proxyEnvFromRules } from './proxy-env.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -39,7 +52,11 @@ let uta: ChildProcess | null = null
 let alice: ChildProcess | null = null
 let appQuitting = false
 let restartingUTA = false
+let pendingUTAMode: GuardianTradingModePlan | null = null
 let rendererOnboardingSmokeStarted = false
+let rendererTradingModeSmokeStarted = false
+let rendererWorkspaceAcceptanceSmokeStarted = false
+let guardianRuntimeLock: RuntimeProcessLock | null = null
 
 const DEFAULT_WEB_PORT_START = 47331
 const READY_TIMEOUT_MS = 30_000
@@ -140,6 +157,21 @@ async function readMcpConfigFile(userDataHome: string): Promise<{ enabled: boole
   }
 }
 
+function selectPort(
+  envKey: string,
+  fileValue: number | undefined,
+  fallback: number,
+): { value: number; explicitOrigin: string | null } {
+  const envRaw = process.env[envKey]
+  if (envRaw !== undefined && envRaw !== '') {
+    return { value: parsePort(envRaw, envKey), explicitOrigin: envKey }
+  }
+  if (fileValue !== undefined) {
+    return { value: fileValue, explicitOrigin: 'data/config/ports.json' }
+  }
+  return { value: fallback, explicitOrigin: null }
+}
+
 function parseEnabledEnv(raw: string | undefined): boolean | null {
   if (raw === undefined || raw === '') return null
   return raw === '1' || raw.toLowerCase() === 'true'
@@ -236,6 +268,27 @@ function resolveManagedRuntimeEnv(opts: {
   return out
 }
 
+async function resolveChildProxyEnv(): Promise<Record<string, string>> {
+  // Existing env is authoritative on every platform. Electron 39 embeds Node
+  // 22.22, whose fetch stack consumes it only when NODE_USE_ENV_PROXY is set.
+  const explicit = proxyEnvFromRules('', process.env)
+  if (Object.keys(explicit).length > 0 || process.env['HTTPS_PROXY'] || process.env['HTTP_PROXY'] || process.env['ALL_PROXY']) {
+    return explicit
+  }
+  if (process.platform !== 'win32') return {}
+
+  try {
+    // Chromium already understands Windows Internet Options, including PAC.
+    // Resolve one representative HTTPS API URL and pass a concrete proxy to
+    // the pure-Node Alice/UTA children, whose fetch does not consult Chromium.
+    const rules = await session.defaultSession.resolveProxy('https://api.openai.com/')
+    return proxyEnvFromRules(rules, process.env)
+  } catch (err) {
+    console.warn(`[guardian] could not resolve Windows system proxy: ${err instanceof Error ? err.message : String(err)}`)
+    return {}
+  }
+}
+
 function isLiteModeEnv(env: NodeJS.ProcessEnv): boolean {
   return truthyEnv(env['OPENALICE_LITE_MODE']) || truthyEnv(env['OPENALICE_UTA_DISABLED'])
 }
@@ -247,19 +300,13 @@ async function claimPort(
   fileValue: number | undefined,
   probeStart: number,
 ): Promise<number> {
-  const envRaw = process.env[envKey]
-  const explicit =
-    envRaw !== undefined && envRaw !== ''
-      ? { value: parsePort(envRaw, envKey), origin: envKey }
-      : fileValue !== undefined
-        ? { value: fileValue, origin: 'data/config/ports.json' }
-        : null
-  if (explicit === null) return probeFreePort(probeStart)
+  const selected = selectPort(envKey, fileValue, probeStart)
+  if (selected.explicitOrigin === null) return probeFreePort(selected.value)
   try {
-    return await probeFreePort(explicit.value, explicit.value)
+    return await probeFreePort(selected.value, selected.value)
   } catch {
     throw new Error(
-      `[guardian] port ${explicit.value} (${name}, from ${explicit.origin}) is already in use — free it or configure another port`,
+      `[guardian] port ${selected.value} (${name}, from ${selected.explicitOrigin}) is already in use — free it or configure another port`,
     )
   }
 }
@@ -395,6 +442,7 @@ async function runRendererOnboardingSmoke(win: BrowserWindow): Promise<void> {
       if (!button) throw new Error('first-run primary button missing')
       button.click()
     }
+    const credentialPrimary = () => document.querySelector('[data-testid="credential-modal-primary"]')
 
     await waitFor('Electron preload bridge', () => Boolean(window.openAlice?.runtime && window.openAlice?.pty))
 
@@ -414,8 +462,34 @@ async function runRendererOnboardingSmoke(win: BrowserWindow): Promise<void> {
     clickPrimary()
     await waitFor('AI access step', () => activeStep() === 'ai' ? true : false)
 
+    const initialReadiness = await waitFor('initial Pi runtime readiness', async () => {
+      const snapshot = await json(await fetch('/api/agent-runtimes/readiness'))
+      const row = snapshot.agents?.pi
+      return row && row.status !== 'unknown' && row.status !== 'checking' ? snapshot : null
+    }, 60000)
+
+    if (!initialReadiness.agents.pi?.ready) {
+      await waitFor('AI credential action', () => {
+        const button = document.querySelector('[data-testid="first-run-guide-primary"]')
+        return button &&
+          !button.disabled &&
+          button.getAttribute('data-onboarding-action') === 'add-credential'
+          ? true
+          : false
+      })
+      clickPrimary()
+      await waitFor('credential modal', () => credentialPrimary())
+      credentialPrimary().click()
+      await waitFor('verified credential', () => {
+        const button = credentialPrimary()
+        return button && !button.disabled && button.textContent?.trim() === 'Save' ? true : false
+      })
+      credentialPrimary().click()
+      await waitFor('credential modal close', () => credentialPrimary() ? false : true)
+    }
+
     const readiness = await waitFor('Pi runtime readiness', async () => {
-      const snapshot = await json(await fetch('/api/workspaces/agent-runtime-readiness'))
+      const snapshot = await json(await fetch('/api/agent-runtimes/readiness'))
       const row = snapshot.agents?.pi
       if (row?.ready && row.status === 'ready') return snapshot
       if (row && row.status !== 'unknown' && row.status !== 'checking') {
@@ -426,10 +500,14 @@ async function runRendererOnboardingSmoke(win: BrowserWindow): Promise<void> {
     const piReady = readiness.agents.pi
 
     await waitFor('AI ready primary button', async () => {
-      const snapshot = await json(await fetch('/api/workspaces/agent-runtime-readiness'))
+      const snapshot = await json(await fetch('/api/agent-runtimes/readiness'))
       const row = snapshot.agents?.pi
       const button = document.querySelector('[data-testid="first-run-guide-primary"]')
-      return activeStep() === 'ai' && row?.ready === true && button && !button.disabled
+      return activeStep() === 'ai' &&
+        row?.ready === true &&
+        button &&
+        !button.disabled &&
+        button.getAttribute('data-onboarding-action') === 'continue'
     }, 60000)
     clickPrimary()
     await waitFor('broker step', () => activeStep() === 'broker' ? true : false)
@@ -487,6 +565,59 @@ app.whenReady().then(async () => {
         OPENALICE_APP_HOME: repoRoot,
       }
 
+  // Resolve duplicate ownership before relocation, port reads, or any child
+  // process can mutate the selected store.
+  const launcherRoot = process.env['AQ_LAUNCHER_ROOT']?.trim() || join(userDataHome, 'workspaces')
+  let takeover = takeoverRequested()
+  const guardianStartedAt = currentProcessStartedAt()
+  const runtimeInspections = await inspectOpenAliceInstance({
+    userDataHome,
+    launcherRoot,
+  })
+  const activeRuntime = runtimeInspections.find((row) => row.state === 'active' && row.owner)
+  if (activeRuntime && !takeover) {
+    const owner = activeRuntime.owner!
+    const staleDetail = activeRuntime.heartbeatStale
+      ? '\n\nThe process is still present, but its health heartbeat is stale.'
+      : ''
+    const { response } = await dialog.showMessageBox({
+      type: activeRuntime.heartbeatStale ? 'warning' : 'question',
+      title: 'OpenAlice is already running',
+      message: `Another OpenAlice ${owner.launcher} instance is using this data.`,
+      detail: `PID ${owner.pid}\nData: ${userDataHome}\nLast heartbeat: ${owner.heartbeatAt}${staleDetail}`,
+      buttons: ['Keep existing instance', 'Stop it and start this OpenAlice'],
+      defaultId: activeRuntime.heartbeatStale ? 1 : 0,
+      cancelId: 0,
+      noLink: true,
+    })
+    if (response !== 1) {
+      app.quit()
+      return
+    }
+    takeover = true
+  }
+  try {
+    guardianRuntimeLock = await acquireGuardianRuntime({
+      userDataHome,
+      launcherRoot,
+      launcher: app.isPackaged ? 'guardian-electron-packaged' : 'guardian-electron-dev',
+      takeover,
+      processStartedAt: guardianStartedAt,
+      onOwnershipLost: (err) => {
+        console.error('[guardian] runtime ownership lost:', err)
+        shutdown()
+      },
+    })
+    if (takeover) console.log('[guardian] takeover → previous OpenAlice runtime stopped')
+  } catch (err) {
+    dialog.showErrorBox(
+      'OpenAlice — recovery failed',
+      `${err instanceof Error ? err.message : String(err)}\n\nThe previous writer was not confirmed stopped, so OpenAlice did not unlock the data directory.`,
+    )
+    app.quit()
+    return
+  }
+
   // Pre-global-root installs kept user data under Electron's userData dir.
   // Move it once, BEFORE ports.json is read from the new root and before the
   // backend boots (it would run migrations against an empty store). On
@@ -514,19 +645,21 @@ app.whenReady().then(async () => {
   const portsFile = await readPortsFile(homeEnv.OPENALICE_HOME)
   const mcpFile = await readMcpConfigFile(homeEnv.OPENALICE_HOME)
   const mcpEnabled = parseEnabledEnv(process.env['OPENALICE_MCP_ENABLED']) ?? mcpFile.enabled
-  const liteMode = isLiteModeEnv(process.env)
+  let tradingMode = await resolveGuardianTradingMode(process.env, homeEnv.OPENALICE_HOME)
   const mcpPort = mcpEnabled
     ? await claimPort('mcp', 'OPENALICE_MCP_PORT', portsFile.mcp ?? mcpFile.port, DEFAULT_WEB_PORT_START + 1)
     : null
-  const utaPort = liteMode
-    ? null
-    : await claimPort('uta', 'OPENALICE_UTA_PORT', portsFile.uta, mcpPort !== null ? mcpPort + 1 : DEFAULT_WEB_PORT_START + 1)
-  const utaUrl = utaPort !== null ? `http://127.0.0.1:${utaPort}` : null
+  const utaPortFallback = mcpPort !== null ? mcpPort + 1 : DEFAULT_WEB_PORT_START + 1
+  const utaPort = tradingMode.mode === 'lite'
+    ? selectPort('OPENALICE_UTA_PORT', portsFile.uta, utaPortFallback).value
+    : await claimPort('uta', 'OPENALICE_UTA_PORT', portsFile.uta, utaPortFallback)
+  const utaUrl = `http://127.0.0.1:${utaPort}`
   const launcherMode = app.isPackaged ? 'electron-packaged' : 'electron-dev'
   const runtimeEnv = resolveManagedRuntimeEnv({
     appHome: homeEnv.OPENALICE_APP_HOME,
     launcherMode,
   })
+  const proxyEnv = await resolveChildProxyEnv()
   const piRuntime = runtimeEnv.OPENALICE_MANAGED_PI_PATH
     ? runtimeEnv.OPENALICE_MANAGED_PI_NODE_PATH
       ? `pi=${runtimeEnv.OPENALICE_MANAGED_PI_NODE_PATH} ${runtimeEnv.OPENALICE_MANAGED_PI_PATH}`
@@ -543,15 +676,19 @@ app.whenReady().then(async () => {
   // Node runtime mode. Without it each spawn would open a new app window.
 
   const spawnUTA = (): ChildProcess => {
-    if (utaPort === null) throw new Error('spawnUTA called while OPENALICE_LITE_MODE disables UTA')
     const child = spawn(process.execPath, [utaEntry], {
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
         OPENALICE_UTA_PORT: String(utaPort),
         OPENALICE_LAUNCHER: 'electron',
+        OPENALICE_GUARDIAN_PID: String(process.pid),
+        OPENALICE_GUARDIAN_STARTED_AT: String(guardianStartedAt),
+        AQ_LAUNCHER_ROOT: launcherRoot,
+        ...(takeover ? { OPENALICE_TAKEOVER: '1' } : {}),
         ...homeEnv,
         ...runtimeEnv,
+        ...proxyEnv,
       },
       stdio: 'inherit',
     })
@@ -573,10 +710,15 @@ app.whenReady().then(async () => {
         OPENALICE_LOCAL_CLI_ON_WEB: '1',
         OPENALICE_TOOL_BASE_URL: toolBaseUrl,
         OPENALICE_TOOL_SOCKET: toolSocketPath,
-        ...(liteMode ? { OPENALICE_LITE_MODE: '1' } : { OPENALICE_UTA_URL: utaUrl ?? '' }),
+        OPENALICE_UTA_URL: utaUrl,
         OPENALICE_LAUNCHER: 'electron',
+        OPENALICE_GUARDIAN_PID: String(process.pid),
+        OPENALICE_GUARDIAN_STARTED_AT: String(guardianStartedAt),
+        AQ_LAUNCHER_ROOT: launcherRoot,
+        ...(takeover ? { OPENALICE_TAKEOVER: '1' } : {}),
         ...homeEnv,
         ...runtimeEnv,
+        ...proxyEnv,
       },
       // The fourth fd opens Node child_process IPC. Electron app mode uses it
       // as the local PTY transport between BrowserWindow/preload and Alice's
@@ -603,11 +745,11 @@ app.whenReady().then(async () => {
   // sees when debugging startup, and "Electron app loading local HTTP" looks
   // deceptively similar to Docker/prod unless the launcher mode is named.
   console.log('')
-  console.log(`[guardian] mode     →  ${launcherMode}`)
+  console.log(`[guardian] mode     →  ${launcherMode}; trading=${tradingMode.mode} (${tradingMode.source}${tradingMode.envLocked ? ', env-locked' : ''})`)
   console.log(`[guardian] data     →  ${homeEnv.OPENALICE_HOME}`)
   console.log(`[guardian] app      →  ${homeEnv.OPENALICE_APP_HOME}`)
   console.log(`[guardian] runtime  →  ${piRuntime}`)
-  console.log(`[guardian] UTA      →  ${utaUrl ?? 'disabled (OPENALICE_LITE_MODE)'}`)
+  console.log(`[guardian] UTA      →  ${tradingMode.mode === 'lite' ? 'disabled (trading mode lite)' : utaUrl}`)
   console.log(`[guardian] Alice    →  app://openalice (Electron IPC)`)
   console.log(`[guardian] Tools    →  ${toolSocketPath}`)
   console.log(`[guardian] MCP      →  ${mcpPort !== null ? `http://127.0.0.1:${mcpPort}/mcp` : 'disabled'}`)
@@ -628,7 +770,7 @@ app.whenReady().then(async () => {
       return new Response(err instanceof Error ? err.message : String(err), { status: 503 })
     }
   })
-  if (utaUrl !== null) {
+  if (tradingMode.mode !== 'lite') {
     uta = spawnUTA()
     void waitForUTA(utaUrl).then((ready) => {
       if (ready) console.log(`[guardian] UTA ready pid=${uta?.pid ?? ''}`)
@@ -642,9 +784,12 @@ app.whenReady().then(async () => {
 
   // ── Restart-flag watcher: broker config changes touch the flag; SIGTERM
   // + respawn UTA without restarting Alice (mirrors prod.mjs). ────────────
-  if (utaUrl !== null) {
-    void startFlagWatcher(homeEnv.OPENALICE_HOME, utaUrl, spawnUTA)
-  }
+  void startFlagWatcher(homeEnv.OPENALICE_HOME, () => {
+    void (async () => {
+      tradingMode = await resolveGuardianTradingMode(process.env, homeEnv.OPENALICE_HOME)
+      await reconcileUTA(tradingMode, utaUrl, spawnUTA)
+    })().catch((err) => console.error('[guardian] UTA mode reconcile failed:', err))
+  })
 
   // No in-window menu bar on Windows/Linux — Electron's default
   // File/Edit/View/Window/Help renders *inside* the window there and is
@@ -712,6 +857,59 @@ app.whenReady().then(async () => {
               }
             })
         }
+        if (ready && process.env['OPENALICE_ELECTRON_SMOKE_TRADING_MODE'] === '1' && !rendererTradingModeSmokeStarted) {
+          rendererTradingModeSmokeStarted = true
+          void runRendererTradingModeSmoke(win)
+            .then((result) => {
+              console.log(
+                `[guardian] electron smoke trading mode → ok ${result.initialMode} -> ${result.activeMode} -> ${result.finalMode}`,
+              )
+              if (process.env['OPENALICE_ELECTRON_SMOKE_EXIT'] === '1') shutdown()
+            })
+            .catch((err) => {
+              console.error(`[guardian] electron smoke trading mode → failed: ${err instanceof Error ? err.message : String(err)}`)
+              if (process.env['OPENALICE_ELECTRON_SMOKE_EXIT'] === '1') {
+                process.exitCode = 1
+                shutdown()
+              }
+            })
+        }
+        if (
+          ready &&
+          process.env['OPENALICE_ELECTRON_SMOKE_WORKSPACE_ACCEPTANCE'] === '1' &&
+          !rendererWorkspaceAcceptanceSmokeStarted
+        ) {
+          rendererWorkspaceAcceptanceSmokeStarted = true
+          const aiBaseUrl = process.env['OPENALICE_WORKSPACE_ACCEPTANCE_AI_BASE_URL']?.trim()
+          const receiptPath = process.env['OPENALICE_SMOKE_RECEIPT_PATH']?.trim()
+          if (!aiBaseUrl || !receiptPath) {
+            console.error('[guardian] electron smoke workspace acceptance → failed: AI base URL or receipt path missing')
+            process.exitCode = 1
+            if (process.env['OPENALICE_ELECTRON_SMOKE_EXIT'] === '1') shutdown()
+          } else {
+            void runRendererWorkspaceAcceptanceSmoke(win, aiBaseUrl)
+              .then(async (result) => {
+                await writeFile(receiptPath, `${JSON.stringify(result, null, 2)}\n`, 'utf8')
+                const failedChecks = Object.entries(result.checks)
+                  .filter(([, ok]) => ok !== true)
+                  .map(([name]) => name)
+                if (failedChecks.length > 0) {
+                  throw new Error(
+                    `${result.error ?? 'Workspace acceptance failed'}; failed checks: ${failedChecks.join(', ')}`,
+                  )
+                }
+                console.log(`[guardian] electron smoke workspace acceptance → ok ${JSON.stringify(result)}`)
+                if (process.env['OPENALICE_ELECTRON_SMOKE_EXIT'] === '1') shutdown()
+              })
+              .catch((err) => {
+                console.error(`[guardian] electron smoke workspace acceptance → failed: ${err instanceof Error ? err.message : String(err)}`)
+                if (process.env['OPENALICE_ELECTRON_SMOKE_EXIT'] === '1') {
+                  process.exitCode = 1
+                  shutdown()
+                }
+              })
+          }
+        }
       })
       .catch((err) => {
         console.error(`[guardian] renderer bridge probe failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -722,24 +920,54 @@ app.whenReady().then(async () => {
   configureAutoUpdate(win, { beforeInstall: stopChildren })
 })
 
-async function restartUTA(utaUrl: string, spawnUTA: () => ChildProcess): Promise<void> {
-  if (restartingUTA || appQuitting) return
+async function stopUTAProcess(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null) return
+  const exited = new Promise<void>((resolveExit) => child.once('exit', () => resolveExit()))
+  killTree(child, 'SIGTERM')
+  await Promise.race([exited, new Promise((resolveWait) => setTimeout(resolveWait, UTA_RESTART_GRACE_MS))])
+  if (child.exitCode === null) {
+    killTree(child, 'SIGKILL')
+    await exited
+  }
+}
+
+async function reconcileUTA(
+  mode: GuardianTradingModePlan,
+  utaUrl: string,
+  spawnUTA: () => ChildProcess,
+): Promise<void> {
+  if (appQuitting) return
+  pendingUTAMode = mode
+  if (restartingUTA) return
+
   restartingUTA = true
   try {
-    console.log('[guardian] restart-uta.flag triggered — restarting UTA')
-    const old = uta
-    if (old && old.exitCode === null) {
-      const exited = new Promise<void>((r) => old.once('exit', () => r()))
-      killTree(old, 'SIGTERM')
-      await Promise.race([exited, new Promise((r) => setTimeout(r, UTA_RESTART_GRACE_MS))])
-      if (old.exitCode === null) {
-        killTree(old, 'SIGKILL')
-        await exited
+    while (pendingUTAMode && !appQuitting) {
+      const targetMode = pendingUTAMode
+      pendingUTAMode = null
+      const running = uta !== null && uta.exitCode === null
+      const action = planUTATransition(targetMode.mode, running)
+      if (action === 'none') {
+        if (uta?.exitCode !== null) uta = null
+        continue
+      }
+
+      if (action === 'stop' || action === 'restart') {
+        console.log(action === 'stop'
+          ? '[guardian] trading mode lite — stopping UTA'
+          : `[guardian] trading mode ${targetMode.mode} — restarting UTA`)
+        const old = uta
+        if (old) await stopUTAProcess(old)
+        if (uta === old) uta = null
+      }
+
+      if (action === 'start' || action === 'restart') {
+        if (action === 'start') console.log(`[guardian] trading mode ${targetMode.mode} — starting UTA`)
+        uta = spawnUTA()
+        const ready = await waitForUTA(utaUrl)
+        console.log(ready ? '[guardian] UTA online' : '[guardian] UTA did not become ready')
       }
     }
-    uta = spawnUTA()
-    const ready = await waitForUTA(utaUrl)
-    console.log(ready ? '[guardian] UTA back online' : '[guardian] UTA did not come back up after restart')
   } finally {
     restartingUTA = false
   }
@@ -747,8 +975,7 @@ async function restartUTA(utaUrl: string, spawnUTA: () => ChildProcess): Promise
 
 async function startFlagWatcher(
   dataHome: string,
-  utaUrl: string,
-  spawnUTA: () => ChildProcess,
+  onTrigger: () => void,
 ): Promise<void> {
   const flagPath = resolve(dataHome, 'data', 'control', 'restart-uta.flag')
   const flagDir = dirname(flagPath)
@@ -759,7 +986,7 @@ async function startFlagWatcher(
     if (pending) clearTimeout(pending)
     pending = setTimeout(() => {
       pending = undefined
-      restartUTA(utaUrl, spawnUTA).catch((err) => console.error('[guardian] restartUTA threw:', err))
+      onTrigger()
     }, 100)
   }
   try {
@@ -795,7 +1022,10 @@ async function stopChildren(): Promise<void> {
 /** Cascade tree-kill both children, then exit once they're gone. */
 function shutdown(): void {
   if (appQuitting) return
-  void stopChildren().finally(() => {
+  void stopChildren().finally(async () => {
+    const current = guardianRuntimeLock
+    guardianRuntimeLock = null
+    await current?.release().catch((err) => console.error('[guardian] runtime lock release failed:', err))
     const exitCode = typeof process.exitCode === 'number' ? process.exitCode : 0
     app.exit(exitCode)
   })

@@ -37,6 +37,7 @@ interface HeadlessRecordLike {
   readonly taskId: string
   readonly issueId?: string
   readonly agent: string
+  readonly agentSessionId?: string
 }
 interface SessionRecordLike {
   readonly id: string
@@ -83,6 +84,7 @@ export function resolveInboxOrigin(
         runId: rec.taskId,
         ...(rec.issueId ? { issueId: rec.issueId } : {}),
         ...(rec.agent ? { agent: rec.agent } : {}),
+        ...(rec.agentSessionId ? { agentSessionId: rec.agentSessionId } : {}),
       }
     }
     // A present-but-unknown run id falls through to the session header rather

@@ -88,7 +88,7 @@ export function AutomationRunsSection() {
   const [tasks, setTasks] = useState<HeadlessTaskRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const { spawn } = useWorkspaces()
+  const { openHeadlessRun } = useWorkspaces()
 
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -186,9 +186,13 @@ export function AutomationRunsSection() {
                           type="button"
                           className="mt-2 rounded border border-border px-2 py-0.5 text-xs text-emerald-400 hover:bg-emerald-500/10"
                           title="resume this run's conversation in an interactive session"
-                          onClick={() =>
-                            void spawn(t.wsId, { resume: t.agentSessionId!, agent: t.agent })
-                          }
+                          onClick={() => {
+                            void openHeadlessRun(t.wsId, t.taskId, {
+                              agent: t.agent,
+                              agentSessionId: t.agentSessionId,
+                              title: t.prompt,
+                            }).catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                          }}
                         >
                           ▸ Open as session
                         </button>

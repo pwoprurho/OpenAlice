@@ -195,6 +195,7 @@ export type AgentRuntimeReadinessStatus =
   | 'not_installed'
   | 'auth_required'
   | 'provider_required'
+  | 'output_unrecognized'
   | 'timeout'
   | 'failed';
 
@@ -240,13 +241,16 @@ export async function listAgents(): Promise<AgentInfo[]> {
 }
 
 export async function getAgentRuntimeReadiness(): Promise<AgentRuntimeReadinessSnapshot> {
-  const res = await fetch('/api/workspaces/agent-runtime-readiness');
+  const res = await fetch('/api/agent-runtimes/readiness');
   if (!res.ok) throw new Error(`get agent runtime readiness failed: ${res.status}`);
   return (await res.json()) as AgentRuntimeReadinessSnapshot;
 }
 
-export async function probeAgentRuntimeReadiness(agent?: string): Promise<AgentRuntimeReadinessSnapshot> {
-  const res = await fetch('/api/workspaces/agent-runtime-readiness/probe', {
+export async function probeAgentRuntimeReadiness(
+  agent?: string,
+  onSnapshot?: (snapshot: AgentRuntimeReadinessSnapshot) => void,
+): Promise<AgentRuntimeReadinessSnapshot> {
+  const res = await fetch('/api/agent-runtimes/readiness/probe', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(agent ? { agent } : {}),
@@ -255,7 +259,24 @@ export async function probeAgentRuntimeReadiness(agent?: string): Promise<AgentR
     const msg = await res.text().catch(() => '');
     throw new Error(`probe agent runtime readiness failed: ${res.status} ${msg}`);
   }
-  return (await res.json()) as AgentRuntimeReadinessSnapshot;
+  const started = (await res.json()) as {
+    probeId: string;
+    agents: string[];
+    snapshot: AgentRuntimeReadinessSnapshot;
+  };
+  let snapshot = started.snapshot;
+  onSnapshot?.(snapshot);
+  const targets = new Set(started.agents);
+  const deadline = Date.now() + 100_000;
+  while ([...targets].some((id) => snapshot.agents[id]?.status === 'checking')) {
+    if (Date.now() >= deadline) {
+      throw new Error(`agent runtime readiness probe ${started.probeId} did not settle`);
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    snapshot = await getAgentRuntimeReadiness();
+    onSnapshot?.(snapshot);
+  }
+  return snapshot;
 }
 
 export async function getWorkspaceDefaultAgent(): Promise<string | null> {
@@ -304,7 +325,7 @@ export async function setIssueDefaultAgent(agent: string | null): Promise<string
 //
 // V3.S4 — single SessionRecord type that covers both running PTYs and paused
 // records. `pid` + `startedAt` are non-null only when `state === 'running'`.
-// Persisted server-side at ~/.auto-quant-launcher/state/sessions/<wsId>.json
+// Persisted server-side at <OPENALICE_HOME>/workspaces/state/sessions/<wsId>.json
 // so records survive PTY death and server restarts.
 
 export interface SessionRecord {
@@ -320,6 +341,8 @@ export interface SessionRecord {
   readonly startedAt: number | null;
   /** First message (seeded sessions) — the sidebar title; null → fall back to `name`. */
   readonly title: string | null;
+  /** Headless run this stable Alice Session was materialized from. */
+  readonly sourceRunId?: string | null;
 }
 
 export interface SpawnedSession {
@@ -370,6 +393,38 @@ export async function spawnSession(
     throw new Error(`spawn session failed: ${res.status} ${msg}`);
   }
   return (await res.json()) as SpawnedSession;
+}
+
+export interface OpenHeadlessSessionOptions {
+  readonly agent?: string;
+  readonly agentSessionId?: string;
+  readonly title?: string;
+}
+
+export interface OpenHeadlessSessionResult {
+  readonly session: SessionRecord;
+  readonly created: boolean;
+}
+
+/** Idempotently materialize a finished headless run as one interactive Session. */
+export async function openHeadlessRunSession(
+  wsId: string,
+  taskId: string,
+  opts: OpenHeadlessSessionOptions = {},
+): Promise<OpenHeadlessSessionResult> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(wsId)}/headless/${encodeURIComponent(taskId)}/session`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(opts),
+    },
+  );
+  if (!res.ok) {
+    const parsed = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+    throw new Error(parsed?.message ?? parsed?.error ?? `open headless session failed: ${res.status}`);
+  }
+  return (await res.json()) as OpenHeadlessSessionResult;
 }
 
 /** Response of the quick-chat launch: the (reused-or-created) chat workspace + the seeded session. */

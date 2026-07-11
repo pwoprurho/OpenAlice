@@ -1,5 +1,5 @@
 import type { InboxEntry, InboxOrigin } from '../../api/inbox'
-import { DEMO_WORKSPACE_ID } from './workspaces'
+import { DEMO_SESSION_ID, DEMO_WORKSPACE_ID } from './workspaces'
 
 export const DEMO_REPORT_PATH = 'research-AAPL-q1.md'
 
@@ -21,6 +21,21 @@ export const demoInboxEntry: InboxEntry = {
     '',
     'Want me to set up a watchlist alert on next quarter\'s services number?',
   ].join('\n'),
+  origin: { kind: 'interactive', sessionId: DEMO_SESSION_ID, agent: 'claude' },
+}
+
+export const demoHeadlessSessionReport: InboxEntry = {
+  id: 'demo-inbox-headless-session',
+  ts: FIVE_MIN_AGO - 60_000,
+  workspaceId: DEMO_WORKSPACE_ID,
+  workspaceLabel: 'demo',
+  comments: 'The NVDA quant snapshot is ready. Open the originating run if you want to challenge the assumptions.',
+  origin: {
+    kind: 'headless',
+    runId: 'demo-headless-1',
+    agent: 'codex',
+    agentSessionId: '019eb75e-0b1b-7fa2-ba95-fd7db4463afe',
+  },
 }
 
 // ── Headless reports tied to scheduled issues ──
@@ -88,6 +103,7 @@ export const demoMoversReportOlder: InboxEntry = {
  *  without an originating-issue breadcrumb. */
 export const demoInboxEntries: InboxEntry[] = [
   demoInboxEntry,
+  demoHeadlessSessionReport,
   demoMoversReport,
   demoDigestReport,
   demoMoversReportOlder,

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { PanelLeftOpen, X } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { Sidebar } from './Sidebar'
 
 const MIN_WIDTH = 200
 const MAX_WIDTH = 420
 const MAIN_PANE_MIN_WIDTH = 500
+const COLLAPSED_WIDTH = 44
 
 function clampWidth(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
@@ -15,11 +17,20 @@ function storageName(storageKey: string): string {
   return `openalice.page-sidebar-width.${storageKey}.v1`
 }
 
+function collapsedStorageName(storageKey: string): string {
+  return `openalice.page-sidebar-collapsed.${storageKey}.v1`
+}
+
 function readStoredWidth(storageKey: string, fallback: number): number {
   if (typeof window === 'undefined') return fallback
   const raw = window.localStorage.getItem(storageName(storageKey))
   if (!raw) return fallback
   return clampWidth(Number(raw), fallback)
+}
+
+function readStoredCollapsed(storageKey: string): boolean {
+  if (typeof window === 'undefined') return false
+  return window.localStorage.getItem(collapsedStorageName(storageKey)) === '1'
 }
 
 function responsiveMaxWidth(containerWidth: number): number {
@@ -72,9 +83,11 @@ export function PageSidebarLayout({
   children,
   defaultWidth = 260,
 }: PageSidebarLayoutProps) {
+  const { t } = useTranslation()
   const isDesktop = useIsDesktop()
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => readStoredCollapsed(storageKey))
   const [preferredWidth, setPreferredWidth] = useState(() =>
     readStoredWidth(storageKey, clampWidth(defaultWidth, defaultWidth)),
   )
@@ -86,6 +99,11 @@ export function PageSidebarLayout({
 
   const persistWidth = useCallback((next: number) => {
     window.localStorage.setItem(storageName(storageKey), String(next))
+  }, [storageKey])
+
+  const updateCollapsed = useCallback((next: boolean) => {
+    setCollapsed(next)
+    window.localStorage.setItem(collapsedStorageName(storageKey), next ? '1' : '0')
   }, [storageKey])
 
   const beginResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -141,8 +159,23 @@ export function PageSidebarLayout({
     return () => ro.disconnect()
   }, [isDesktop])
 
+  const desktopActions = (
+    <>
+      {actions}
+      <button
+        type="button"
+        onClick={() => updateCollapsed(true)}
+        className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-overlay hover:text-text"
+        aria-label={t('common.collapsePanel', { title })}
+        title={t('common.focusContent')}
+      >
+        <PanelLeftClose size={15} strokeWidth={1.75} aria-hidden />
+      </button>
+    </>
+  )
+
   const sidebarPanel = (
-    <Sidebar title={title} actions={actions}>
+    <Sidebar title={title} actions={desktopActions}>
       {sidebar}
     </Sidebar>
   )
@@ -150,13 +183,38 @@ export function PageSidebarLayout({
   if (isDesktop) {
     return (
       <div ref={rootRef} className="flex h-full min-h-0 w-full overflow-hidden">
-        <div
-          className="h-full min-h-0 shrink-0"
-          style={{ width }}
-        >
-          {sidebarPanel}
-        </div>
-        <ResizeHandle width={width} maxWidth={maxWidth} onPointerDown={beginResize} />
+        {collapsed ? (
+          <aside
+            className="flex h-full shrink-0 flex-col items-center border-r border-border/80 bg-bg-secondary py-1.5"
+            style={{ width: COLLAPSED_WIDTH }}
+          >
+            <button
+              type="button"
+              onClick={() => updateCollapsed(false)}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-overlay hover:text-text"
+              aria-label={t('common.openPanel', { title })}
+              title={t('common.openPanel', { title })}
+            >
+              <PanelLeftOpen size={16} strokeWidth={1.75} aria-hidden />
+            </button>
+            <span
+              aria-hidden
+              className="mt-3 select-none text-[10px] font-semibold uppercase tracking-[0.18em] text-text-muted [writing-mode:vertical-rl] rotate-180"
+            >
+              {title}
+            </span>
+          </aside>
+        ) : (
+          <>
+            <div
+              className="h-full min-h-0 shrink-0"
+              style={{ width }}
+            >
+              {sidebarPanel}
+            </div>
+            <ResizeHandle width={width} maxWidth={maxWidth} onPointerDown={beginResize} />
+          </>
+        )}
         <div className="min-h-0 min-w-0 flex flex-1 flex-col">
           {children}
         </div>
@@ -171,7 +229,7 @@ export function PageSidebarLayout({
           type="button"
           onClick={() => setDrawerOpen(true)}
           className="flex h-8 w-8 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-overlay hover:text-text"
-          aria-label={`Open ${title}`}
+          aria-label={t('common.openPanel', { title })}
           title={title}
         >
           <PanelLeftOpen size={17} strokeWidth={1.75} aria-hidden />
@@ -199,7 +257,7 @@ export function PageSidebarLayout({
               type="button"
               onClick={() => setDrawerOpen(false)}
               className="text-text-muted hover:text-text p-1 -ml-1"
-              aria-label={`Close ${title}`}
+              aria-label={t('common.closePanel', { title })}
             >
               <X size={15} strokeWidth={1.75} aria-hidden />
             </button>

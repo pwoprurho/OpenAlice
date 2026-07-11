@@ -115,14 +115,24 @@ export const workspacesHandlers = [
   http.post('/api/workspaces/agent-runtime-readiness/probe', () =>
     HttpResponse.json(demoAgentRuntimeReadiness),
   ),
-  // One sample vault credential so the quick-chat runtime picker (opencode/pi)
-  // shows a populated dropdown — a clean showcase, not a "go configure" prompt.
-  // `?agent=` filtering is a no-op here (the sample speaks openai-chat, which
-  // every loginless runtime accepts).
+  http.get('/api/agent-runtimes/readiness', () =>
+    HttpResponse.json(demoAgentRuntimeReadiness),
+  ),
+  http.post('/api/agent-runtimes/readiness/probe', () =>
+    HttpResponse.json({
+      probeId: 'demo-runtime-probe',
+      agents: Object.keys(demoAgentRuntimeReadiness.agents),
+      snapshot: demoAgentRuntimeReadiness,
+    }, { status: 202 }),
+  ),
+  // Two sample vault credentials let the quick-chat demo show that a remembered
+  // provider can win over the first compatible option. Both speak openai-chat,
+  // which every loginless runtime accepts.
   http.get('/api/workspaces/credentials', () =>
     HttpResponse.json({
       credentials: [
         { slug: 'openai-1', vendor: 'openai', label: 'OpenAI', authType: 'api-key', wires: { 'openai-chat': '' }, lastModel: 'gpt-5.5', apiKey: null },
+        { slug: 'minimax-1', vendor: 'minimax', label: 'MiniMax', authType: 'api-key', wires: { 'openai-chat': '' }, lastModel: 'MiniMax-M2.1', apiKey: null },
       ],
     }),
   ),
@@ -157,11 +167,40 @@ export const workspacesHandlers = [
       title: null,
     }),
   ),
+  http.post('/api/workspaces/:id/headless/:taskId/session', ({ params }) => {
+    const wsId = String(params.id)
+    const taskId = String(params.taskId)
+    const workspace = demoWorkspaces.find((candidate) => candidate.id === wsId)
+    if (!workspace) return HttpResponse.json({ error: 'workspace_not_found' }, { status: 404 })
+    const existing = workspace.sessions.find((session) => session.sourceRunId === taskId)
+    if (existing) return HttpResponse.json({ session: existing, created: false })
+    const now = new Date().toISOString()
+    const session = {
+      id: `run-${taskId}`,
+      wsId,
+      agent: 'codex',
+      name: `x${workspace.sessions.length + 1}`,
+      createdAt: now,
+      lastActiveAt: now,
+      state: 'running' as const,
+      agentSessionId: '019eb75e-0b1b-7fa2-ba95-fd7db4463afe',
+      pid: 0,
+      startedAt: Date.now(),
+      title: 'Compute a quant snapshot of NVDA and push a report to the inbox.',
+      sourceRunId: taskId,
+    }
+    ;(workspace.sessions as Array<typeof session>).push(session)
+    return HttpResponse.json({ session, created: true }, { status: 201 })
+  }),
 
-  // Quick-chat launch — reuse the first demo chat workspace and hand back the
-  // scripted demo session (the Terminal short-circuits to DemoTerminalReplay).
-  http.post('/api/workspaces/quick-chat', () => {
-    const ws = demoChatWorkspace
+  // Quick-chat launch — honor an explicit Chat Workspace target and otherwise
+  // reuse the recent demo Chat workspace. The terminal is a scripted replay.
+  http.post('/api/workspaces/quick-chat', async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as { targetWsId?: unknown } | null
+    const explicit = typeof body?.targetWsId === 'string'
+      ? demoWorkspaces.find((workspace) => workspace.id === body.targetWsId)
+      : undefined
+    const ws = explicit ?? demoChatWorkspace
     return HttpResponse.json(
       {
         workspace: ws,
@@ -220,8 +259,8 @@ export const workspacesHandlers = [
           hasWorkspaceConfig: false,
           hasUsableWorkspaceConfig: false,
           detectedCredentialSlug: null,
-          compatibleCredentialSlugs: ['openai-1'],
-          injectableCredentialSlugs: ['openai-1'],
+          compatibleCredentialSlugs: ['openai-1', 'minimax-1'],
+          injectableCredentialSlugs: ['openai-1', 'minimax-1'],
         },
         pi: {
           agent: 'pi',
@@ -231,8 +270,8 @@ export const workspacesHandlers = [
           hasWorkspaceConfig: false,
           hasUsableWorkspaceConfig: false,
           detectedCredentialSlug: null,
-          compatibleCredentialSlugs: ['openai-1'],
-          injectableCredentialSlugs: ['openai-1'],
+          compatibleCredentialSlugs: ['openai-1', 'minimax-1'],
+          injectableCredentialSlugs: ['openai-1', 'minimax-1'],
         },
       },
     }),

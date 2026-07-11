@@ -38,6 +38,7 @@ import {
   listAgents,
   listTemplates,
   listWorkspaces,
+  openHeadlessRunSession,
   pauseSession as apiPauseSession,
   quickChat as apiQuickChat,
   resumeSession as apiResumeSession,
@@ -179,13 +180,54 @@ export function WorkspacesProvider({ children }: { children: ReactNode }) {
     setDefaultAgentState(saved)
   }, [])
 
+  const openHeadlessRun = useCallback(
+    async (
+      wsId: string,
+      taskId: string,
+      opts: { agent?: string; agentSessionId?: string; title?: string } = {},
+    ): Promise<void> => {
+      const { session } = await openHeadlessRunSession(wsId, taskId, opts)
+      let nextSession = session
+      if (session.state === 'paused') {
+        const resumed = await apiResumeSession(wsId, session.id, terminalTheme)
+        if (resumed) {
+          nextSession = {
+            ...session,
+            state: 'running',
+            pid: resumed.pid,
+            startedAt: resumed.startedAt,
+            agentSessionId: resumed.agentSessionId ?? session.agentSessionId,
+            lastActiveAt: new Date().toISOString(),
+          }
+        }
+      }
+      setWorkspaces((prev) =>
+        prev.map((workspace) =>
+          workspace.id === wsId
+            ? {
+                ...workspace,
+                sessions: workspace.sessions.some((candidate) => candidate.id === nextSession.id)
+                  ? workspace.sessions.map((candidate) =>
+                      candidate.id === nextSession.id ? nextSession : candidate,
+                    )
+                  : [...workspace.sessions, nextSession],
+              }
+            : workspace,
+        ),
+      )
+      openOrFocus({ kind: 'workspace', params: { wsId, sessionId: nextSession.id } })
+      void refresh()
+    },
+    [openOrFocus, refresh, terminalTheme],
+  )
+
   const setIssueDefaultAgent = useCallback(async (agent: string | null): Promise<void> => {
     const saved = await apiSetIssueDefaultAgent(agent)
     setIssueDefaultAgentState(saved)
   }, [])
 
   const quickChat = useCallback(
-    async (prompt: string, agent?: string, credentialSlug?: string, targetWsId?: string): Promise<void> => {
+    async (prompt: string, agent?: string, credentialSlug?: string, targetWsId?: string): Promise<string> => {
       const { workspace, session } = await apiQuickChat(prompt, agent, credentialSlug, targetWsId, terminalTheme)
       const nowIso = new Date().toISOString()
       const newRecord: SessionRecord = {
@@ -223,6 +265,7 @@ export function WorkspacesProvider({ children }: { children: ReactNode }) {
         params: { wsId: workspace.id, sessionId: session.sessionId, source: 'chat' },
       })
       void refresh()
+      return workspace.id
     },
     [refresh, openOrFocus, terminalTheme],
   )
@@ -337,6 +380,7 @@ export function WorkspacesProvider({ children }: { children: ReactNode }) {
         templatesLoaded,
         refresh,
         spawn,
+        openHeadlessRun,
         setDefaultAgent,
         setIssueDefaultAgent,
         quickChat,

@@ -24,12 +24,14 @@ import { createWriteStream, type WriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 
 import type { Logger } from './logger.js';
 import { resolveLaunchCommand } from './win-command.js';
 
 const KILL_GRACE_MS = 5_000;
 const OUTPUT_TAIL_BYTES = 16 * 1024;
+const ASSISTANT_TEXT_MAX_CHARS = 64 * 1024;
 /** Scanner line buffer cap — a "line" past this without \n is not the id announcement. */
 const SCAN_LINE_MAX_BYTES = 256 * 1024;
 
@@ -57,6 +59,8 @@ export interface HeadlessTaskArgs {
    */
   readonly extractSessionId?: (line: string) => string | null;
   readonly onSessionId?: (id: string) => void;
+  /** Adapter-owned JSONL decoder for completed assistant messages. */
+  readonly extractAssistantText?: (line: string) => string | null;
   /**
    * Default false. The normal automation path refuses Windows npm .cmd shims
    * because the task prompt is user-controlled. Runtime readiness probes pass a
@@ -78,6 +82,8 @@ export interface HeadlessTaskResult {
   readonly stderrTail: string;
   /** The agent's own session id, if `extractSessionId` found one in stdout. */
   readonly agentSessionId: string | null;
+  /** Latest completed assistant reply decoded from structured stdout. */
+  readonly assistantText: string | null;
 }
 
 /**
@@ -112,29 +118,51 @@ function makeTailSink(maxBytes: number): { push(c: Buffer): void; text(): string
  * exceeding the cap without a newline is discarded (the id announcement is a
  * small JSONL event in the first lines of every adapter's headless output).
  */
-function makeSessionIdScanner(
-  extract: (line: string) => string | null,
-  onFound: (id: string) => void,
-): { push(c: Buffer): void } {
+function makeStructuredOutputScanner(opts: {
+  readonly extractSessionId?: (line: string) => string | null;
+  readonly onSessionId: (id: string) => void;
+  readonly extractAssistantText?: (line: string) => string | null;
+  readonly onAssistantText: (text: string) => void;
+}): { push(c: Buffer): void; finish(): void } {
   let buf = '';
-  let done = false;
+  let sessionDone = false;
+  const decoder = new StringDecoder('utf8');
+
+  const inspect = (raw: string) => {
+    const line = raw.trim();
+    if (!line) return;
+    if (!sessionDone && opts.extractSessionId) {
+      const id = opts.extractSessionId(line);
+      if (id) {
+        sessionDone = true;
+        opts.onSessionId(id);
+      }
+    }
+    if (opts.extractAssistantText) {
+      const text = opts.extractAssistantText(line)?.trim();
+      if (text) opts.onAssistantText(text);
+    }
+  };
+
+  const drain = () => {
+    let nl: number;
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      inspect(buf.slice(0, nl));
+      buf = buf.slice(nl + 1);
+    }
+    if (buf.length > SCAN_LINE_MAX_BYTES) buf = '';
+  };
+
   return {
     push(c) {
-      if (done) return;
-      buf += c.toString('utf8');
-      let nl: number;
-      while ((nl = buf.indexOf('\n')) !== -1) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        const id = extract(line);
-        if (id) {
-          done = true;
-          onFound(id);
-          return;
-        }
-      }
-      if (buf.length > SCAN_LINE_MAX_BYTES) buf = '';
+      buf += decoder.write(c);
+      drain();
+    },
+    finish() {
+      buf += decoder.end();
+      drain();
+      if (buf.trim()) inspect(buf);
+      buf = '';
     },
   };
 }
@@ -162,13 +190,21 @@ export async function runHeadlessTask(args: HeadlessTaskArgs): Promise<HeadlessT
   let signal: NodeJS.Signals | null = null;
   let killed = false;
   let agentSessionId: string | null = null;
+  let assistantText: string | null = null;
   const outSink = makeTailSink(OUTPUT_TAIL_BYTES);
   const errSink = makeTailSink(OUTPUT_TAIL_BYTES);
-  const scanner = args.extractSessionId
-    ? makeSessionIdScanner(args.extractSessionId, (id) => {
-        agentSessionId = id;
-        logger.info('headless.session_id_captured', { agentSessionId: id });
-        args.onSessionId?.(id);
+  const scanner = args.extractSessionId || args.extractAssistantText
+    ? makeStructuredOutputScanner({
+        ...(args.extractSessionId ? { extractSessionId: args.extractSessionId } : {}),
+        ...(args.extractAssistantText ? { extractAssistantText: args.extractAssistantText } : {}),
+        onSessionId: (id) => {
+          agentSessionId = id;
+          logger.info('headless.session_id_captured', { agentSessionId: id });
+          args.onSessionId?.(id);
+        },
+        onAssistantText: (text) => {
+          assistantText = text.slice(-ASSISTANT_TEXT_MAX_CHARS);
+        },
       })
     : null;
   // win32: resolve the bare CLI name against PATH × PATHEXT. Native-exe agents
@@ -196,6 +232,7 @@ export async function runHeadlessTask(args: HeadlessTaskArgs): Promise<HeadlessT
         `surface). Native-exe agents (claude, codex) run headless; run shim agents ` +
         `(opencode, pi) interactively instead.`,
       agentSessionId: null,
+      assistantText: null,
     };
   }
   const [spawnFile, ...spawnArgs] = resolved.argv;
@@ -217,17 +254,17 @@ export async function runHeadlessTask(args: HeadlessTaskArgs): Promise<HeadlessT
     errFile?.write(d);
   });
 
-  const exitPromise = new Promise<void>((resolve) => {
-    child.once('exit', (code, sig) => {
-      exitCode = code;
-      signal = sig;
-      resolve();
-    });
+  const closePromise = new Promise<void>((resolve) => {
     child.once('error', (err) => {
-      // e.g. ENOENT (binary not on PATH) — 'exit' won't fire, so resolve here.
+      // e.g. ENOENT (binary not on PATH). `close` still follows `error`, so
+      // wait for it to keep stdout parsing ordered with stream shutdown.
       logger.error('headless.spawn_error', { command: argv0, err });
       errSink.push(Buffer.from(String(err)));
       if (exitCode === null) exitCode = -1;
+    });
+    child.once('close', (code, sig) => {
+      if (exitCode !== -1) exitCode = code;
+      signal = sig;
       resolve();
     });
   });
@@ -252,9 +289,10 @@ export async function runHeadlessTask(args: HeadlessTaskArgs): Promise<HeadlessT
   }, timeoutMs + KILL_GRACE_MS);
   hardKill.unref();
 
-  await exitPromise;
+  await closePromise;
   clearTimeout(softKill);
   clearTimeout(hardKill);
+  scanner?.finish();
   outFile?.end();
   errFile?.end();
   const durationMs = Date.now() - start;
@@ -268,9 +306,21 @@ export async function runHeadlessTask(args: HeadlessTaskArgs): Promise<HeadlessT
     signal,
     killed,
     agentSessionId,
+    assistantReply: assistantText !== null,
     stdoutBytes: stdoutTail.length,
     stderrBytes: stderrTail.length,
   });
 
-  return { command, cwd, exitCode, signal, killed, durationMs, stdoutTail, stderrTail, agentSessionId };
+  return {
+    command,
+    cwd,
+    exitCode,
+    signal,
+    killed,
+    durationMs,
+    stdoutTail,
+    stderrTail,
+    agentSessionId,
+    assistantText,
+  };
 }

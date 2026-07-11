@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatRelativeTime } from '../../lib/intl';
 import type { ReactElement } from 'react';
 import { Bot, ChevronDown, ChevronRight, Code2, Cpu, LayoutGrid, Library, Pencil, Play, Plus, Settings as SettingsIcon, Sparkles, Square, Terminal, X, type LucideIcon } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { headlessApi, type HeadlessTaskRecord } from '../../api/headless';
 import {
@@ -14,6 +15,8 @@ import {
 import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
 import { Skeleton } from '../StateViews';
 import { workspaceDisplayName, workspaceDisplayTitle } from './display';
+import { orderSessionsForSidebar, orderWorkspacesForSidebar } from './sidebar-order';
+import { useReorderMotion } from './useReorderMotion';
 
 /**
  * Workspace launcher sidebar.
@@ -53,6 +56,11 @@ export interface SidebarProps {
   readonly onSelectWorkspace: (wsId: string) => void;
   readonly onSelectSession: (wsId: string, sessionId: string) => void;
   readonly onSpawn: (wsId: string, opts?: SpawnOpts) => void;
+  readonly onOpenHeadlessRun: (
+    wsId: string,
+    taskId: string,
+    opts: { agent?: string; agentSessionId?: string; title?: string },
+  ) => void;
   readonly onSetDefaultAgent: (agent: string | null) => void;
   readonly onPauseSession: (wsId: string, sessionId: string) => void;
   readonly onResumeSession: (wsId: string, sessionId: string) => void;
@@ -72,8 +80,16 @@ export interface SidebarProps {
 }
 
 export function Sidebar(props: SidebarProps): ReactElement {
+  const { t } = useTranslation();
   const [showCreate, setShowCreate] = useState(false);
   const showListError = Boolean(props.listError && props.workspaces.length === 0);
+  const orderedWorkspaces = useMemo(
+    () => orderWorkspacesForSidebar(props.workspaces, props.selection),
+    [props.workspaces, props.selection],
+  );
+  const workspaceListRef = useReorderMotion<HTMLDivElement>(
+    orderedWorkspaces.map((workspace) => workspace.id),
+  );
 
   // Headless runs, polled once for the whole tree (not per-workspace) and
   // grouped client-side. Low-frequency passive surface → plain polling.
@@ -106,7 +122,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
   }, [headlessTasks]);
 
   const onDelete = async (id: string): Promise<void> => {
-    if (!window.confirm('Delete workspace? (registry only — files on disk are kept.)')) return;
+    if (!window.confirm(t('workspace.deleteConfirm'))) return;
     const ok = await deleteWorkspace(id);
     if (ok) {
       props.onChanged();
@@ -126,7 +142,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-border/60 bg-bg-tertiary/30 text-[13px] font-medium text-text-muted transition-colors hover:text-text hover:border-accent/50 hover:bg-bg-tertiary/60"
         >
           <Plus size={15} strokeWidth={2.25} className="shrink-0" />
-          <span className="truncate">New workspace</span>
+          <span className="truncate">{t('workspace.newWorkspace')}</span>
         </button>
       </div>
 
@@ -144,19 +160,19 @@ export function Sidebar(props: SidebarProps): ReactElement {
       {props.onOpenOverview && (
         <NavRow
           icon={LayoutGrid}
-          label="Overview"
+          label={t('workspace.overview')}
           active={!!props.overviewActive}
           onClick={props.onOpenOverview}
-          title="Card-based dashboard of all workspaces"
+          title={t('workspace.overviewNavTitle')}
         />
       )}
       {props.onOpenTemplates && (
         <NavRow
           icon={Library}
-          label="Templates"
+          label={t('workspace.templates')}
           active={!!props.templatesActive}
           onClick={props.onOpenTemplates}
-          title="Browse workspace templates"
+          title={t('workspace.templatesNavTitle')}
         />
       )}
 
@@ -171,14 +187,15 @@ export function Sidebar(props: SidebarProps): ReactElement {
         </div>
       )}
       {props.hasLoaded && props.workspaces.length === 0 && !showListError && (
-        <div className="px-3 py-2 text-[12px] text-text-muted/60">No workspaces yet</div>
+        <div className="px-3 py-2 text-[12px] text-text-muted/60">{t('workspace.emptySidebar')}</div>
       )}
       {showListError && <div className="px-3 py-2 text-[12px] text-red">{props.listError}</div>}
 
-      <div className="flex flex-col mt-0.5">
-        {props.workspaces.map((w) => (
+      <div ref={workspaceListRef} className="flex flex-col mt-0.5">
+        {orderedWorkspaces.map((w) => (
           <WorkspaceRow
             key={w.id}
+            reorderId={w.id}
             workspace={w}
             agents={props.agents}
             defaultAgent={props.defaultAgent}
@@ -187,6 +204,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
             onSelectWorkspace={props.onSelectWorkspace}
             onSelectSession={props.onSelectSession}
             onSpawn={props.onSpawn}
+            onOpenHeadlessRun={props.onOpenHeadlessRun}
             onSetDefaultAgent={props.onSetDefaultAgent}
             onPauseSession={props.onPauseSession}
             onResumeSession={props.onResumeSession}
@@ -229,6 +247,7 @@ function NavRow({
 }
 
 export interface WorkspaceRowProps {
+  readonly reorderId?: string;
   readonly workspace: Workspace;
   readonly agents: readonly AgentInfo[];
   readonly defaultAgent: string | null;
@@ -238,6 +257,7 @@ export interface WorkspaceRowProps {
   readonly onSelectWorkspace: (wsId: string) => void;
   readonly onSelectSession: (wsId: string, sessionId: string) => void;
   readonly onSpawn: (wsId: string, opts?: SpawnOpts) => void;
+  readonly onOpenHeadlessRun: SidebarProps['onOpenHeadlessRun'];
   readonly onSetDefaultAgent: (agent: string | null) => void;
   readonly onPauseSession: (wsId: string, sessionId: string) => void;
   readonly onResumeSession: (wsId: string, sessionId: string) => void;
@@ -288,11 +308,22 @@ function rowAction(danger = false): string {
 }
 
 export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
+  const { t } = useTranslation();
   const w = props.workspace;
   const label = workspaceDisplayName(w);
   const isSelected = props.selection?.wsId === w.id && props.selection.sessionId === null;
   const hasRunning = w.sessions.some((s) => s.state === 'running');
   const runningCount = w.sessions.filter((s) => s.state === 'running').length;
+  const orderedSessions = useMemo(
+    () => orderSessionsForSidebar(
+      w.sessions,
+      props.selection?.wsId === w.id ? props.selection.sessionId : null,
+    ),
+    [w.sessions, w.id, props.selection],
+  );
+  const sessionListRef = useReorderMotion<HTMLDivElement>(
+    orderedSessions.map((session) => session.id),
+  );
 
   const [spawnMenuOpen, setSpawnMenuOpen] = useState(false);
   const plusBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -343,8 +374,8 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
 
   const plusTitle =
     defaultAgentEnabled && props.defaultAgent
-      ? `spawn a new ${agentLabel(props.defaultAgent, props.agents)} session`
-      : 'spawn a new session…';
+      ? t('workspace.spawnAgent', { agent: agentLabel(props.defaultAgent, props.agents) })
+      : t('workspace.spawn');
 
   const statusClass = hasRunning
     ? 'bg-green'
@@ -353,7 +384,7 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
       : 'border border-border';
 
   return (
-    <div>
+    <div data-reorder-id={props.reorderId}>
       <div
         className={`group relative flex items-center gap-1 pl-3 pr-2 py-1.5 text-[12px] transition-colors ${
           isSelected ? 'bg-bg-tertiary text-text' : 'text-text hover:bg-bg-tertiary/50'
@@ -368,7 +399,7 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
         >
           <span
             className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusClass}`}
-            title={hasRunning ? `${runningCount} running` : 'idle'}
+            title={hasRunning ? t('workspace.runningCount', { count: runningCount }) : t('workspace.idle')}
           />
           <span className="truncate font-medium">{label}</span>
           <span className="text-[10px] text-text-muted/50 tabular-nums shrink-0">{formatRelativeTime(w.createdAt)}</span>
@@ -377,9 +408,9 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
           <button
             type="button"
             className={`${rowAction()} opacity-0 group-hover:opacity-100 focus-visible:opacity-100`}
-            title="rename workspace"
+            title={t('workspace.rename')}
             onClick={() => {
-              const next = window.prompt('Workspace display name', label);
+              const next = window.prompt(t('workspace.displayNamePrompt'), label);
               if (next === null) return;
               const trimmed = next.trim();
               if (trimmed.length === 0 || trimmed === label) return;
@@ -447,7 +478,7 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
           <button
             type="button"
             className={`${rowAction()} opacity-0 group-hover:opacity-100 focus-visible:opacity-100`}
-            title="Configure this workspace"
+            title={t('workspace.configure')}
             onClick={() => props.onConfigureWorkspace?.(w.id)}
           >
             <SettingsIcon size={12} strokeWidth={2} />
@@ -456,18 +487,19 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
         <button
           type="button"
           className={`${rowAction(true)} opacity-0 group-hover:opacity-100 focus-visible:opacity-100`}
-          title="delete workspace"
+          title={t('workspace.deleteWorkspace')}
           onClick={() => void props.onDelete(w.id)}
         >
           <X size={12} strokeWidth={2.5} />
         </button>
       </div>
 
-      {w.sessions.length > 0 && (
-        <div className="ml-[18px] border-l border-border/50">
-          {w.sessions.map((s) => (
+      {orderedSessions.length > 0 && (
+        <div ref={sessionListRef} className="ml-[18px] border-l border-border/50">
+          {orderedSessions.map((s) => (
             <SessionRow
               key={s.id}
+              reorderId={s.id}
               session={s}
               isActive={props.selection?.wsId === w.id && props.selection.sessionId === s.id}
               onSelect={() => props.onSelectSession(w.id, s.id)}
@@ -482,7 +514,11 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
       {(props.headlessTasks?.length ?? 0) > 0 && (
         <HeadlessGroup
           tasks={props.headlessTasks!}
-          onOpenAsSession={(t) => props.onSpawn(w.id, { resume: t.agentSessionId!, agent: t.agent })}
+          onOpenAsSession={(task) => props.onOpenHeadlessRun(w.id, task.taskId, {
+            agent: task.agent,
+            agentSessionId: task.agentSessionId,
+            title: task.prompt,
+          })}
         />
       )}
     </div>
@@ -513,6 +549,7 @@ function HeadlessGroup(props: {
   readonly tasks: readonly HeadlessTaskRecord[];
   readonly onOpenAsSession: (t: HeadlessTaskRecord) => void;
 }): ReactElement {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false); // collapsed by default, by design
   const runningCount = props.tasks.filter((t) => t.status === 'running').length;
 
@@ -524,13 +561,13 @@ function HeadlessGroup(props: {
         aria-expanded={open}
         title={
           runningCount > 0
-            ? `headless runs — ${runningCount} running`
-            : 'headless runs (automation)'
+            ? t('workspace.headlessRunning', { count: runningCount })
+            : t('workspace.headlessAutomation')
         }
         className="group flex items-center gap-1 w-full pl-3 pr-2 py-1 text-[10px] font-medium uppercase tracking-wider text-text-muted/60 hover:text-text-muted transition-colors select-none"
       >
         {open ? <ChevronDown size={11} strokeWidth={2.25} aria-hidden="true" /> : <ChevronRight size={11} strokeWidth={2.25} aria-hidden="true" />}
-        <span>headless</span>
+        <span>{t('workspace.headless')}</span>
         <span className="text-text-muted/45 tabular-nums">{props.tasks.length}</span>
         {runningCount > 0 && <span className="ml-0.5 w-1.5 h-1.5 rounded-full bg-accent" />}
       </button>
@@ -549,27 +586,28 @@ function HeadlessTaskRow(props: {
   readonly task: HeadlessTaskRecord;
   readonly onOpenAsSession: (t: HeadlessTaskRecord) => void;
 }): ReactElement {
-  const t = props.task;
-  const openable = t.status !== 'running' && !!t.agentSessionId;
-  const titleParts = [`${t.agent} · ${t.status}`, formatRelativeTime(t.startedAt)];
-  if (t.error) titleParts.push(t.error);
-  titleParts.push(t.prompt);
+  const { t } = useTranslation();
+  const task = props.task;
+  const openable = task.status !== 'running' && !!task.agentSessionId;
+  const titleParts = [`${task.agent} · ${task.status}`, formatRelativeTime(task.startedAt)];
+  if (task.error) titleParts.push(task.error);
+  titleParts.push(task.prompt);
 
   return (
     <div className="group flex items-center gap-1.5 pl-3 pr-2 py-1 text-[11px]" title={titleParts.join('\n')}>
-      <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${HEADLESS_DOT_CLASS[t.status]}`} aria-label={t.status} />
+      <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${HEADLESS_DOT_CLASS[task.status]}`} aria-label={task.status} />
       <span className="shrink-0 flex items-center justify-center w-3.5 text-text-muted/50">
-        <AgentBadgeGlyph agentId={t.agent} />
+        <AgentBadgeGlyph agentId={task.agent} />
       </span>
-      <span className="flex-1 truncate text-text-muted">{t.prompt}</span>
+      <span className="flex-1 truncate text-text-muted">{task.prompt}</span>
       {openable && (
         <button
           type="button"
           className={`${rowAction()} opacity-0 group-hover:opacity-100 focus-visible:opacity-100`}
-          title="open this run as an interactive session"
+          title={t('workspace.openRun')}
           onClick={(e) => {
             e.stopPropagation();
-            props.onOpenAsSession(t);
+            props.onOpenAsSession(task);
           }}
         >
           <ChevronRight size={12} strokeWidth={2.25} />
@@ -580,6 +618,7 @@ function HeadlessTaskRow(props: {
 }
 
 export interface SessionRowProps {
+  reorderId?: string;
   session: SessionRecord;
   isActive: boolean;
   onSelect: () => void;
@@ -589,6 +628,7 @@ export interface SessionRowProps {
 }
 
 export function SessionRow(props: SessionRowProps): ReactElement {
+  const { t } = useTranslation();
   const s = props.session;
   const isPaused = s.state === 'paused';
   // Title: the captured first message (seeded sessions), else the sticky name.
@@ -597,13 +637,14 @@ export function SessionRow(props: SessionRowProps): ReactElement {
   const metaParts: string[] = [`agent ${s.agent}`];
   if (s.pid !== null) metaParts.push(`pid ${s.pid}`);
   if (tidShort) metaParts.push(tidShort);
-  if (isPaused) metaParts.push('paused');
+  if (isPaused) metaParts.push(t('workspace.paused'));
   const meta = metaParts.join(' · ');
   // Full message on hover when it's been truncated, then the technical meta.
   const tooltip = s.title?.trim() ? `${s.title.trim()}\n${meta}` : meta;
 
   return (
     <div
+      data-reorder-id={props.reorderId}
       className={`group relative flex items-center gap-1.5 pl-3 pr-2 py-1.5 text-[12px] transition-colors ${
         props.isActive ? 'bg-bg-tertiary' : 'hover:bg-bg-tertiary/50'
       }`}
@@ -627,8 +668,8 @@ export function SessionRow(props: SessionRowProps): ReactElement {
         <button
           type="button"
           className={rowAction()}
-          title="resume this session"
-          aria-label="resume this session"
+          title={t('workspace.resumeSession')}
+          aria-label={t('workspace.resumeSession')}
           onClick={(e) => {
             e.stopPropagation();
             props.onResume();
@@ -640,8 +681,8 @@ export function SessionRow(props: SessionRowProps): ReactElement {
         <button
           type="button"
           className={rowAction()}
-          title="stop this session"
-          aria-label="stop this session"
+          title={t('workspace.stopSession')}
+          aria-label={t('workspace.stopSession')}
           onClick={(e) => {
             e.stopPropagation();
             props.onPause();
@@ -653,8 +694,8 @@ export function SessionRow(props: SessionRowProps): ReactElement {
       <button
         type="button"
         className={`${rowAction(true)} opacity-0 group-hover:opacity-100 focus-visible:opacity-100`}
-        title="delete this session"
-        aria-label="delete this session"
+        title={t('workspace.deleteSession')}
+        aria-label={t('workspace.deleteSession')}
         onClick={(e) => {
           e.stopPropagation();
           props.onDelete();

@@ -29,8 +29,8 @@ interface InboxPageProps {
  * (we have no Issue layer to make them one thread) — merging them into a
  * combined timeline read badly. So selection is a single entry, and this
  * pane shows just that one: its docs (collapsed attachment cards) above
- * its comment (markdown body), with a reply bar that jumps into the
- * source workspace.
+ * its comment (markdown body), with a reply bar that returns to the exact
+ * source Session when provenance is available and falls back to the Workspace.
  *
  * Selection (an entryId) is owned by `useInboxSelection`; the sidebar
  * drives it and marks the entry read on select. Delete (header trash +
@@ -155,7 +155,8 @@ function Detail({ entry, onDelete }: { entry: InboxEntry; onDelete: () => void }
   // Workspace liveness — drives whether the jump-to-workspace affordance
   // is enabled. A deleted workspace's inbox entry stays as a record but
   // has nowhere to navigate to.
-  const { workspaces } = useWorkspaces()
+  const workspacesCtx = useWorkspaces()
+  const { workspaces } = workspacesCtx
   const aliveWorkspace = workspaces.find((w) => w.id === entry.workspaceId) ?? null
   const wsAlive = aliveWorkspace !== null
   const displayLabel = aliveWorkspace?.tag ?? entry.workspaceLabel ?? entry.workspaceId
@@ -173,6 +174,11 @@ function Detail({ entry, onDelete }: { entry: InboxEntry; onDelete: () => void }
   // (server-stamped from AQ_SESSION_ID, validated against the session registry).
   // Navigable: opens/focuses that exact session tab.
   const sessionId = origin?.kind === 'interactive' ? origin.sessionId : undefined
+  const sessionRecord = sessionId
+    ? aliveWorkspace?.sessions.find((session) => session.id === sessionId) ?? null
+    : null
+  const [continuing, setContinuing] = useState(false)
+  const [continueError, setContinueError] = useState<string | null>(null)
   // Resolve the issue id (a filename stem) to its display title via the warm,
   // process-cached board snapshot — a cheap path (no extra fetch on the hot
   // line). Falls back to the stem when the board hasn't resolved it.
@@ -203,10 +209,47 @@ function Detail({ entry, onDelete }: { entry: InboxEntry; onDelete: () => void }
   // (WorkspaceView focuses the matching session record). Switch the sidebar to
   // Workspaces so the sessions list shows alongside the tab.
   const openSession = () => {
-    if (!wsAlive || !sessionId) return
+    if (!wsAlive || !sessionId || !sessionRecord) return
     setSidebar('workspaces')
+    if (sessionRecord.state === 'paused') {
+      void workspacesCtx.resumeSession(entry.workspaceId, sessionId).catch((err) =>
+        setContinueError(err instanceof Error ? err.message : String(err)),
+      )
+      return
+    }
     openOrFocus({ kind: 'workspace', params: { wsId: entry.workspaceId, sessionId } })
   }
+
+  const continueOrigin = async () => {
+    if (!wsAlive) return
+    setContinueError(null)
+    setContinuing(true)
+    setSidebar('workspaces')
+    try {
+      if (origin?.kind === 'headless' && origin.runId) {
+        await workspacesCtx.openHeadlessRun(entry.workspaceId, origin.runId, {
+          ...(origin.agent ? { agent: origin.agent } : {}),
+          ...(origin.agentSessionId ? { agentSessionId: origin.agentSessionId } : {}),
+          ...(entry.comments ? { title: entry.comments.slice(0, 200) } : {}),
+        })
+      } else if (sessionId && sessionRecord) {
+        if (sessionRecord.state === 'paused') {
+          await workspacesCtx.resumeSession(entry.workspaceId, sessionId)
+        } else {
+          openOrFocus({ kind: 'workspace', params: { wsId: entry.workspaceId, sessionId } })
+        }
+      } else {
+        openWorkspace()
+      }
+    } catch (err) {
+      setContinueError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setContinuing(false)
+    }
+  }
+
+  const hasHeadlessOrigin = origin?.kind === 'headless' && !!origin.runId
+  const canContinueOrigin = hasHeadlessOrigin || !!sessionRecord
 
   return (
     <div className="max-w-[1040px] mx-auto py-6 px-4 md:px-8">
@@ -223,7 +266,7 @@ function Detail({ entry, onDelete }: { entry: InboxEntry; onDelete: () => void }
 
         {/* Origin — the run/issue this push came from. Navigable for a
          *  scheduled issue; a lighter marker for a bare headless run. */}
-        {issueId ? (
+        {issueId && (
           <button
             type="button"
             onClick={openIssue}
@@ -233,25 +276,29 @@ function Detail({ entry, onDelete }: { entry: InboxEntry; onDelete: () => void }
             <ListChecks size={12} strokeWidth={1.75} className="shrink-0" />
             <span className="truncate max-w-[220px]">from {issueTitle ?? issueId}</span>
           </button>
-        ) : sessionId ? (
+        )}
+        {sessionId ? (
           <button
             type="button"
             onClick={openSession}
-            disabled={!wsAlive}
+            disabled={!wsAlive || !sessionRecord}
             title={`From session ${sessionId}`}
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-text-muted/80 hover:text-accent hover:bg-accent/10 transition-colors disabled:opacity-50 disabled:hover:text-text-muted/80 disabled:hover:bg-transparent disabled:cursor-default"
           >
             <Terminal size={12} strokeWidth={1.75} className="shrink-0" />
             <span className="truncate max-w-[220px]">from session{origin?.agent ? ` · ${origin.agent}` : ''}</span>
           </button>
-        ) : origin?.runId ? (
-          <span
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-text-muted/55"
+        ) : hasHeadlessOrigin ? (
+          <button
+            type="button"
+            onClick={() => void continueOrigin()}
+            disabled={!wsAlive || continuing}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-text-muted/80 hover:text-accent hover:bg-accent/10 transition-colors disabled:opacity-50 disabled:hover:text-text-muted/80 disabled:hover:bg-transparent disabled:cursor-default"
             title={`From headless run ${origin.runId}`}
           >
             <Bot size={12} strokeWidth={1.75} className="shrink-0" />
             <span>from run{origin.agent ? ` · ${origin.agent}` : ''}</span>
-          </span>
+          </button>
         ) : null}
 
         <span className="text-[11px] text-text-muted/70 tabular-nums ml-auto">
@@ -301,18 +348,27 @@ function Detail({ entry, onDelete }: { entry: InboxEntry; onDelete: () => void }
         </div>
       )}
 
-      {/* Reply bar — jumps into the workspace (single-click navigation; a
-       *  v2 could pre-fill the workspace chat input). */}
+      {/* Follow-up bar — exact originating Session when available; Workspace
+       * fallback for legacy/manual entries without Session provenance. */}
       <div className="mt-6">
         {wsAlive ? (
           <button
             type="button"
-            onClick={openWorkspace}
+            onClick={() => void continueOrigin()}
+            disabled={continuing}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-lg border border-border bg-bg-tertiary/40 hover:bg-bg-tertiary hover:border-accent/40 transition-colors text-left group"
           >
-            <MessageSquare size={15} strokeWidth={1.75} className="shrink-0 text-text-muted/70 group-hover:text-accent transition-colors" />
+            {canContinueOrigin
+              ? <Terminal size={15} strokeWidth={1.75} className="shrink-0 text-text-muted/70 group-hover:text-accent transition-colors" />
+              : <MessageSquare size={15} strokeWidth={1.75} className="shrink-0 text-text-muted/70 group-hover:text-accent transition-colors" />}
             <span className="flex-1 text-[13px] text-text-muted/80 group-hover:text-text transition-colors">
-              {t('inbox.replyInWorkspace', { label: displayLabel })}
+              {continuing
+                ? t('inbox.continuingSession')
+                : hasHeadlessOrigin
+                  ? t('inbox.continueRun')
+                  : sessionRecord
+                    ? t('inbox.continueSession')
+                    : t('inbox.replyInWorkspace', { label: displayLabel })}
             </span>
             <ArrowRight size={15} strokeWidth={1.75} className="shrink-0 text-text-muted/60 group-hover:text-accent group-hover:translate-x-0.5 transition-all" />
           </button>
@@ -320,6 +376,9 @@ function Detail({ entry, onDelete }: { entry: InboxEntry; onDelete: () => void }
           <div className="px-4 py-3 text-[12px] text-text-muted/60 italic border-t border-border/40 pt-4">
             {t('inbox.cannotReplyWorkspaceGone')}
           </div>
+        )}
+        {continueError && (
+          <div className="mt-2 text-[12px] text-red">{continueError}</div>
         )}
       </div>
 
