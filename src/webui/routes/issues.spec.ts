@@ -50,7 +50,9 @@ function build(inboxReports: InboxEntry[] = []) {
     },
     resumeRegistry: {
       get: (resumeId: string) => resumeId === 'resume-kind-owl-abc123'
-        ? { resumeId, wsId: 'ws-1', agent: 'codex', createdAt: 1, updatedAt: 1 }
+        ? { resumeId, wsId: 'ws-1', agent: 'codex', agentSessionId: 'native-1', createdAt: 1, updatedAt: 1 }
+        : resumeId === 'resume-unready'
+          ? { resumeId, wsId: 'ws-1', agent: 'codex', createdAt: 1, updatedAt: 1 }
         : null,
     },
     issueDetail: async (wsId: string, id: string) => {
@@ -121,6 +123,16 @@ describe('PATCH /api/issues/:wsId/:id', () => {
     })
     expect(updated.status).toBe(200)
     expect(updated.body.issue.execution).toEqual({ mode: 'resume', resumeId: 'resume-kind-owl-abc123' })
+  })
+
+  it('409 when the selected execution owner is not resumable yet', async () => {
+    await createIssue(wsDir, { id: 'i1', title: 'T', when: { kind: 'every', every: '1h' } })
+    const { app } = build()
+    const unavailable = await req(app, 'PATCH', '/ws-1/i1', {
+      execution: { mode: 'resume', resumeId: 'resume-unready' },
+    })
+    expect(unavailable.status).toBe(409)
+    expect(unavailable.body.error).toBe('unavailable_execution_owner')
   })
 
   it('400 no_fields when the body has none of the patchable fields', async () => {

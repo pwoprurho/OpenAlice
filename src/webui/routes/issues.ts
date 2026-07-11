@@ -137,6 +137,12 @@ export function createIssuesRoutes(svc: WorkspaceService): Hono {
             message: 'resumeId must identify a product Session in this Workspace',
           }, 400)
         }
+        if (!identity.agentSessionId) {
+          return c.json({
+            error: 'unavailable_execution_owner',
+            message: 'the selected Session is not resumable yet; complete one agent turn before assigning it',
+          }, 409)
+        }
       }
       patch.execution = execution.data
     }

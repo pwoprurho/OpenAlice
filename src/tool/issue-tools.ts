@@ -91,6 +91,12 @@ function resolveIssueExecution(
   if (identity && identity.workspaceId !== ctx.workspaceId) {
     return { ok: false, error: `product Session ${resumeId} belongs to another workspace` }
   }
+  if (identity && !identity.resumable) {
+    return {
+      ok: false,
+      error: `product Session ${resumeId} is not resumable yet; complete one agent turn before assigning it`,
+    }
+  }
   return { ok: true, execution: parsed.data }
 }
 

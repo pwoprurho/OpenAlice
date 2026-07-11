@@ -61,8 +61,10 @@ The filename stem is the stable issue id. Frontmatter:
   immutable runtime.
 - `execution` — scheduled ownership: `{ mode: fresh }` creates a new product
   Session per fire; `{ mode: resume, resumeId: <id> }` continues one exact
-  accountable Session. Existing files without it remain fresh for compatibility;
-  new agent-created schedules must choose explicitly.
+  accountable Session. A new resume owner must already have captured a native
+  runtime session id; provenance-only, not-yet-resumable Sessions are rejected
+  at assignment time. Existing files without `execution` remain fresh for
+  compatibility; new agent-created schedules must choose explicitly.
 
 `done` and `canceled` are terminal and stop scheduled firing. There is no
 separate `enabled` flag. A successful one-shot `at` issue is automatically

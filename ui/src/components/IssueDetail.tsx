@@ -267,7 +267,12 @@ function ExecutionEditor({
     return raw.length > 44 ? `${raw.slice(0, 43)}…` : raw
   }
   const selected = value?.mode === 'resume' ? value.resumeId : '__fresh__'
-  const choices = sessions.filter((session) => session.resumeId && session.agent !== 'shell')
+  // A product resumeId can exist before the native runtime has reported its
+  // own session id. Such an entry is useful provenance, but cannot own a
+  // scheduled resume yet: dispatch would fail with `not_ready` on every tick.
+  const choices = sessions.filter(
+    (session) => session.resumeId && session.agent !== 'shell' && session.resumable,
+  )
   const hasSelected = value?.mode !== 'resume' || choices.some((session) => session.resumeId === value.resumeId)
 
   return (
@@ -287,7 +292,7 @@ function ExecutionEditor({
         </option>
       ))}
       {!hasSelected && value?.mode === 'resume' && (
-        <option value={value.resumeId}>Continue {value.resumeId}</option>
+        <option value={value.resumeId}>Unavailable owner · {value.resumeId}</option>
       )}
     </select>
   )

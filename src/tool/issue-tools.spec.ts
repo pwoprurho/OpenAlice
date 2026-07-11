@@ -147,6 +147,20 @@ describe('issue_create', () => {
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/another workspace/)
   })
+
+  it('refuses to assign a Session that has no resumable runtime identity yet', async () => {
+    const context = ctx({
+      resolveSessionIdentity: () => ({ workspaceId: 'ws-self', agent: 'pi', resumable: false }),
+    })
+    const result = await run(issueCreateFactory.build(context), {
+      id: 'unready-owner',
+      title: 'Unready owner',
+      when: { kind: 'every', every: '30m' },
+      execution: { mode: 'resume', resumeId: 'resume-unready' },
+    })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/not resumable yet/)
+  })
 })
 
 describe('issue_update', () => {
