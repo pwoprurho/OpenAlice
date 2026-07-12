@@ -37,6 +37,7 @@ The app ships:
 
 - Electron's bundled Node runtime;
 - the pinned managed Pi npm runtime under `vendor/pi/`;
+- pinned `fd` and `ripgrep` binaries under `vendor/tools/darwin-<arch>/`;
 - the existing packaged Git path used by Workspace bootstrap.
 
 Pi uses `/bin/bash` when available and falls back to `/bin/sh`. The packaged
@@ -49,6 +50,7 @@ The app ships:
 
 - Electron's bundled Node runtime;
 - the same pinned managed Pi npm runtime;
+- pinned `fd` and `ripgrep` binaries under `vendor/tools/win32-<arch>/`;
 - a pinned PortableGit payload under `vendor/git/<platform>-<arch>/`, including
   `git.exe`, `bash.exe`, `sh.exe`, and the command-line tools Pi needs.
 
@@ -113,12 +115,19 @@ machine-local preference remains the source of truth.
 - downloads Pi's pinned install package and lockfile;
 - verifies their checksums;
 - runs an isolated `npm ci --omit=dev` under `vendor/pi/`;
+- downloads the platform's pinned `fd` and `ripgrep` archives, verifies their
+  release checksums, and retains their license files;
+- publishes both search binaries from one shared `vendor/tools/<platform>-<arch>/bin`
+  directory so Pi never needs a per-Workspace tool download;
 - downloads and verifies PortableGit on supported Windows targets;
 - extracts it into the deterministic `vendor/git/<platform>-<arch>/` path;
 - writes `vendor/manifest.json` with versions, paths, and toolchain entries.
 
 `pnpm electron:pack` runs this through `pnpm vendor:runtime`. The desktop
 builder keeps `asar` disabled and includes `vendor/**` in the packaged files.
+Contributors who run `pnpm vendor:runtime` also get the generated search-tool
+directory on `pnpm dev`'s managed PATH; dev startup never downloads or mutates
+that payload implicitly.
 
 ### 2. Resolve packaged capabilities
 
@@ -132,7 +141,7 @@ OPENALICE_MANAGED_PI_NODE_PATH=/.../OpenAlice(.exe)
 OPENALICE_MANAGED_GIT_DIR=/.../vendor/git/win32-x64
 OPENALICE_MANAGED_GIT_BIN=/.../vendor/git/win32-x64/cmd/git.exe
 OPENALICE_MANAGED_SHELL_PATH=/.../vendor/git/win32-x64/bin/bash.exe
-OPENALICE_MANAGED_TOOLCHAIN_PATH=/.../cmd:/.../bin:/.../usr/bin
+OPENALICE_MANAGED_TOOLCHAIN_PATH=/.../vendor/tools/win32-x64/bin:/.../cmd:/.../bin:/.../usr/bin
 LOCAL_GIT_DIRECTORY=/.../vendor/git/win32-x64
 ```
 
@@ -211,6 +220,11 @@ Keep these true together:
   incomplete package.
 - Pi and PortableGit versions, download URLs, and checksums remain pinned in
   `scripts/vendor-managed-runtime.mjs`.
+- Managed `fd` and `ripgrep` versions, release URLs, checksums, binaries, and
+  license files remain pinned together in `scripts/vendor-managed-runtime.mjs`.
+- Pi remains network-capable. The managed search tools prevent its normal
+  startup probe from downloading a separate copy into each redirected
+  `PI_CODING_AGENT_DIR`; they do not force `PI_OFFLINE` or patch Pi itself.
 - Every packaged Workspace CLI includes the shared `openalice-cli.cjs` payload,
   its POSIX launcher, and its Windows `.cmd` twin; packaged smoke must execute
   the payload through Electron Node.
