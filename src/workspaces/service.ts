@@ -58,6 +58,7 @@ import {
   annotateNameCollisions,
   detailIssue,
   inboxReportsForIssue,
+  issueActivityRecords,
   issueProvenanceRecords,
   snapshotBoardIssue,
   type IssueDetail,
@@ -1306,7 +1307,8 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     const provenance = issueProvenanceRecords(provenanceStore.list({
       artifact: { kind: 'issue', workspaceId: ws.id, issueId: issue.id },
     }));
-    return { issue: detailIssue(issue, markers, ws.tag), comments, runs, inboxReports, provenance };
+    const activity = issueActivityRecords(provenance, runs);
+    return { issue: detailIssue(issue, markers, ws.tag), comments, runs, inboxReports, provenance, activity };
   };
 
   const sessionDirectory = async (

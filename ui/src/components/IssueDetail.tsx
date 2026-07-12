@@ -7,6 +7,7 @@ import type { InboxEntry } from '../api/inbox'
 import type {
   IssueDetail as IssueDetailData,
   IssueDetailIssue,
+  IssueActivityRecord,
   IssueExecution,
   IssuePriority,
   IssueProvenanceRecord,
@@ -626,27 +627,19 @@ function RunRow({ run, onAsk }: { run: HeadlessTaskRecord; onAsk: (run: Headless
           {run.prompt}
         </p>
       )}
+      {run.output?.assistantPreview && (
+        <p className="mt-1.5 line-clamp-2 border-l-2 border-accent/25 pl-2 text-[12px] leading-snug text-muted" title={run.output.assistantPreview}>
+          {run.output.assistantPreview}
+        </p>
+      )}
+      {run.output && (run.output.toolCalls > 0 || run.output.toolFailures > 0) && (
+        <p className={`mt-1 text-[11px] ${run.output.toolFailures > 0 ? 'text-red-400' : 'text-muted/60'}`}>
+          {run.output.toolCalls} tool {run.output.toolCalls === 1 ? 'call' : 'calls'}
+          {run.output.toolFailures > 0 ? ` · ${run.output.toolFailures} failed` : ''}
+        </p>
+      )}
       {run.error && <p className="mt-1 text-[12px] text-red-400">{run.error}</p>}
     </li>
-  )
-}
-
-function ActivityFeed({ runs, onAskRun }: { runs: HeadlessTaskRecord[]; onAskRun: (run: HeadlessTaskRecord) => void }) {
-  return (
-    <section className="mt-8">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted/70">Activity</h3>
-      {runs.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-xs text-muted">
-          No headless runs for this issue yet.
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {runs.map((run) => (
-            <RunRow key={run.taskId} run={run} onAsk={onAskRun} />
-          ))}
-        </ul>
-      )}
-    </section>
   )
 }
 
@@ -655,7 +648,7 @@ function ActivityFeed({ runs, onAskRun }: { runs: HeadlessTaskRecord[]; onAskRun
 /**
  * The inbox reports this issue produced — the issue→inbox direction of the
  * cross-link (each entry's server-stamped `origin.issueId` is this issue). The
- * run→issue direction is the Activity feed above. Each row jumps to the Inbox,
+ * run→issue direction is the unified Activity feed. Each row jumps to the Inbox,
  * selecting + marking-read that entry. Rendered only when there are reports
  * (the Activity feed already establishes the run history; an empty inbox list
  * would just be noise).
@@ -698,7 +691,7 @@ function InboxReportsSection({
   )
 }
 
-// ==================== Provenance timeline (Issue → Session) ====================
+// ==================== Issue activity (attribution + runs) ====================
 
 const PROVENANCE_ACTION_LABEL: Record<IssueProvenanceRecord['action'], string> = {
   created: 'Created',
@@ -709,12 +702,14 @@ const PROVENANCE_ACTION_LABEL: Record<IssueProvenanceRecord['action'], string> =
   reconstructed: 'Reconstructed',
 }
 
-function ProvenanceTimeline({
-  records,
+function IssueActivity({
+  activity,
   onContinue,
+  onAskRun,
 }: {
-  records: IssueProvenanceRecord[]
+  activity: IssueActivityRecord[]
   onContinue: (record: IssueProvenanceRecord) => Promise<void>
+  onAskRun: (run: HeadlessTaskRecord) => void
 }) {
   const [continuingId, setContinuingId] = useState<string | null>(null)
   const [continueError, setContinueError] = useState<string | null>(null)
@@ -733,14 +728,18 @@ function ProvenanceTimeline({
 
   return (
     <section className="mt-8">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted/70">Provenance</h3>
-      {records.length === 0 ? (
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted/70">Activity</h3>
+      {activity.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border px-4 py-4 text-center text-xs text-muted">
-          No attribution was recorded for this legacy or manually-created issue.
+          No activity has been recorded for this issue yet.
         </p>
       ) : (
         <ul className="space-y-2">
-          {records.map((record) => {
+          {activity.map((item) => {
+            if (item.kind === 'run') {
+              return <RunRow key={`run:${item.run.taskId}`} run={item.run} onAsk={onAskRun} />
+            }
+            const record = item
             const origin = record.origin
             const isSession = origin.kind === 'session'
             const originLabel = isSession
@@ -751,7 +750,7 @@ function ProvenanceTimeline({
                   ? `External · ${origin.system}`
                   : `Unknown · ${origin.reason}`
             return (
-              <li key={record.id} className="flex items-center gap-2.5 rounded-lg border border-border bg-bg-secondary px-3 py-2.5">
+              <li key={`provenance:${record.id}`} className="flex items-center gap-2.5 rounded-lg border border-border bg-bg-secondary px-3 py-2.5">
                 <History size={14} className="shrink-0 text-muted/70" aria-hidden />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -1107,6 +1106,10 @@ export function IssueDetail({
   const comments = data.comments ?? []
   const inboxReports = data.inboxReports ?? []
   const provenance = data.provenance ?? []
+  const activity = data.activity ?? [
+    ...provenance.map((record) => ({ ...record, kind: 'change' as const })),
+    ...runs.map((run) => ({ kind: 'run' as const, id: run.taskId, at: run.startedAt, run })),
+  ].sort((a, b) => b.at - a.at)
   const inquiryDescription = inquiryTarget.relation === 'owner'
     ? 'Continue the one responsible Session declared by this Issue’s execution policy.'
     : inquiryTarget.relation === 'run'
@@ -1164,9 +1167,9 @@ export function IssueDetail({
           />
           <IssueComments comments={comments} />
           <CommentComposer wsId={wsId} id={id} onPosted={mutate} />
-          <ProvenanceTimeline records={provenance} onContinue={continueProvenanceSession} />
-          <ActivityFeed
-            runs={runs}
+          <IssueActivity
+            activity={activity}
+            onContinue={continueProvenanceSession}
             onAskRun={(run) => {
               setInquiryTarget({ relation: 'run', runId: run.taskId })
               window.requestAnimationFrame(() => document.getElementById('inquiries')?.scrollIntoView({ behavior: 'smooth', block: 'center' }))

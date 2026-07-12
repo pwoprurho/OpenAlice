@@ -12,10 +12,12 @@
  */
 
 import type { InboxEntry } from '../../core/inbox-store.js'
-import type {
-  ArtifactOrigin,
-  ProvenanceAction,
-  ProvenanceRecord,
+import {
+  ACTIVITY_UPDATE_COALESCE_MS,
+  artifactOriginsMatch,
+  type ArtifactOrigin,
+  type ProvenanceAction,
+  type ProvenanceRecord,
 } from '../../core/provenance-store.js'
 import type { Schedule } from '../../core/schedule-expr.js'
 import type {
@@ -242,9 +244,13 @@ export interface IssueDetail {
    *  `origin.issueId` is this issue, newest-first. The issue→inbox direction of
    *  the cross-link (`runs` is the run→issue one). */
   inboxReports: InboxEntry[]
-  /** Immutable attribution events for this Issue, newest first. The product
+  /** Human-readable attribution activity for this Issue, newest first. Nearby
+   *  updates from one origin are one editing activity rather than autosave spam.
    *  `resumeId` is the only conversation handle exposed for Session origins. */
   provenance: IssueProvenanceRecord[]
+  /** Unified Issue log: human/Session changes and scheduled executions share
+   * one chronological contract while retaining their authoritative stores. */
+  activity: IssueActivityRecord[]
 }
 
 export interface IssueProvenanceRecord {
@@ -254,11 +260,28 @@ export interface IssueProvenanceRecord {
   at: number
 }
 
+export type IssueActivityRecord =
+  | ({ kind: 'change' } & IssueProvenanceRecord)
+  | { kind: 'run'; id: string; at: number; run: IssueRunRecord }
+
 /** Strip persistence-only artifact/fingerprint fields from Issue detail. */
 export function issueProvenanceRecords(
   records: readonly ProvenanceRecord[],
 ): IssueProvenanceRecord[] {
-  return records.map(({ id, action, origin, at }) => ({ id, action, origin, at }))
+  const sorted = [...records].sort((a, b) => b.at - a.at)
+  const compacted: ProvenanceRecord[] = []
+  for (const record of sorted) {
+    const newer = compacted.at(-1)
+    const elapsed = newer ? newer.at - record.at : -1
+    if (
+      newer &&
+      newer.action === 'updated' && record.action === 'updated' &&
+      artifactOriginsMatch(newer.origin, record.origin) &&
+      elapsed >= 0 && elapsed <= ACTIVITY_UPDATE_COALESCE_MS
+    ) continue
+    compacted.push(record)
+  }
+  return compacted.map(({ id, action, origin, at }) => ({ id, action, origin, at }))
 }
 
 /** Agent/UI-safe projection of one execution. `resumeId` is the only public
@@ -306,6 +329,19 @@ export function issueRunRecord(task: HeadlessTaskRecord, resumable: boolean): Is
     ...(task.output !== undefined ? { output: task.output } : {}),
     resumable,
   }
+}
+
+/** One chronological Issue log assembled from durable attribution edges and
+ * the headless run registry. New activity kinds can join this projection
+ * without forcing unrelated persistence systems into one file. */
+export function issueActivityRecords(
+  changes: readonly IssueProvenanceRecord[],
+  runs: readonly IssueRunRecord[],
+): IssueActivityRecord[] {
+  return [
+    ...changes.map((change) => ({ ...change, kind: 'change' as const })),
+    ...runs.map((run) => ({ kind: 'run' as const, id: run.taskId, at: run.startedAt, run })),
+  ].sort((a, b) => b.at - a.at)
 }
 
 /** Filter a workspace's inbox entries to the ones a given issue produced

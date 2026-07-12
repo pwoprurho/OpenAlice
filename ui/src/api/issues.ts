@@ -48,6 +48,12 @@ export interface IssueProvenanceRecord {
   at: number
 }
 
+/** Unified Issue log. Persistence stays domain-owned; the API supplies one
+ * chronological projection for UI, CLI, and future activity consumers. */
+export type IssueActivityRecord =
+  | ({ kind: 'change' } & IssueProvenanceRecord)
+  | { kind: 'run'; id: string; at: number; run: HeadlessTaskRecord }
+
 export interface IssueComment {
   id: string
   author: string
@@ -178,9 +184,13 @@ export interface IssueDetail {
    * issue with no reports yields an empty array.
    */
   inboxReports?: InboxEntry[]
-  /** Immutable creation/update/comment attribution, newest first. Optional for
-   * legacy/demo payloads written before provenance projection existed. */
+  /** Creation/update/comment activity, newest first. Nearby updates from one
+   * origin are coalesced into an editing activity. Optional for legacy/demo
+   * payloads written before provenance projection existed. */
   provenance?: IssueProvenanceRecord[]
+  /** Unified change + scheduled execution log. Optional for older/demo servers;
+   * the client can derive it from provenance/runs during rollout. */
+  activity?: IssueActivityRecord[]
 }
 
 export const issuesApi = {

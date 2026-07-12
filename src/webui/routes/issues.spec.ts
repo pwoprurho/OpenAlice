@@ -63,7 +63,7 @@ function build(inboxReports: InboxEntry[] = []) {
       const issue = r.issues.find((i) => i.id === id)
       if (!issue) return null
       const comments = await readIssueComments(wsDir, id)
-      return { issue: detailIssue(issue, null), comments: comments.ok ? comments.comments : [], runs: [], inboxReports, provenance: [] }
+      return { issue: detailIssue(issue, null), comments: comments.ok ? comments.comments : [], runs: [], inboxReports, provenance: [], activity: [] }
     },
     provenanceStore: { append: appendProvenance, list: vi.fn(), latest: vi.fn() },
   } as unknown as WorkspaceService
@@ -171,7 +171,7 @@ describe('PATCH /api/issues/:wsId/:id', () => {
       artifact: { kind: 'issue', workspaceId: 'ws-1', issueId: 'i1' },
       action: 'updated',
       origin: { kind: 'human' },
-    }))
+    }), { coalesceWithinMs: 900000 })
   })
 
   it('clears the scheduled agent runtime with null', async () => {

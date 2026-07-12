@@ -6,6 +6,7 @@ import {
   detailIssue,
   flattenBoardRows,
   inboxReportsForIssue,
+  issueActivityRecords,
   issueProvenanceRecords,
   issueRunRecord,
   snapshotBoardIssue,
@@ -44,6 +45,45 @@ describe('issueProvenanceRecords', () => {
     }])
     expect(projected[0]).not.toHaveProperty('artifact')
     expect(projected[0]).not.toHaveProperty('fingerprint')
+  })
+
+  it('folds legacy autosave spam into one user-facing update activity', () => {
+    const artifact = { kind: 'issue' as const, workspaceId: 'ws-1', issueId: 'audit' }
+    const origin = { kind: 'human' as const }
+    const projected = issueProvenanceRecords([
+      { id: 'newest', artifact, action: 'updated', origin, at: 250 },
+      { id: 'middle', artifact, action: 'updated', origin, at: 200 },
+      { id: 'oldest', artifact, action: 'updated', origin, at: 100 },
+    ])
+
+    expect(projected).toEqual([{ id: 'newest', action: 'updated', origin, at: 250 }])
+  })
+
+  it('keeps separate update activities across comments', () => {
+    const artifact = { kind: 'issue' as const, workspaceId: 'ws-1', issueId: 'audit' }
+    const origin = { kind: 'human' as const }
+    const projected = issueProvenanceRecords([
+      { id: 'after', artifact, action: 'updated', origin, at: 250 },
+      { id: 'comment', artifact, action: 'commented', origin, at: 225 },
+      { id: 'before', artifact, action: 'updated', origin, at: 200 },
+    ])
+
+    expect(projected.map((record) => record.id)).toEqual(['after', 'comment', 'before'])
+  })
+})
+
+describe('issueActivityRecords', () => {
+  it('projects changes and runs into one newest-first Issue log', () => {
+    const change = { id: 'p-1', action: 'updated' as const, origin: { kind: 'human' as const }, at: 100 }
+    const run = {
+      taskId: 'run-1', resumeId: 'resume-1', wsId: 'ws-1', issueId: 'audit', agent: 'codex',
+      prompt: 'scan', status: 'done' as const, startedAt: 200, resumable: true,
+    }
+
+    expect(issueActivityRecords([change], [run])).toEqual([
+      { kind: 'run', id: 'run-1', at: 200, run },
+      { kind: 'change', ...change },
+    ])
   })
 })
 

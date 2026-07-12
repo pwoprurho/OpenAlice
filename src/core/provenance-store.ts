@@ -2,8 +2,9 @@
  * Durable Session -> artifact provenance.
  *
  * `resumeId` is the product Session identity. Native runtime session ids never
- * enter this store. Records are immutable attribution occurrences; mutable
+ * enter this store. Records are durable attribution activities; mutable
  * artifacts accumulate edges instead of overwriting one "author" field.
+ * High-frequency updates may advance one activity window's timestamp.
  */
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
@@ -65,6 +66,14 @@ const recordSchema = z.object({
 })
 export type ProvenanceRecord = z.infer<typeof recordSchema>
 
+/** Consecutive low-level updates inside one editing session are one product
+ * activity, not one timeline row per autosave / agent patch. */
+export const ACTIVITY_UPDATE_COALESCE_MS = 15 * 60 * 1000
+
+export interface ProvenanceAppendOptions {
+  coalesceWithinMs?: number
+}
+
 export interface ProvenanceQuery {
   artifact?: ArtifactRef
   action?: ProvenanceAction
@@ -73,7 +82,10 @@ export interface ProvenanceQuery {
 }
 
 export interface IProvenanceStore {
-  append(input: Omit<ProvenanceRecord, 'id'> & { id?: string }): Promise<ProvenanceRecord>
+  append(
+    input: Omit<ProvenanceRecord, 'id'> & { id?: string },
+    options?: ProvenanceAppendOptions,
+  ): Promise<ProvenanceRecord>
   list(query?: ProvenanceQuery): ProvenanceRecord[]
   latest(query: ProvenanceQuery): ProvenanceRecord | null
 }
@@ -109,12 +121,35 @@ export class ArtifactProvenanceStore implements IProvenanceStore {
     }
   }
 
-  async append(input: Omit<ProvenanceRecord, 'id'> & { id?: string }): Promise<ProvenanceRecord> {
+  async append(
+    input: Omit<ProvenanceRecord, 'id'> & { id?: string },
+    options: ProvenanceAppendOptions = {},
+  ): Promise<ProvenanceRecord> {
     const candidate = recordSchema.parse({ ...input, id: input.id ?? randomUUID() })
     if (candidate.fingerprint) {
       const existing = this.records.find((record) => record.fingerprint === candidate.fingerprint)
       if (existing) return existing
     }
+
+    const coalesceWithinMs = options.coalesceWithinMs ?? 0
+    if (coalesceWithinMs > 0) {
+      // Coalesce only with the latest activity for this artifact. An intervening
+      // create/comment/send/etc. starts a new activity window even if an older
+      // update has the same origin.
+      const previous = this.latest({ artifact: candidate.artifact })
+      const elapsed = previous ? candidate.at - previous.at : -1
+      if (
+        previous &&
+        previous.action === candidate.action &&
+        artifactOriginsMatch(previous.origin, candidate.origin) &&
+        elapsed >= 0 && elapsed <= coalesceWithinMs
+      ) {
+        previous.at = candidate.at
+        await this.flush()
+        return previous
+      }
+    }
+
     this.records.push(candidate)
     await this.flush()
     return candidate
@@ -152,6 +187,26 @@ export class ArtifactProvenanceStore implements IProvenanceStore {
       this.logger.warn('provenance_store.flush_failed', { err })
     }
   }
+}
+
+/** Product identity equality for grouping activity without exposing runtime
+ * native ids. Session execution identifies the concrete occurrence when set. */
+export function artifactOriginsMatch(a: ArtifactOrigin, b: ArtifactOrigin): boolean {
+  if (a.kind !== b.kind) return false
+  if (a.kind === 'human' && b.kind === 'human') return true
+  if (a.kind === 'external' && b.kind === 'external') return a.system === b.system
+  if (a.kind === 'unknown' && b.kind === 'unknown') return a.reason === b.reason
+  if (a.kind === 'session' && b.kind === 'session') {
+    if (a.workspaceId !== b.workspaceId || a.resumeId !== b.resumeId || a.agent !== b.agent) return false
+    if (!a.execution || !b.execution) return a.execution === b.execution
+    if (a.execution.kind !== b.execution.kind) return false
+    return a.execution.kind === 'headless' && b.execution.kind === 'headless'
+      ? a.execution.taskId === b.execution.taskId
+      : a.execution.kind === 'interactive' && b.execution.kind === 'interactive'
+        ? a.execution.sessionRecordId === b.execution.sessionRecordId
+        : false
+  }
+  return false
 }
 
 /** Undefined revision in a query means "all revisions of this report path". */

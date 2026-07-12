@@ -67,6 +67,39 @@ describe('ArtifactProvenanceStore', () => {
     expect(value.list()).toHaveLength(1)
   })
 
+  it('coalesces adjacent activity from the same artifact, action, and origin', async () => {
+    const { path, logger, value } = await store()
+    const input = {
+      artifact: { kind: 'issue' as const, workspaceId: 'ws-1', issueId: 'i1' },
+      action: 'updated' as const,
+      origin: { kind: 'human' as const },
+    }
+    const first = await value.append({ ...input, at: 100 }, { coalesceWithinMs: 300 })
+    const second = await value.append({ ...input, at: 250 }, { coalesceWithinMs: 300 })
+
+    expect(second.id).toBe(first.id)
+    expect(value.list()).toEqual([expect.objectContaining({ id: first.id, at: 250 })])
+
+    const reloaded = await ArtifactProvenanceStore.load(path, logger)
+    expect(reloaded.list()).toEqual([expect.objectContaining({ id: first.id, at: 250 })])
+  })
+
+  it('starts a new activity after an intervening event or a different origin', async () => {
+    const { value } = await store()
+    const artifact = { kind: 'issue' as const, workspaceId: 'ws-1', issueId: 'i1' }
+    await value.append({ artifact, action: 'updated', origin: { kind: 'human' }, at: 100 }, { coalesceWithinMs: 300 })
+    await value.append({ artifact, action: 'commented', origin: { kind: 'human' }, at: 150 })
+    await value.append({ artifact, action: 'updated', origin: { kind: 'human' }, at: 200 }, { coalesceWithinMs: 300 })
+    await value.append({
+      artifact,
+      action: 'updated',
+      origin: { kind: 'external', system: 'importer' },
+      at: 250,
+    }, { coalesceWithinMs: 300 })
+
+    expect(value.list()).toHaveLength(4)
+  })
+
   it('persists a reconstruction Session without changing historical authorship', async () => {
     const { value } = await store()
     await value.append({

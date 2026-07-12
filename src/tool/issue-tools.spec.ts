@@ -191,7 +191,10 @@ describe('issue_update', () => {
     await run(issueUpdateFactory.build(context), { id: 'trail', status: 'in_progress' })
     await run(issueUpdateFactory.build(context), { id: 'missing', status: 'done' })
     expect(append).toHaveBeenCalledTimes(1)
-    expect(append).toHaveBeenCalledWith(expect.objectContaining({ action: 'updated' }))
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'updated' }),
+      { coalesceWithinMs: 900000 },
+    )
   })
 
   it('errors with no fields to update', async () => {
@@ -310,6 +313,7 @@ describe('global board (ctx.board present)', () => {
       runs: [],
       inboxReports: [],
       provenance: [],
+      activity: [],
     },
   }
 
@@ -416,6 +420,7 @@ describe('global board (ctx.board present)', () => {
         id: 'p-1', action: 'created', at: 1,
         origin: { kind: 'session', workspaceId: 'ws-a', resumeId: 'resume-kind-owl-abc123', agent: 'codex' },
       }],
+      activity: [],
     }
     const context = boardCtx({ detail: async () => detail })
 

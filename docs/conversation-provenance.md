@@ -133,9 +133,13 @@ interface ProvenanceEdge {
 }
 ```
 
-Mutable artifacts retain multiple edges. Creation, later edits, publication,
-and repeated execution are different occurrences and may belong to different
-Sessions or a human.
+Mutable artifacts retain multiple meaningful edges. Creation, later editing
+sessions, publication, and repeated execution are different occurrences and may
+belong to different Sessions or a human. High-frequency `updated` writes from
+the same origin to the same artifact are one editing activity: OpenAlice
+coalesces adjacent updates within fifteen minutes instead of treating autosave or
+several small agent patches as distinct user-facing events. Intervening actions
+such as comments or a different origin always start a new activity.
 
 ## Universal Follow-up Rule
 
@@ -232,12 +236,22 @@ An Issue has two independent identity questions:
 
 Creating an Issue must explicitly choose one execution mode.
 
-Issue detail and `alice-workspace issue show` expose the immutable
-`created` / `updated` / `commented` occurrences newest-first. Session origins
-carry a product `resumeId`, so a human or agent can continue that exact author
-without learning a runtime-native session id. Missing history remains visibly
-unattributed for legacy or manual files; it is never inferred from the current
-assignee, scheduled owner, or Workspace default runtime.
+Issue detail and `alice-workspace issue show` expose `created` / `updated` /
+`commented` activity newest-first. Adjacent updates from the same origin are
+projected as one editing activity, including historical autosave records written
+before store-side coalescing existed. Session origins carry a product
+`resumeId`, so a human or agent can continue that exact author without learning
+a runtime-native session id. Missing history remains visibly unattributed for
+legacy or manual files; it is never inferred from the current assignee,
+scheduled owner, or Workspace default runtime.
+
+The Issue detail API also exposes a unified chronological `activity[]` log.
+Change activities come from the provenance store; scheduled execution
+activities come from the headless run registry. They remain authoritative in
+their own persistence systems, while the projection gives UI, CLI, and future
+automation one extensible contract for “what happened to this Issue.” New kinds
+such as Inbox delivery or schedule skips should extend this activity union
+instead of creating another parallel timeline.
 
 #### Mode A: one responsible Session
 

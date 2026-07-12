@@ -24,6 +24,7 @@
  */
 import { Hono } from 'hono'
 
+import { ACTIVITY_UPDATE_COALESCE_MS } from '../../core/provenance-store.js'
 import {
   ISSUE_PRIORITIES,
   ISSUE_STATUSES,
@@ -172,10 +173,10 @@ export function createIssuesRoutes(svc: WorkspaceService): Hono {
         action: 'updated',
         origin: { kind: 'human' },
         at: Date.now(),
-      })
+      }, { coalesceWithinMs: ACTIVITY_UPDATE_COALESCE_MS })
       launcherLogger.info('issue.updated', { wsId, id, fields: Object.keys(patch) })
       const detail = await svc.issueDetail(wsId, id)
-      return c.json(detail ?? { issue: res.issue, comments: [], runs: [], inboxReports: [], provenance: [] })
+      return c.json(detail ?? { issue: res.issue, comments: [], runs: [], inboxReports: [], provenance: [], activity: [] })
     } catch (err) {
       launcherLogger.warn('issue.update_failed', { wsId, id, err })
       return c.json({ error: 'write_failed', message: (err as Error).message }, 500)
@@ -216,7 +217,7 @@ export function createIssuesRoutes(svc: WorkspaceService): Hono {
       })
       launcherLogger.info('issue.comment_added', { wsId, id, author: 'human' })
       const detail = await svc.issueDetail(wsId, id)
-      return c.json(detail ?? { issue: res.issue, comments: [res.comment], runs: [], inboxReports: [], provenance: [] })
+      return c.json(detail ?? { issue: res.issue, comments: [res.comment], runs: [], inboxReports: [], provenance: [], activity: [] })
     } catch (err) {
       launcherLogger.warn('issue.comment_failed', { wsId, id, err })
       return c.json({ error: 'write_failed', message: (err as Error).message }, 500)

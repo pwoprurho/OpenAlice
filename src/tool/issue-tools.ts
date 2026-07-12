@@ -26,7 +26,11 @@ import { tool } from 'ai'
 import { z } from 'zod'
 
 import type { WorkspaceToolFactory, WorkspaceToolContext } from '../core/workspace-tool-center.js'
-import { sessionOriginFromInboxOrigin, type ProvenanceAction } from '../core/provenance-store.js'
+import {
+  ACTIVITY_UPDATE_COALESCE_MS,
+  sessionOriginFromInboxOrigin,
+  type ProvenanceAction,
+} from '../core/provenance-store.js'
 import { readWorkspaceFile } from '../workspaces/file-service.js'
 import {
   ISSUES_DIR_REL,
@@ -114,13 +118,18 @@ async function recordIssueProvenance(
     kind: 'unknown' as const,
     reason: 'missing-session-origin',
   }
-  await ctx.provenanceStore.append({
-    artifact: { kind: 'issue', workspaceId: ctx.workspaceId, issueId },
+  const input = {
+    artifact: { kind: 'issue' as const, workspaceId: ctx.workspaceId, issueId },
     action,
     origin,
     at: Date.now(),
     ...(action === 'created' ? { fingerprint: `issue:${ctx.workspaceId}:${issueId}:created` } : {}),
-  })
+  }
+  if (action === 'updated') {
+    await ctx.provenanceStore.append(input, { coalesceWithinMs: ACTIVITY_UPDATE_COALESCE_MS })
+  } else {
+    await ctx.provenanceStore.append(input)
+  }
 }
 
 /** Project a full IssueRecord into the compact row the tools return. */

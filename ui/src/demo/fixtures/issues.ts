@@ -221,6 +221,13 @@ const demoIssueExtras: Record<string, IssueDetailExtras> = {
         finishedAt: now - HOUR + 84_000,
         durationMs: 84_000,
         exitCode: 0,
+        output: {
+          hasAssistantReply: true,
+          assistantPreview: 'Morning scan complete: three actionable gaps, led by the semiconductor cluster.',
+          blockCount: 7,
+          toolCalls: 3,
+          toolFailures: 0,
+        },
       },
       {
         taskId: 'demo-run-morning-2',
@@ -235,6 +242,12 @@ const demoIssueExtras: Record<string, IssueDetailExtras> = {
         durationMs: 12_000,
         exitCode: 1,
         error: 'market-data provider timed out (OpenBB upstream 504)',
+        output: {
+          hasAssistantReply: false,
+          blockCount: 2,
+          toolCalls: 1,
+          toolFailures: 1,
+        },
       },
       {
         taskId: 'demo-run-morning-3',
@@ -426,6 +439,7 @@ export function demoIssueDetail(wsId: string, id: string): IssueDetail | null {
   const what = explicitWhat && legacyBody && explicitWhat !== legacyBody
     ? `${explicitWhat}\n\n## Context\n\n${legacyBody}`
     : explicitWhat || legacyBody || boardIssue.title
+  const runs = extras?.runs ?? []
   return {
     issue: {
       ...boardIssue,
@@ -433,7 +447,8 @@ export function demoIssueDetail(wsId: string, id: string): IssueDetail | null {
       ...(extras?.agent ? { agent: extras.agent } : {}),
     },
     comments: demoIssueComments[`${wsId}/${id}`] ?? [],
-    runs: extras?.runs ?? [],
+    runs,
+    activity: runs.map((run) => ({ kind: 'run' as const, id: run.taskId, at: run.startedAt, run })),
     // issue→inbox direction of the cross-link: every inbox report this issue
     // produced (server-stamped origin.issueId === id, this workspace), newest
     // first. Mirrors the real route's `inboxReportsFor` (webui/routes/issues.ts).
