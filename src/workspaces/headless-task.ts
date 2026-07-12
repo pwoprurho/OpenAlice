@@ -102,6 +102,28 @@ export interface HeadlessTaskResult {
 }
 
 /**
+ * Turn process/runtime evidence into the durable task status shown to callers.
+ *
+ * Some runtimes (currently Codex) emit retryable `error` events while
+ * reconnecting, then continue to a normal assistant reply and exit 0. Keep
+ * those events in the activity stream, but only treat an in-band runtime error
+ * as terminal when no later assistant text recovered the turn.
+ */
+export function headlessTaskStatus(
+  result: Pick<HeadlessTaskResult, 'exitCode' | 'killed' | 'structured'>,
+): 'done' | 'failed' {
+  if (result.killed || result.exitCode !== 0) return 'failed';
+
+  let lastError = -1;
+  let lastText = -1;
+  result.structured.blocks.forEach((block, index) => {
+    if (block.type === 'error') lastError = index;
+    if (block.type === 'text') lastText = index;
+  });
+  return lastError > lastText ? 'failed' : 'done';
+}
+
+/**
  * Byte-accumulating tail sink. Buffers raw chunks and decodes UTF-8 ONCE at the
  * end — so a multi-byte sequence split across two `data` chunks isn't mangled
  * into U+FFFD at the seam (which per-chunk `.toString()` would do, corrupting

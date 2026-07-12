@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { runHeadlessTask } from './headless-task.js';
+import { headlessTaskStatus, runHeadlessTask } from './headless-task.js';
 import type { Logger } from './logger.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -274,5 +274,47 @@ describe('runHeadlessTask', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('headlessTaskStatus', () => {
+  const structured = (blocks: Array<{ type: 'error'; message: string } | { type: 'text'; text: string }>) => ({
+    schemaVersion: 1 as const,
+    assistantText: blocks.findLast((block) => block.type === 'text')?.text ?? null,
+    blocks,
+    metrics: {
+      textBlocks: blocks.filter((block) => block.type === 'text').length,
+      toolCalls: 0,
+      toolFailures: 0,
+    },
+    truncated: false,
+  });
+
+  it('keeps a recovered runtime retry as done', () => {
+    expect(headlessTaskStatus({
+      exitCode: 0,
+      killed: false,
+      structured: structured([
+        { type: 'error', message: 'Reconnecting... 2/5' },
+        { type: 'text', text: 'Recovered reply' },
+      ]),
+    })).toBe('done');
+  });
+
+  it('fails a terminal runtime error even when earlier text was emitted', () => {
+    expect(headlessTaskStatus({
+      exitCode: 0,
+      killed: false,
+      structured: structured([
+        { type: 'text', text: 'Partial reply' },
+        { type: 'error', message: 'Provider unavailable' },
+      ]),
+    })).toBe('failed');
+  });
+
+  it('fails killed and non-zero-exit runs', () => {
+    const output = structured([{ type: 'text', text: 'Reply before exit' }]);
+    expect(headlessTaskStatus({ exitCode: 0, killed: true, structured: output })).toBe('failed');
+    expect(headlessTaskStatus({ exitCode: 1, killed: false, structured: output })).toBe('failed');
   });
 });

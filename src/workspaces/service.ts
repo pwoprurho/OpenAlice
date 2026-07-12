@@ -30,7 +30,7 @@ import { loadConfig, type ServerConfig } from './config.js';
 import { ensureAgentCredentialReady } from './agent-credential-readiness.js';
 import { logger as launcherLogger } from './logger.js';
 import { runHeadlessProbe, type HeadlessProbeResult } from './probe.js';
-import { runHeadlessTask, type HeadlessTaskResult } from './headless-task.js';
+import { headlessTaskStatus, runHeadlessTask, type HeadlessTaskResult } from './headless-task.js';
 import {
   checkingRuntimeReadinessRow,
   failedRuntimeReadinessRow,
@@ -1107,10 +1107,10 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       throw err;
     }
     if (!resumeId) activeResumeIds.add(rec.resumeId);
-    // Fire-and-forget: run to natural exit, then fill the record. NOTE: status
-    // is judged by exit code — pi can exit 0 on an in-band model error, so
-    // "done" means "process exited cleanly", not "the agent succeeded"; the
-    // operator confirms via the normalized output / Inbox.
+    // Fire-and-forget: run to natural exit, then fill the record. Process
+    // failures and terminal in-band runtime errors fail the task; retryable
+    // errors followed by a later assistant reply remain visible in Activity
+    // without turning a recovered run into a false failure.
     void runHeadlessTaskMethod(ws, adapter, prompt, timeoutMs, {
       taskId: rec.taskId,
       resumeId: rec.resumeId,
@@ -1127,8 +1127,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       },
     })
       .then(async (r) => {
-        const runtimeReportedError = r.structured.blocks.some((block) => block.type === 'error');
-        const status = r.killed || runtimeReportedError || r.exitCode !== 0 ? 'failed' : 'done';
+        const status = headlessTaskStatus(r);
         await headlessTasks.complete(rec.taskId, {
           status,
           finishedAt: Date.now(),
