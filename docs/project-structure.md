@@ -5,6 +5,7 @@ and persistent-state layout. Update it when a top-level subsystem moves or a
 new long-lived process, package, or state root is introduced.
 
 Related guides: [[docs/managed-workspace-runtime.md]],
+[[docs/docker-deployment.md]],
 [[docs/workspace-lifecycle.md]],
 [[docs/workspace-issues-and-scheduling.md]],
 [[docs/conversation-provenance.md]], and [[docs/market-data-architecture.md]].
