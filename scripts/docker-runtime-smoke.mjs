@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -14,6 +15,8 @@ import {
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 const plan = buildDockerRuntimeSmokePlan(process.argv.slice(2))
 const {
+  aiAgent,
+  aiCredentialSlug,
   containerName,
   image,
   keep,
@@ -24,17 +27,22 @@ const {
   volumeName,
 } = plan.options
 const logFile = process.env['OPENALICE_DOCKER_SMOKE_LOG_FILE']?.trim()
+const runtimeSecrets = []
 
 function printHelp() {
   console.log(`Usage: pnpm docker:smoke [options]
 
 Build and run an isolated OpenAlice server image, create a real Chat Workspace,
 open a shell PTY, and execute the injected alice CLI through its live gateway.
-No external AI credential or broker account is used.
+Default mode uses no external AI credential or broker account.
 
 Options:
   --skip-build        Reuse a caller-owned image (requires --image)
   --image <tag>       Build/reuse this caller-owned image tag
+  --ai-credential <slug>
+                      Run a real, two-turn conversation using one credential
+                      from Alice's local vault (never copied into the image)
+  --ai-agent <id>     claude (default), codex, opencode, or pi
   --keep              Keep the container, volume, and owned image for debugging
   --keep-image        Keep only the temporary image built by this run
   -h, --help          Show this help
@@ -46,6 +54,7 @@ function docker(args, options = {}) {
     cwd: repoRoot,
     encoding: options.inherit ? undefined : 'utf8',
     stdio: options.inherit ? 'inherit' : 'pipe',
+    ...(options.input !== undefined ? { input: options.input } : {}),
     env: process.env,
   })
   if (result.error) throw result.error
@@ -58,6 +67,56 @@ function docker(args, options = {}) {
     stdout: typeof result.stdout === 'string' ? result.stdout : '',
     stderr: typeof result.stderr === 'string' ? result.stderr : '',
   }
+}
+
+function loadAiCredentialConfig(slug, agent) {
+  const source = process.env['OPENALICE_DOCKER_AI_CONFIG_FILE']?.trim()
+    || resolve(homedir(), '.openalice', 'data', 'config', 'ai-provider-manager.json')
+  const parsed = JSON.parse(readFileSync(source, 'utf8'))
+  const credential = parsed?.credentials?.[slug]
+  if (!credential || typeof credential !== 'object') throw new Error(`AI credential not found in local vault: ${slug}`)
+  if (typeof credential.apiKey !== 'string' || credential.apiKey.length === 0) {
+    throw new Error(`AI credential has no API key: ${slug}`)
+  }
+  if (typeof credential.lastModel !== 'string' || credential.lastModel.length === 0) {
+    throw new Error(`AI credential has no remembered model: ${slug}`)
+  }
+  const wires = credential.wires && typeof credential.wires === 'object'
+    ? credential.wires
+    : credential.wireShape
+      ? { [credential.wireShape]: credential.baseUrl ?? '' }
+      : {}
+  const compatibleWires = agent === 'codex'
+    ? ['openai-responses']
+    : agent === 'claude'
+      ? ['anthropic']
+      : ['openai-chat', 'anthropic', 'openai-responses']
+  if (!compatibleWires.some((wire) => wire in wires)) {
+    throw new Error(`AI credential ${slug} cannot drive ${agent}; missing a compatible wire`)
+  }
+  runtimeSecrets.push(credential.apiKey)
+  return {
+    model: credential.lastModel,
+    config: {
+      credentials: { [slug]: credential },
+      workspaceCredentialDefaults: {
+        [agent]: { credentialSlug: slug, model: credential.lastModel },
+      },
+    },
+  }
+}
+
+function writeAiCredentialConfigToContainer(config) {
+  const writer = [
+    "const fs=require('node:fs')",
+    "let input=''",
+    "process.stdin.setEncoding('utf8')",
+    "process.stdin.on('data',(chunk)=>{input+=chunk})",
+    "process.stdin.on('end',()=>{fs.mkdirSync('/data/data/config',{recursive:true});fs.writeFileSync('/data/data/config/ai-provider-manager.json',input,{mode:0o600})})",
+  ].join(';')
+  docker(['exec', '--interactive', containerName, 'node', '-e', writer], {
+    input: `${JSON.stringify(config)}\n`,
+  })
 }
 
 function sleep(ms) {
@@ -98,6 +157,117 @@ async function waitForHttp(baseUrl, timeoutMs = 90_000) {
     }
   }
   throw new Error(`Alice HTTP surface did not become ready: ${lastError instanceof Error ? lastError.message : String(lastError)}`)
+}
+
+async function dispatchHeadlessTurn(baseUrl, workspaceId, { agent, prompt, resumeId }, timeoutMs = 180_000) {
+  const dispatched = await fetchJson(baseUrl, `/api/workspaces/${workspaceId}/headless`, {
+    method: 'POST',
+    body: JSON.stringify({
+      agent,
+      prompt,
+      timeoutMs,
+      ...(resumeId ? { resumeId } : {}),
+    }),
+  }, 202)
+  if (typeof dispatched?.taskId !== 'string' || typeof dispatched?.resumeId !== 'string') {
+    throw new Error('headless dispatch omitted taskId or resumeId')
+  }
+
+  const deadline = Date.now() + timeoutMs + 15_000
+  let task = null
+  while (Date.now() < deadline) {
+    task = await fetchJson(baseUrl, `/api/headless/${dispatched.taskId}`)
+    if (task?.status !== 'running') break
+    await sleep(500)
+  }
+  const output = await fetchJson(baseUrl, `/api/headless/${dispatched.taskId}/output`)
+  if (task?.status !== 'done') {
+    throw new Error(
+      `AI turn ${dispatched.taskId} ended as ${task?.status ?? 'unknown'}: ${output?.structured?.assistantText ?? output?.stderr?.text ?? 'no diagnostics'}`,
+    )
+  }
+  return {
+    taskId: dispatched.taskId,
+    resumeId: dispatched.resumeId,
+    assistantText: output?.structured?.assistantText,
+    structured: output?.structured,
+  }
+}
+
+async function runCredentialedConversation(baseUrl, workspaceId, agent, model) {
+  const codeword = `docker-${suffix.slice(0, 8)}`
+  const first = await dispatchHeadlessTurn(baseUrl, workspaceId, {
+    agent,
+    prompt: `Remember the codeword ${codeword}. Reply with exactly: ACK ${codeword}. Do not use tools.`,
+  })
+  if (typeof first.assistantText !== 'string' || !first.assistantText.includes(codeword)) {
+    throw new Error(`AI turn 1 did not return the codeword: ${first.assistantText ?? 'no assistant text'}`)
+  }
+  console.log(`[docker-smoke] AI turn 1 (${agent}/${model}): ${first.assistantText.trim()}`)
+
+  const second = await dispatchHeadlessTurn(baseUrl, workspaceId, {
+    agent,
+    resumeId: first.resumeId,
+    prompt: 'What codeword did I ask you to remember in the previous turn? Reply with only that codeword. Do not use tools.',
+  })
+  if (second.resumeId !== first.resumeId) throw new Error('AI turn 2 changed the OpenAlice resume identity')
+  if (typeof second.assistantText !== 'string' || !second.assistantText.includes(codeword)) {
+    throw new Error(`AI turn 2 did not remember the codeword: ${second.assistantText ?? 'no assistant text'}`)
+  }
+  console.log(`[docker-smoke] AI turn 2 resumed ${first.resumeId}: ${second.assistantText.trim()}`)
+
+  const issueId = `docker-cli-${suffix.slice(0, 8)}`
+  const dataMarker = `CLI_DATA_${suffix.slice(0, 8).toUpperCase()}`
+  const third = await dispatchHeadlessTurn(baseUrl, workspaceId, {
+    agent,
+    resumeId: first.resumeId,
+    prompt: [
+      'Use the Bash tool to run these commands in order:',
+      `alice-workspace issue create --title "${issueId}" --what "Docker CLI marker ${dataMarker}"`,
+      `alice-workspace issue show --id "${issueId}"`,
+      `Only if the second command output contains ${dataMarker}, reply exactly: CLI_DATA_OK ${dataMarker}`,
+    ].join('\n'),
+  })
+  const completedToolOutput = JSON.stringify(
+    (third.structured?.blocks ?? [])
+      .filter((block) => block?.type === 'tool' && block.status === 'completed')
+      .map((block) => block.output),
+  )
+  if ((third.structured?.metrics?.toolCalls ?? 0) < 1) {
+    throw new Error('AI CLI-data turn completed without a recorded tool call')
+  }
+  if (!completedToolOutput.includes(dataMarker)) {
+    throw new Error('AI CLI-data tool output did not contain the seeded Workspace marker')
+  }
+  if (third.assistantText?.trim() !== `CLI_DATA_OK ${dataMarker}`) {
+    throw new Error(`AI did not confirm the CLI data round trip: ${third.assistantText ?? 'no assistant text'}`)
+  }
+  console.log(`[docker-smoke] AI Workspace CLI data (${third.structured.metrics.toolCalls} tool calls): ${third.assistantText.trim()}`)
+
+  const market = await dispatchHeadlessTurn(baseUrl, workspaceId, {
+    agent,
+    resumeId: first.resumeId,
+    prompt: [
+      'Use the Bash tool to run exactly: traderhub board get --board macro',
+      'Read the actual command output. Reply on one line starting with MARKET_DATA_OK followed by one metric label and value from that output.',
+      'If the command fails or returns no macro data, reply exactly: MARKET_DATA_FAILED',
+    ].join('\n'),
+  })
+  const marketToolOutput = JSON.stringify(
+    (market.structured?.blocks ?? [])
+      .filter((block) => block?.type === 'tool' && block.status === 'completed')
+      .map((block) => block.output),
+  )
+  if ((market.structured?.metrics?.toolCalls ?? 0) < 1) {
+    throw new Error('AI market-data turn completed without a recorded tool call')
+  }
+  if (!/(CPI|Fed|Treasury|Unemployment|Oil|M2|GDP|Rates)/i.test(marketToolOutput)) {
+    throw new Error(`traderhub macro output was missing expected market fields: ${marketToolOutput.slice(-2000)}`)
+  }
+  if (!market.assistantText?.trim().startsWith('MARKET_DATA_OK ')) {
+    throw new Error(`AI did not confirm the market-data round trip: ${market.assistantText ?? 'no assistant text'}`)
+  }
+  console.log(`[docker-smoke] AI traderhub market data: ${market.assistantText.trim()}`)
 }
 
 function decodeWsData(data) {
@@ -192,7 +362,7 @@ function collectFailureLogs() {
     '=== docker logs ===',
     logs.stdout,
     logs.stderr,
-  ].filter(Boolean).join('\n')).trim()
+  ].filter(Boolean).join('\n'), runtimeSecrets).trim()
   if (logFile && report) {
     const target = resolve(repoRoot, logFile)
     mkdirSync(dirname(target), { recursive: true })
@@ -217,8 +387,10 @@ let containerCreated = false
 let volumeCreated = false
 let passed = false
 let finalCode = 0
+let aiCredential = null
 
 try {
+  if (aiCredentialSlug) aiCredential = loadAiCredentialConfig(aiCredentialSlug, aiAgent)
   docker(['info'])
   if (!skipBuild) {
     console.log(`[docker-smoke] building ${image}`)
@@ -246,10 +418,27 @@ try {
   const baseUrl = `http://127.0.0.1:${port}`
   const version = await waitForHttp(baseUrl)
   console.log(`[docker-smoke] HTTP ready: ${baseUrl} (${version?.version ?? 'version route OK'})`)
+  const agentInventory = await fetchJson(baseUrl, '/api/workspaces/agents')
+  const inventoryById = new Map((agentInventory?.agents ?? []).map((agent) => [agent.id, agent]))
+  const missingRuntimes = ['claude', 'codex', 'opencode', 'pi'].filter(
+    (id) => inventoryById.get(id)?.installed !== true,
+  )
+  if (missingRuntimes.length > 0) {
+    throw new Error(`Docker image did not detect all agent runtimes: ${missingRuntimes.join(', ')}`)
+  }
+  console.log('[docker-smoke] agent runtimes detected: claude, codex, opencode, pi')
+  if (aiCredential) {
+    writeAiCredentialConfigToContainer(aiCredential.config)
+    console.log(`[docker-smoke] staged isolated ${aiAgent} credential config (${aiCredential.model})`)
+  }
 
   const created = await fetchJson(baseUrl, '/api/workspaces', {
     method: 'POST',
-    body: JSON.stringify({ tag: `docker-smoke-${suffix}`, template: 'chat', agents: ['shell'] }),
+    body: JSON.stringify({
+      tag: `docker-smoke-${suffix}`,
+      template: 'chat',
+      agents: ['shell', ...(aiCredential ? [aiAgent] : [])],
+    }),
   }, 201)
   const workspaceId = created?.workspace?.id
   if (typeof workspaceId !== 'string' || !workspaceId) throw new Error('workspace create response omitted workspace.id')
@@ -267,6 +456,10 @@ try {
   const terminalOutput = await runWorkspaceCliThroughPty(baseUrl, session.sessionId)
   console.log('[docker-smoke] Workspace PTY + alice manifest round-trip: OK')
   if (process.env['OPENALICE_DOCKER_SMOKE_VERBOSE'] === '1') console.log(terminalOutput)
+  if (aiCredential) {
+    await runCredentialedConversation(baseUrl, workspaceId, aiAgent, aiCredential.model)
+    console.log('[docker-smoke] credentialed multi-turn conversation + Workspace CLI data: OK')
+  }
 
   await fetchJson(baseUrl, `/api/workspaces/${workspaceId}/offboard`, {
     method: 'POST',
@@ -276,7 +469,8 @@ try {
   passed = true
 } catch (error) {
   finalCode = 1
-  console.error(`[docker-smoke] ${error instanceof Error ? error.message : String(error)}`)
+  const message = error instanceof Error ? error.message : String(error)
+  console.error(`[docker-smoke] ${redactDockerLogs(message, runtimeSecrets)}`)
   if (containerCreated) {
     const report = collectFailureLogs()
     if (report) console.error(report.split('\n').slice(-160).join('\n'))

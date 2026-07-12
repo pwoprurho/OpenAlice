@@ -64,18 +64,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tini \
     && rm -rf /var/lib/apt/lists/*
 
-# Two agent CLIs installed globally so they're on PATH for the PTY
-# sessions OpenAlice spawns. Both come from npm (codex's npm package is
-# a thin wrapper that pulls down the Rust binary on install).
+# The four supported agent CLIs are installed globally so every Docker
+# Workspace gets the same runtime surface as OpenAlice. They all come from npm
+# (Codex/opencode packages resolve their platform binary during install).
 # Keep these explicit: an unchanged Dockerfile layer must resolve to the same
 # runtime instead of silently changing when an upstream `latest` tag moves.
 ARG CLAUDE_CODE_VERSION=2.1.202
 ARG CODEX_VERSION=0.144.1
+ARG OPENCODE_VERSION=1.17.18
+ARG PI_VERSION=0.80.6
 RUN npm install -g \
         "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
         "@openai/codex@${CODEX_VERSION}" \
+        "opencode-ai@${OPENCODE_VERSION}" \
+        "@earendil-works/pi-coding-agent@${PI_VERSION}" \
     && claude --version \
     && codex --version \
+    && opencode --version \
+    && pi --version \
     && npm cache clean --force
 
 # Production artifacts. The Guardian script (`scripts/guardian/prod.mjs`)

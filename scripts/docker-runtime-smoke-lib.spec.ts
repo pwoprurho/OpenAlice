@@ -31,6 +31,22 @@ describe('Docker runtime smoke plan', () => {
     expect(plan.options).toMatchObject({ image: 'openalice:ci', ownsImage: false, skipBuild: true })
   })
 
+  it('makes real AI conversation opt-in and never keeps its secret volume', () => {
+    const plan = buildDockerRuntimeSmokePlan(['--ai-credential', 'custom-1'])
+    expect(plan.errors).toEqual([])
+    expect(plan.options).toMatchObject({ aiCredentialSlug: 'custom-1', aiAgent: 'claude' })
+
+    expect(buildDockerRuntimeSmokePlan(['--ai-credential', 'custom-1', '--keep']).errors).toContain(
+      '[docker-smoke] --keep is disabled for credentialed smoke runs so the secret volume is always removed',
+    )
+    expect(buildDockerRuntimeSmokePlan(['--ai-agent', 'codex']).errors).toContain(
+      '[docker-smoke] --ai-agent requires --ai-credential <slug>',
+    )
+    expect(buildDockerRuntimeSmokePlan(['--ai-credential', 'custom-1', '--ai-agent', 'ghost']).errors).toContain(
+      '[docker-smoke] --ai-agent must be claude, codex, opencode, or pi',
+    )
+  })
+
   it('parses Docker port output and terminal output deterministically', () => {
     expect(parsePublishedPort('127.0.0.1:49173\n')).toBe(49173)
     expect(parsePublishedPort('[::1]:49174')).toBe(49174)
@@ -38,15 +54,19 @@ describe('Docker runtime smoke plan', () => {
     expect(stripTerminalControl('\u001b[32mOpenAlice\u001b[0m\r\n')).toBe('OpenAlice\n')
   })
 
-  it('redacts the ephemeral first-run token from failure logs', () => {
+  it('redacts the ephemeral first-run token and runtime credentials from failure logs', () => {
     const logs = [
       'First-run admin token (save this):',
       '',
       '      abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
       'engine started',
     ].join('\n')
-    expect(redactDockerLogs(logs)).not.toContain('abcdefghijklmnopqrstuvwxyz')
-    expect(redactDockerLogs(logs)).toContain('[ephemeral admin token redacted]')
+    const apiKey = 'secret-runtime-key'
+    const redacted = redactDockerLogs(`${logs}\nprovider rejected ${apiKey}`, [apiKey])
+    expect(redacted).not.toContain('abcdefghijklmnopqrstuvwxyz')
+    expect(redacted).not.toContain(apiKey)
+    expect(redacted).toContain('[ephemeral admin token redacted]')
+    expect(redacted).toContain('[runtime credential redacted]')
   })
 })
 
@@ -72,9 +92,13 @@ describe('Dockerfile runtime contract', () => {
     expect(dockerfile).not.toMatch(/ln -s[^\n]*\/usr\/local\/bin\/(alice|traderhub)/)
   })
 
-  it('pins native agent runtime versions and exposes a healthcheck', () => {
-    expect(dockerfile).toMatch(/ARG CLAUDE_CODE_VERSION=\d+\.\d+\.\d+/)
-    expect(dockerfile).toMatch(/ARG CODEX_VERSION=\d+\.\d+\.\d+/)
+  it('pins and verifies all four agent runtimes and exposes a healthcheck', () => {
+    for (const name of ['CLAUDE_CODE', 'CODEX', 'OPENCODE', 'PI']) {
+      expect(dockerfile).toMatch(new RegExp(`ARG ${name}_VERSION=\\d+\\.\\d+\\.\\d+`))
+    }
+    for (const command of ['claude', 'codex', 'opencode', 'pi']) {
+      expect(dockerfile).toContain(`&& ${command} --version`)
+    }
     expect(dockerfile).toContain('HEALTHCHECK ')
     expect(dockerfile).toContain('/api/version')
   })

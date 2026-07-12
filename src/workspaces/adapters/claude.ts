@@ -24,6 +24,18 @@ const CLAUDE_SETTINGS_PATH = '.claude/settings.local.json';
  */
 const AUTOTRUST_SETTINGS = '{"enableAllProjectMcpServers":true}';
 
+// `claude -p` has nobody available to answer a permission prompt. Keep its
+// autonomous Bash surface limited to the four launcher-owned CLI shims rather
+// than bypassing every Claude Code permission. The gateway still validates the
+// Workspace/run identity and each command's argument schema server-side.
+// Syntax follows Claude Code's documented command-prefix permission rules.
+const HEADLESS_ALLOWED_TOOLS = [
+  'Bash(alice:*)',
+  'Bash(alice-workspace:*)',
+  'Bash(alice-uta:*)',
+  'Bash(traderhub:*)',
+].join(',');
+
 /** dashed-cwd convention used by Claude Code's project store. */
 function projectKey(workspaceDir: string): string {
   const abs = resolve(workspaceDir);
@@ -99,6 +111,7 @@ export const claudeAdapter: CliAdapter = {
     return [
       ...base,
       '--settings', AUTOTRUST_SETTINGS,
+      '--allowedTools', HEADLESS_ALLOWED_TOOLS,
       ...(ctx.resume ? ['--resume', ctx.resume.sessionId] : []),
       '-p', '--output-format', 'stream-json', '--verbose',
       '--', prompt,

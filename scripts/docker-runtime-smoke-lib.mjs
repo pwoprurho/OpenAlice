@@ -5,15 +5,19 @@ export function buildDockerRuntimeSmokePlan(argv, opts = {}) {
   const warnings = []
   const flags = new Set()
   let image = null
+  let aiCredentialSlug = null
+  let aiAgent = 'claude'
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--') continue
-    if (arg === '--image') {
+    if (arg === '--image' || arg === '--ai-credential' || arg === '--ai-agent') {
       const value = argv[index + 1]
-      if (!value || value.startsWith('--')) errors.push('[docker-smoke] --image requires a tag')
+      if (!value || value.startsWith('--')) errors.push(`[docker-smoke] ${arg} requires a value`)
       else {
-        image = value
+        if (arg === '--image') image = value
+        else if (arg === '--ai-credential') aiCredentialSlug = value
+        else aiAgent = value
         index += 1
       }
       continue
@@ -24,6 +28,15 @@ export function buildDockerRuntimeSmokePlan(argv, opts = {}) {
 
   const skipBuild = flags.has('--skip-build')
   if (skipBuild && !image) errors.push('[docker-smoke] --skip-build requires --image <tag>')
+  if (aiCredentialSlug && flags.has('--keep')) {
+    errors.push('[docker-smoke] --keep is disabled for credentialed smoke runs so the secret volume is always removed')
+  }
+  if (aiCredentialSlug && !['claude', 'codex', 'opencode', 'pi'].includes(aiAgent)) {
+    errors.push('[docker-smoke] --ai-agent must be claude, codex, opencode, or pi')
+  }
+  if (!aiCredentialSlug && aiAgent !== 'claude') {
+    errors.push('[docker-smoke] --ai-agent requires --ai-credential <slug>')
+  }
 
   const suffix = (opts.randomUUID?.() ?? randomUUID()).replaceAll('-', '').slice(0, 12).toLowerCase()
   const ownsImage = image === null
@@ -37,6 +50,8 @@ export function buildDockerRuntimeSmokePlan(argv, opts = {}) {
     warnings,
     options: {
       help: flags.has('--help') || flags.has('-h'),
+      aiAgent,
+      aiCredentialSlug,
       image: resolvedImage,
       keep: flags.has('--keep'),
       keepImage: flags.has('--keep-image'),
@@ -67,10 +82,10 @@ export function stripTerminalControl(text) {
     .replace(/\r/g, '')
 }
 
-export function redactDockerLogs(text) {
+export function redactDockerLogs(text, secrets = []) {
   const lines = text.split(/\r?\n/)
   let redactNextToken = false
-  return lines.map((line) => {
+  const tokenRedacted = lines.map((line) => {
     if (line.includes('First-run admin token')) {
       redactNextToken = true
       return line
@@ -81,4 +96,8 @@ export function redactDockerLogs(text) {
     }
     return line
   }).join('\n')
+  return secrets.reduce(
+    (result, secret) => secret ? result.replaceAll(secret, '[runtime credential redacted]') : result,
+    tokenRedacted,
+  )
 }

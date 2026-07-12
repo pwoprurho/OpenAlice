@@ -300,6 +300,8 @@ describe('composeHeadlessCommand (one-shot headless argv, prompt placed per-CLI)
       'claude',
       '--settings',
       '{"enableAllProjectMcpServers":true}',
+      '--allowedTools',
+      'Bash(alice:*),Bash(alice-workspace:*),Bash(alice-uta:*),Bash(traderhub:*)',
       '-p',
       '--output-format',
       'stream-json',
@@ -343,6 +345,12 @@ describe('composeHeadlessCommand (one-shot headless argv, prompt placed per-CLI)
       '--mode',
       'json',
       'do x',
+    ]);
+  });
+
+  it('pi: Docker headless explicitly approves the image-pinned runtime', () => {
+    expect(piAdapter.composeHeadlessCommand!(['pi'], ctx({ OPENALICE_LAUNCHER: 'docker' }), 'do x')).toEqual([
+      'pi', '--approve', '-p', '--mode', 'json', 'do x',
     ]);
   });
 

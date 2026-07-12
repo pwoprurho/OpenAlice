@@ -108,7 +108,7 @@ Add checks according to the touched surface:
 | Workspace issues, schedules, headless dispatch | Follow [Workspace issues and scheduling](docs/workspace-issues-and-scheduling.md) |
 | Guardian locks, process ownership, takeover | `pnpm test:guardian-recovery`; exercise the real launcher path |
 | Desktop, IPC, PTY, managed Pi, shell, packaging | Follow [Managed Workspace runtime](docs/managed-workspace-runtime.md) and run the matching Electron/package smoke |
-| Docker/server image, Compose, remote deployment | Follow [Docker deployment](docs/docker-deployment.md) and run `pnpm docker:smoke` |
+| Docker/server image, Compose, remote deployment | Follow [Docker deployment](docs/docker-deployment.md) and run `pnpm docker:smoke`; before release, opt into the credentialed agent/CLI check documented there |
 | Persisted data shape | Add an idempotent migration + spec, register it, then run `pnpm build:migration-index` |
 | Onboarding/first run/auth | Use isolated data; exercise dev and packaged onboarding paths where relevant |
 

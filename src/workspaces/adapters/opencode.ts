@@ -31,8 +31,9 @@ function positiveNumber(value: number | null | undefined): number | null {
  * surface and (b) reach the Chat-Completions ecosystem (CN + local models)
  * that codex's Responses-only lock can't touch.
  *
- * Contract VERIFIED against opencode 1.16.0 on macOS (`opencode --help` +
- * an `opencode debug config` provider-config smoke, 2026-06):
+ * Contract VERIFIED against opencode 1.16.0 on macOS and the Docker-pinned
+ * 1.17.18 (`opencode --help`, provider config, headless resume, CLI tool calls,
+ * and live traderhub data; 2026-07):
  *
  *   - Tool access: OpenAlice tools are exposed through the injected
  *     `alice*` / `traderhub` CLI shims, not opencode's native MCP config.

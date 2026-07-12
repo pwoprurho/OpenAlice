@@ -64,10 +64,11 @@ export async function syncPiWindowsShellPath(
 }
 
 function piHeadlessApproveArgs(env: Readonly<Record<string, string | undefined>>): readonly string[] {
-  // The packaged app always uses OpenAlice's pinned managed Pi. Contributor
+  // Packaged desktop and Docker both use an OpenAlice-pinned Pi. Contributor
   // dev intentionally uses whatever `pi` is on PATH; its install/version/trust
   // policy belongs to that developer, so do not attach version-specific flags.
-  return runtimeProfileFromEnv(env).managedPiPath ? ['--approve'] : [];
+  const profile = runtimeProfileFromEnv(env);
+  return profile.managedPiPath || profile.launcher === 'docker' ? ['--approve'] : [];
 }
 
 /**
