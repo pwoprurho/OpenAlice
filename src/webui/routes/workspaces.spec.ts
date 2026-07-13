@@ -10,6 +10,7 @@ import { join } from 'node:path';
 
 import { createWorkspaceRoutes } from './workspaces.js';
 import { HeadlessCapacityError, type WorkspaceService } from '../../workspaces/service.js';
+import { TemplateUpgradeError } from '../../workspaces/template-upgrade.js';
 import { readWorkspaceMetadata } from '../../workspaces/workspace-metadata.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -35,6 +36,7 @@ function build(
     resumeIdentity?: any;
     sessionDirectory?: any;
     lifecycle?: any;
+    templateUpgrades?: any;
   } = {},
 ) {
   const claude = {
@@ -87,6 +89,13 @@ function build(
     restore: vi.fn(async () => ({ ok: true, workspace: { id: 'ws-1', lifecycle: 'active' }, assessment: {} })),
     purge: vi.fn(async () => ({ ok: true, workspace: { id: 'ws-1', lifecycle: 'purged' }, assessment: {} })),
   };
+  const templateUpgrades = opts.templateUpgrades ?? {
+    plan: vi.fn(async () => ({ workspaceId: 'ws-1', planDigest: 'digest-1' })),
+    apply: vi.fn(async () => ({
+      workspaceId: 'ws-1', fromVersion: '1.0.0', toVersion: '2.0.0',
+      commit: 'abc123', changedPaths: ['README.md'], keptPaths: [],
+    })),
+  };
   const svc = {
     registry: { get: (id: string) => (id === 'ws-1' ? meta : undefined) },
     adapters: { get: (a: string) => adapters[a] },
@@ -101,6 +110,7 @@ function build(
     getAgentRuntimeReadiness,
     probeAgentRuntimeReadiness,
     lifecycle,
+    templateUpgrades,
     sessionDirectory: vi.fn(async (id: string) => id === 'ws-1'
       ? (opts.sessionDirectory ?? {
           workspace: { id: 'ws-1', tag: 'demo' },
@@ -119,6 +129,7 @@ function build(
     getAgentRuntimeReadiness,
     probeAgentRuntimeReadiness,
     lifecycle,
+    templateUpgrades,
   };
 }
 
@@ -222,6 +233,57 @@ describe('Workspace lifecycle routes', () => {
     const { app } = build({ lifecycle });
     expect((await del(app, '/departed/ws-old')).status).toBe(200);
     expect(lifecycle.purge).toHaveBeenCalledWith('ws-old');
+  });
+});
+
+describe('Workspace template upgrade routes', () => {
+  it('returns a review plan and applies only the accepted resolution values', async () => {
+    const templateUpgrades = {
+      plan: vi.fn(async () => ({ workspaceId: 'ws-1', planDigest: 'digest-1' })),
+      apply: vi.fn(async () => ({
+        workspaceId: 'ws-1', fromVersion: '1.0.0', toVersion: '2.0.0',
+        commit: 'abc123', changedPaths: ['README.md'], keptPaths: ['AGENTS.md'],
+      })),
+    };
+    const { app } = build({ templateUpgrades });
+
+    expect(await get(app, '/ws-1/template-upgrade')).toMatchObject({
+      status: 200,
+      body: { plan: { planDigest: 'digest-1' } },
+    });
+    const applied = await post(app, '/ws-1/template-upgrade', {
+      planDigest: 'digest-1',
+      resolutions: { 'AGENTS.md': 'workspace', 'README.md': 'anything-else' },
+    });
+    expect(applied.status).toBe(200);
+    expect(templateUpgrades.apply).toHaveBeenCalledWith('ws-1', {
+      planDigest: 'digest-1',
+      resolutions: { 'AGENTS.md': 'workspace' },
+    });
+  });
+
+  it('maps a changed preview to a recoverable 409 with the refreshed plan', async () => {
+    const refreshed = { workspaceId: 'ws-1', planDigest: 'digest-2' } as any;
+    const templateUpgrades = {
+      plan: vi.fn(),
+      apply: vi.fn(async () => {
+        throw new TemplateUpgradeError('stale_plan', 'Review the refreshed plan.', refreshed);
+      }),
+    };
+    const { app } = build({ templateUpgrades });
+    const result = await post(app, '/ws-1/template-upgrade', { planDigest: 'digest-1' });
+
+    expect(result).toMatchObject({
+      status: 409,
+      body: { error: 'stale_plan', plan: { planDigest: 'digest-2' } },
+    });
+  });
+
+  it('rejects apply requests without a reviewed plan digest', async () => {
+    const { app, templateUpgrades } = build();
+    const result = await post(app, '/ws-1/template-upgrade', {});
+    expect(result).toMatchObject({ status: 400, body: { error: 'bad_request' } });
+    expect(templateUpgrades.apply).not.toHaveBeenCalled();
   });
 });
 

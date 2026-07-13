@@ -6,7 +6,8 @@ interrupted lifecycle transition.
 
 Related guides: [[docs/project-structure.md]],
 [[docs/conversation-provenance.md]], and
-[[docs/workspace-issues-and-scheduling.md]].
+[[docs/workspace-issues-and-scheduling.md]]. For in-place managed-asset
+reconciliation, see [[docs/workspace-template-upgrade.md]].
 
 ## The Active Directory Is an Office Floor
 

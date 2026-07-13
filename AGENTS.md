@@ -17,7 +17,7 @@ pnpm dev                  # Guardian -> UTA + Alice + Vite
 pnpm dev --takeover       # replace the recorded local Guardian owner tree
 pnpm build                # packages + UI + UTA + Alice
 pnpm test                 # monorepo Vitest suite
-pnpm test:e2e             # separate end-to-end suite
+pnpm test:e2e             # non-trading product/integration E2E
 ```
 
 Before changing files:
@@ -104,7 +104,8 @@ Add checks according to the touched surface:
 | `ui/` | `cd ui && npx tsc -b`; verify the real route in browser/dev |
 | UI `/api/*` contract or demo surface | Update `ui/src/demo/` handlers and walk `pnpm -F open-alice-ui dev:demo` |
 | `packages/<name>/` | `pnpm -F @traderalice/<name> typecheck` |
-| Trading, broker writes, UTA permissions | Relevant scenarios from [UTA live testing](docs/uta-live-testing.md), using demo/paper accounts and leaving them flat |
+| UTA state machine, ledger, staging, or sync logic | `pnpm test:e2e` for the MockBroker lifecycle, plus the targeted unit specs listed in [UTA live testing](docs/uta-live-testing.md) |
+| Broker adapter, order writes, or UTA permissions | Choose the smallest live-paper scenario from [UTA live testing](docs/uta-live-testing.md); verify the configured account is demo/paper first and leave it flat |
 | Workspace issues, schedules, headless dispatch | Follow [Workspace issues and scheduling](docs/workspace-issues-and-scheduling.md) |
 | Guardian locks, process ownership, takeover | `pnpm test:guardian-recovery`; exercise the real launcher path |
 | Desktop, IPC, PTY, managed Pi, shell, packaging | Follow [Managed Workspace runtime](docs/managed-workspace-runtime.md) and run the matching Electron/package smoke |
@@ -113,8 +114,13 @@ Add checks according to the touched surface:
 | Persisted data shape | Add an idempotent migration + spec, register it, then run `pnpm build:migration-index` |
 | Onboarding/first run/auth | Use isolated data; exercise dev and packaged onboarding paths where relevant |
 
-Do not run live-broker tests on real-money accounts. Do not call a change
-verified when the surface-specific path was skipped; state the remaining gap.
+`pnpm test:e2e` is non-trading: it must never load configured broker accounts
+or submit orders. Live-paper acceptance is a separate, explicit lane:
+`OPENALICE_UTA_LIVE_PAPER=1 pnpm test:uta:live-paper`. Never run that lane as
+routine CI or against real-money accounts. Inspect the account mode and the
+pre-test positions/orders before acknowledging it, then verify the account is
+flat after the run even when a test fails. Do not call a change verified when
+the surface-specific path was skipped; state the remaining gap.
 
 For local package verification, prefer `pnpm electron:smoke:workspace`: it owns
 an isolated package output and removes that large expanded app after the smoke
@@ -181,6 +187,8 @@ Read the relevant guide before editing its subsystem:
   layers, skill ownership, live CLI authority, and guidance versioning.
 - [[docs/workspace-lifecycle.md]] — [Workspace and Session lifecycle](docs/workspace-lifecycle.md): offboarding,
   departed desks, handoff, restore/purge, and resumeId retirement.
+- [[docs/workspace-template-upgrade.md]] — [Workspace Template Upgrade](docs/workspace-template-upgrade.md):
+  managed-asset baselines, three-way review, safe apply, recovery, and the future Merge/Absorb boundary.
 - [[docs/uta-live-testing.md]] — [UTA live testing](docs/uta-live-testing.md): broker/trading acceptance loops.
 - [[docs/workspace-issues-and-scheduling.md]] — [Workspace issues and scheduling](docs/workspace-issues-and-scheduling.md): Issue board, schedules, headless runs, and Inbox delivery.
 - [[docs/conversation-provenance.md]] — [Workspace Session and artifact provenance](docs/conversation-provenance.md): `resumeId` identity, artifact trails, Issue responsibility, and the provenance-before-collaboration delivery order.

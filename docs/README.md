@@ -20,6 +20,7 @@ GitHub navigation.
 | [[docs/ui-interaction-and-motion.md]] | [UI interaction and motion](ui-interaction-and-motion.md) | Clickable affordances, shared motion tokens, entrances/disclosures, reduced-motion policy |
 | [[docs/workspace-agent-guidance.md]] | [Workspace agent guidance](workspace-agent-guidance.md) | Always-loaded prompt contract, skill ownership, live CLI authority, guidance versioning |
 | [[docs/workspace-lifecycle.md]] | [Workspace and Session lifecycle](workspace-lifecycle.md) | Offboarding, departed directories, handoff, restore/purge, Session retirement |
+| [[docs/workspace-template-upgrade.md]] | [Workspace Template Upgrade](workspace-template-upgrade.md) | Managed-asset baselines, three-way review, apply transactions, recovery, and the future Merge/Absorb boundary |
 | [[docs/workspace-issues-and-scheduling.md]] | [Workspace issues and scheduling](workspace-issues-and-scheduling.md) | Markdown issue contract, global board, schedule scanner, headless execution, Inbox delivery |
 | [[docs/conversation-provenance.md]] | [Workspace Session and artifact provenance](conversation-provenance.md) | `resumeId` identity, artifact trails, Issue execution responsibility, and provenance-before-collaboration sequencing |
 | [[docs/event-system.md]] | [Event-system retirement note](event-system.md) | Removed Alice event-bus scheduler and the remaining UTA journal boundary |

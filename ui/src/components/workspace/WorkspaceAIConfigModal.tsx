@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Bot, Info, Settings, X } from 'lucide-react'
+import { Bot, GitMerge, Info, Settings, X } from 'lucide-react'
 import {
   getAgentConfig,
   listCredentials,
@@ -27,6 +27,7 @@ import { baseUrlToVendor, vendorPreset, presetModels, pickAgentWire } from '../.
 import { ModelCombobox } from '../credentials/PresetFields'
 import { useTestGate } from '../../lib/useTestGate'
 import { useWorkspaces } from '../../contexts/workspaces-context'
+import { WorkspaceTemplateUpgradePanel } from './WorkspaceTemplateUpgradePanel'
 
 // The agent tab implies a default vendor when the baseUrl alone can't say:
 // claude → Anthropic, codex → OpenAI; opencode/pi run anything so they have no
@@ -39,7 +40,7 @@ const TAB_FALLBACK_VENDOR: Record<Tab, string | null> = {
 }
 
 type Tab = 'claude' | 'codex' | 'opencode' | 'pi'
-type Section = 'general' | 'ai'
+type Section = 'general' | 'ai' | 'template'
 
 interface Props {
   wsId: string
@@ -148,7 +149,7 @@ function testKey(form: FormState, agent: AgentId): string {
 }
 
 export function WorkspaceAIConfigModal({ wsId, onClose, initialAgent = 'claude', initialSection = 'general' }: Props) {
-  const { workspaces, saveWorkspaceMetadata } = useWorkspaces()
+  const { workspaces, refresh, saveWorkspaceMetadata } = useWorkspaces()
   const workspace = workspaces.find((w) => w.id === wsId) ?? null
   const workspaceLabel = workspace?.displayName?.trim() || workspace?.tag || wsId
   const [section, setSection] = useState<Section>(initialSection)
@@ -437,6 +438,21 @@ export function WorkspaceAIConfigModal({ wsId, onClose, initialAgent = 'claude',
               <Bot size={15} />
               <span>AI Provider</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setSection('template')}
+              className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-2 text-left text-[12px] font-medium transition-colors sm:mt-1 sm:w-full ${
+                section === 'template'
+                  ? 'bg-accent/10 text-accent'
+                  : 'text-text-muted hover:bg-bg-tertiary hover:text-text'
+              }`}
+            >
+              <GitMerge size={15} />
+              <span>Template</span>
+              {workspace?.upgradeAvailable && (
+                <span className="ml-auto h-1.5 w-1.5 rounded-full bg-accent" aria-label="Update available" />
+              )}
+            </button>
           </aside>
 
           <div className="min-w-0 flex flex-1 flex-col">
@@ -674,6 +690,7 @@ export function WorkspaceAIConfigModal({ wsId, onClose, initialAgent = 'claude',
             {modelSuggestions.length > 0 && (
               <p className="text-[11px] text-text-muted/70 mt-1">Suggestions from the matched provider — or type any model id.</p>
             )}
+
           </div>
 
           {(tab === 'opencode' || tab === 'pi') && (
@@ -861,6 +878,14 @@ export function WorkspaceAIConfigModal({ wsId, onClose, initialAgent = 'claude',
           </div>
         </div>
               </>
+            )}
+
+            {section === 'template' && (
+              <WorkspaceTemplateUpgradePanel
+                wsId={wsId}
+                onWorkspaceChanged={refresh}
+                onClose={onClose}
+              />
             )}
           </div>
         </div>

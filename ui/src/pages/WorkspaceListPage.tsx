@@ -203,9 +203,7 @@ export function WorkspaceListPage() {
                       })
                     }
                     onConfigure={() => openAgentConfig(w.id)}
-                    onOpenTemplate={(name) =>
-                      openOrFocus({ kind: 'template-detail', params: { name } })
-                    }
+                    onUpgrade={() => openAgentConfig(w.id, undefined, 'template')}
                   />
                 ))}
               </div>

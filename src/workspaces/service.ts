@@ -136,7 +136,9 @@ import { SessionPool, type SessionFactoryContext } from './session-pool.js';
 import { SessionRegistry, type SessionRecord } from './session-registry.js';
 import { buildCliPath, buildSpawnEnv } from './spawn-env.js';
 import { terminalThemeEnv } from './terminal-theme.js';
-import { readReadmeVersion, TemplateRegistry } from './template-registry.js';
+import { TemplateRegistry } from './template-registry.js';
+import { TemplateUpgradeManager } from './template-upgrade.js';
+import { WorkspaceOperationGuard } from './workspace-operation-guard.js';
 import { readWorkspaceMetadata } from './workspace-metadata.js';
 import { TranscriptWatcher } from './transcript-watcher.js';
 import { detectAgentBinary, runtimeInstallOverride, type AgentAvailability } from './agent-detect.js';
@@ -170,6 +172,7 @@ export interface WorkspaceService {
   readonly registry: WorkspaceRegistry;
   readonly catalog: WorkspaceCatalog;
   readonly lifecycle: WorkspaceLifecycleManager;
+  readonly templateUpgrades: TemplateUpgradeManager;
   readonly sessionRegistry: SessionRegistry;
   readonly scrollbackStore: ScrollbackStore;
   readonly templates: TemplateRegistry;
@@ -1603,6 +1606,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     return snapshot;
   };
 
+  const workspaceOperationGuard = new WorkspaceOperationGuard();
   const lifecycle = new WorkspaceLifecycleManager({
     launcherRoot: config.launcherRoot,
     registry,
@@ -1614,11 +1618,25 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     pool,
     webPi,
     isWorkspaceHeadlessActive: (id) => (activeHeadlessByWorkspace.get(id) ?? 0) > 0,
+    operationGuard: workspaceOperationGuard,
     logger: launcherLogger.child({ scope: 'workspace-lifecycle' }),
   });
   await lifecycle.recover();
+  const templateUpgrades = new TemplateUpgradeManager({
+    registry,
+    templates,
+    isWorkspaceBusy: (workspaceId) => {
+      if ((activeHeadlessByWorkspace.get(workspaceId) ?? 0) > 0) return true;
+      return sessionRegistry.listFor(workspaceId).some((record) =>
+        pool.get(record.id) !== undefined || webPi.get(record.id) !== undefined,
+      );
+    },
+    operationGuard: workspaceOperationGuard,
+    logger: launcherLogger.child({ scope: 'template-upgrade' }),
+  });
+  await templateUpgrades.recover();
   // Recovery owns the active/departed boundary. Scheduled work must not see an
-  // interrupted offboarding row between registry load and lifecycle repair.
+  // interrupted offboarding/upgrade row between registry load and repair.
   scheduleScanner.start();
 
   const detectAgents = (): Record<string, AgentAvailability> => {
@@ -1669,26 +1687,20 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       opencode: existsSync(join(w.dir, 'opencode.json')),
       pi: existsSync(join(w.dir, '.pi-agent')),
     };
-    // Version lineage + upgrade hint. We read the instance README's
-    // frontmatter for the "current" version each list call — cheap (one
-    // file read per workspace) and authoritative: the agent self-upgrades
-    // by bumping that frontmatter, so reading it live makes the badge
-    // disappear without any extra plumbing.
+    // Version lineage + upgrade hint. Applied template state, not mutable
+    // README frontmatter, is authoritative: changing a document is not the
+    // same thing as completing a reviewed three-way upgrade.
     let currentVersion: string | undefined;
     let upgradeAvailable: { from: string; to: string } | null = null;
     if (w.template) {
       const tpl = templates.get(w.template);
       if (tpl) {
-        const instanceReadme = join(w.dir, 'README.md');
-        const fromInstance = existsSync(instanceReadme)
-          ? await readReadmeVersion(instanceReadme).catch(() => undefined)
-          : undefined;
-        currentVersion = fromInstance ?? w.spawnedFromVersion;
-        // Surface the badge when the template has moved past whatever
-        // version the instance self-claims. `compareVersions` returns 1
-        // when tpl.version > currentVersion. Missing currentVersion (and
-        // no spawnedFromVersion) → no signal, don't guess.
-        if (currentVersion && compareVersions(tpl.version, currentVersion) > 0) {
+        currentVersion = await templateUpgrades.currentVersion(w);
+        if (
+          tpl.upgradeStrategy === 'managed-context'
+          && currentVersion
+          && compareVersions(tpl.version, currentVersion) > 0
+        ) {
           upgradeAvailable = { from: currentVersion, to: tpl.version };
         }
       }
@@ -1719,6 +1731,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     registry,
     catalog,
     lifecycle,
+    templateUpgrades,
     sessionRegistry,
     scrollbackStore,
     templates,

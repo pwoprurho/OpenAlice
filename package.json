@@ -33,6 +33,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:uta:live-paper": "vitest run --config vitest.uta-live.config.ts",
     "test:bbProvider": "vitest run --config vitest.bbProvider.config.ts",
     "test:smoke": "tsx scripts/guardian/smoke.ts",
     "test:guardian-recovery": "tsx scripts/guardian/runtime-recovery-smoke.ts",

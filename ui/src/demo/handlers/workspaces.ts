@@ -78,6 +78,45 @@ const demoAgentRuntimeReadiness = {
   checkedAt: '2026-07-08T00:00:00.000Z',
 }
 
+const demoTemplateUpgradePlan = (workspaceId: string) => ({
+  workspaceId,
+  template: 'chat',
+  fromVersion: '0.1.0',
+  toVersion: '0.2.0',
+  strategy: 'managed-context' as const,
+  planDigest: 'demo-template-upgrade-plan',
+  source: 'legacy-root-commit' as const,
+  blocked: false,
+  blockers: [],
+  files: [
+    {
+      path: 'README.md', status: 'ready', operation: 'update', canUseTemplate: true,
+      currentPreview: '# Chat workspace\n\nUse the OpenAlice CLI.',
+      templatePreview: '# Chat workspace\n\nUse the OpenAlice CLI and sign durable work.',
+      currentTruncated: false, templateTruncated: false,
+    },
+    {
+      path: '.agents/skills/alice-workspace/SKILL.md', status: 'ready', operation: 'update', canUseTemplate: true,
+      currentPreview: 'Old collaboration guidance.', templatePreview: 'Current collaboration guidance.',
+      currentTruncated: false, templateTruncated: false,
+    },
+    {
+      path: 'AGENTS.md', status: 'preserved', operation: 'keep', canUseTemplate: true,
+      currentPreview: 'Workspace-specific desk instructions.', templatePreview: 'Template desk instructions.',
+      currentTruncated: false, templateTruncated: false,
+      note: 'Changed only in this Workspace; it will stay as-is.',
+    },
+    {
+      path: '.claude/skills/self-scheduling/SKILL.md', status: 'conflict', operation: 'update', canUseTemplate: true,
+      currentPreview: 'Report scheduled work to the owner with the local checklist.',
+      templatePreview: 'Report scheduled work to Inbox with a signed artifact.',
+      currentTruncated: false, templateTruncated: false,
+      note: 'Both the Workspace and template changed this file.',
+    },
+  ],
+  summary: { ready: 2, preserved: 1, conflicts: 1, unchanged: 0 },
+})
+
 export const workspacesHandlers = [
   http.get('/api/workspaces', () => HttpResponse.json({ workspaces: demoWorkspaces })),
   http.get('/api/workspaces/departed', () => HttpResponse.json({ workspaces: demoDepartedWorkspaces })),
@@ -147,6 +186,50 @@ export const workspacesHandlers = [
       },
     })
     return HttpResponse.json({ ok: true })
+  }),
+  http.get('/api/workspaces/:id/template-upgrade', ({ params }) => {
+    const workspace = demoWorkspaces.find((candidate) => candidate.id === String(params.id))
+    if (!workspace) return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    if (!workspace.upgradeAvailable) {
+      return HttpResponse.json({
+        plan: {
+          ...demoTemplateUpgradePlan(workspace.id),
+          fromVersion: workspace.currentVersion ?? '0.2.0',
+          toVersion: workspace.currentVersion ?? '0.2.0',
+          source: 'recorded-baseline',
+          files: [],
+          summary: { ready: 0, preserved: 0, conflicts: 0, unchanged: 0 },
+        },
+      })
+    }
+    return HttpResponse.json({ plan: demoTemplateUpgradePlan(workspace.id) })
+  }),
+  http.post('/api/workspaces/:id/template-upgrade', async ({ params, request }) => {
+    const workspace = demoWorkspaces.find((candidate) => candidate.id === String(params.id))
+    if (!workspace) return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    const body = await request.json().catch(() => ({})) as {
+      planDigest?: string
+      resolutions?: Record<string, string>
+    }
+    if (body.planDigest !== 'demo-template-upgrade-plan') {
+      return HttpResponse.json({ error: 'stale_plan', message: 'Refresh the preview.' }, { status: 409 })
+    }
+    if (!body.resolutions?.['.claude/skills/self-scheduling/SKILL.md']) {
+      return HttpResponse.json({ error: 'unresolved_conflict', message: 'Choose a copy first.' }, { status: 400 })
+    }
+    ;(workspace as { currentVersion?: string; upgradeAvailable?: { from: string; to: string } | null }).currentVersion = '0.2.0'
+    ;(workspace as { currentVersion?: string; upgradeAvailable?: { from: string; to: string } | null }).upgradeAvailable = null
+    return HttpResponse.json({
+      result: {
+        workspaceId: workspace.id,
+        fromVersion: '0.1.0',
+        toVersion: '0.2.0',
+        commit: 'd3m0c0de12345678',
+        changedPaths: ['README.md', '.agents/skills/alice-workspace/SKILL.md'],
+        keptPaths: ['AGENTS.md'],
+      },
+      workspace,
+    })
   }),
   http.delete('/api/workspaces/:id', () => HttpResponse.json(true)),
   http.post('/api/workspaces/:id/stop', () => HttpResponse.json(true)),

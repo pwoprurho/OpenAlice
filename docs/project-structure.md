@@ -8,6 +8,7 @@ Related guides: [[docs/managed-workspace-runtime.md]],
 [[docs/cli-installer.md]], [[docs/local-runtime.md]],
 [[docs/docker-deployment.md]],
 [[docs/workspace-lifecycle.md]],
+[[docs/workspace-template-upgrade.md]],
 [[docs/workspace-issues-and-scheduling.md]],
 [[docs/conversation-provenance.md]], and [[docs/market-data-architecture.md]].
 
@@ -121,6 +122,10 @@ Load-bearing paths:
 - `src/workspaces/session-registry.ts` — durable session metadata.
 - `src/workspaces/scrollback-store.ts` — terminal replay.
 - `src/workspaces/template-registry.ts` — template declarations.
+- `src/workspaces/template-upgrade.ts` — reviewed managed-asset reconciliation
+  and interrupted-upgrade recovery.
+- `src/workspaces/workspace-operation-guard.ts` — shared checkout-mutation
+  lease for upgrade, offboarding, and future merge operations.
 - `src/workspaces/workspace-creator.ts` — bootstrap and initial git state.
 - `src/workspaces/context-injector.ts` — persona and shared skill injection.
 - `src/workspaces/adapters/` — CLI-specific command/config behavior.
@@ -245,6 +250,7 @@ generated `src/migrations/INDEX.md`.
 |---|---|
 | Workspace lifecycle, agent launch, packaged Pi, shell/PATH | `src/workspaces/` + [Managed Workspace runtime](managed-workspace-runtime.md) |
 | Workspace offboarding, restore/purge, Session retirement | [Workspace and Session lifecycle](workspace-lifecycle.md) |
+| Template versions, managed-asset reconciliation, upgrade recovery | [Workspace Template Upgrade](workspace-template-upgrade.md) |
 | Broker/account/execution behavior | `services/uta/src/domain/trading/` + [UTA live testing](uta-live-testing.md) |
 | Shared Alice ↔ UTA shapes | `packages/uta-protocol/` and both callers |
 | External Inbox notifications and IM adapters | [Connector Service](connector-service.md) |
