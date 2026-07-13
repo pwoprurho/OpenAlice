@@ -199,7 +199,7 @@ export async function projectInboxAttachments(
     const extension = extname(doc.path).toLowerCase()
     if (extension === '.md' || extension === '.markdown') {
       reportDocs.push({ doc, mediaType: 'text/markdown' })
-    } else if (extension === '.html' || extension === '.htm') {
+    } else if (extension === '.html') {
       reportDocs.push({ doc, mediaType: 'text/html' })
     }
   }

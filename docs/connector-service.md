@@ -39,7 +39,7 @@ categories.
   eligible attachment is logged and leaves bridge health degraded so partial
   or unnormalized delivery is visible to operators.
 - HTML is a presentation asset, not a Connector message format. Adapters send
-  the `.html`/`.htm` file with a `text/html` media type and never inline,
+  the `.html` file with a `text/html` media type and never inline,
   translate, or render its contents into the external chat message. OpenAlice
   previews static HTML in an origin-less sandbox with scripts, forms,
   navigation, and network disabled; inline CSS, SVG, and data images remain

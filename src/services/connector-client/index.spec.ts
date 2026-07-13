@@ -131,6 +131,21 @@ describe('Inbox Connector bridge', () => {
       .toBe(html)
   })
 
+  it('does not treat the legacy .htm extension as an HTML report', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openalice-connector-legacy-htm-'))
+    tempDirs.push(root)
+    await writeFile(join(root, 'legacy.htm'), '<!doctype html><h1>Legacy</h1>')
+
+    const attachments = await projectInboxAttachments({
+      id: 'entry-legacy-htm',
+      ts: Date.now(),
+      workspaceId: 'ws-1',
+      docs: [{ path: 'legacy.htm' }],
+    }, () => ({ dir: root }))
+
+    expect(attachments).toEqual([])
+  })
+
   it('warns and preserves source bytes when encoding cannot be normalized safely', async () => {
     const root = await mkdtemp(join(tmpdir(), 'openalice-connector-ambiguous-'))
     tempDirs.push(root)

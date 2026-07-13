@@ -33,7 +33,7 @@ function DocBody({ path, content }: { path: string; content: string }): ReactEle
   if (lower.endsWith('.md') || lower.endsWith('.markdown')) {
     return <MarkdownContent text={content} />
   }
-  if (lower.endsWith('.html') || lower.endsWith('.htm')) {
+  if (lower.endsWith('.html')) {
     return <HtmlReportView path={path} content={content} />
   }
   // Plain-text fallback (.txt, .log, no extension, code files…)
