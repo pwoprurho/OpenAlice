@@ -32,6 +32,7 @@ curl --fail --silent --output /dev/null "$OPENALICE_INSTALL_URL" || {
 
 printf '\n[install-playground] Clean container ready: non-root, empty HOME, no pnpm, no external network.\n'
 printf '[install-playground] Starting the same curl installer a user will see.\n\n'
+printf '[install-playground] The installer will pause at its plan. Type y and press Enter to approve it.\n\n'
 curl -fsSL "$OPENALICE_INSTALL_URL" | bash
 
 if [[ -x "$HOME/.openalice/bin/openalice" ]]; then
@@ -41,6 +42,7 @@ fi
 printf '\n[install-playground] You are now in the container after the installer.\n'
 printf 'Try: command -v openalice; openalice --version; cat ~/.bashrc\n'
 printf 'Re-run: curl -fsSL "$OPENALICE_INSTALL_URL" | bash\n'
+printf 'After a successful re-run: source ~/.bashrc\n'
 printf 'Leave: exit\n\n'
 export PS1='openalice-install> '
 bash --noprofile --norc -i

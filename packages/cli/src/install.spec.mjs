@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
+import * as pty from 'node-pty'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const execFileAsync = promisify(execFile)
@@ -58,4 +59,73 @@ describe.skipIf(process.platform === 'win32')('OpenAlice CLI installer', () => {
 
     await expect(access(installRoot)).rejects.toMatchObject({ code: 'ENOENT' })
   })
+
+  it('treats blank interactive confirmation as cancellation', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'openalice-install-cancel-'))
+    temporaryPaths.push(home)
+    const installRoot = join(home, '.openalice')
+    const result = await runInstallerInPty([
+      '--source', repositoryRoot,
+      '--version', 'interactive-cancel',
+      '--install-dir', installRoot,
+      '--no-modify-path',
+    ], { home, reply: '\r' })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.output).toContain('Continue with this install?')
+    expect(result.output).toContain('[y/N]')
+    expect(result.output).toContain('No changes made')
+    await expect(access(installRoot)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('installs after an explicit interactive y confirmation', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'openalice-install-confirm-'))
+    temporaryPaths.push(home)
+    const installRoot = join(home, '.openalice')
+    const result = await runInstallerInPty([
+      '--source', repositoryRoot,
+      '--version', 'interactive-confirm',
+      '--install-dir', installRoot,
+      '--no-modify-path',
+    ], { home, reply: 'y\r' })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.output).toContain('Continue with this install?')
+    expect(result.output).toContain('OpenAlice CLI is ready')
+    await expect(access(join(installRoot, 'bin', 'openalice'))).resolves.toBeUndefined()
+  })
 })
+
+function runInstallerInPty(args, { home, reply }) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const terminal = pty.spawn('bash', [join(repositoryRoot, 'install'), ...args], {
+      cwd: repositoryRoot,
+      cols: 120,
+      rows: 32,
+      env: {
+        ...process.env,
+        HOME: home,
+        SHELL: '/bin/bash',
+        TERM: 'xterm-256color',
+      },
+    })
+    let output = ''
+    let replied = false
+    const timeout = setTimeout(() => {
+      terminal.kill()
+      rejectPromise(new Error(`installer PTY timed out:\n${output}`))
+    }, 10_000)
+
+    terminal.onData((data) => {
+      output += data
+      if (!replied && output.includes('Continue with this install?')) {
+        replied = true
+        terminal.write(reply)
+      }
+    })
+    terminal.onExit(({ exitCode, signal }) => {
+      clearTimeout(timeout)
+      resolvePromise({ exitCode, signal, output })
+    })
+  })
+}

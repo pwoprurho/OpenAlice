@@ -197,21 +197,23 @@ if [[ "$ASSUME_YES" -eq 0 ]]; then
     exit 2
   fi
   while true; do
-    printf '\n%bContinue with this install?%b [Y/n] ' "$BOLD" "$RESET" >&3
+    printf '\n%bContinue with this install?%b [y/N] ' "$BOLD" "$RESET"
     if ! IFS= read -r reply <&3; then
-      reply="n"
+      exec 3>&-
+      printf '\nNo confirmation received. No changes made.\n' >&2
+      exit 2
     fi
     case "$reply" in
-      ""|y|Y|yes|YES|Yes)
+      y|Y|yes|YES|Yes)
         break
         ;;
-      n|N|no|NO|No)
+      ""|n|N|no|NO|No)
         exec 3>&-
         printf '\nNo changes made. You can run the installer again whenever you are ready.\n'
         exit 0
         ;;
       *)
-        printf 'Please answer y or n.\n' >&3
+        printf 'Please answer y or n. Press Enter to cancel.\n'
         ;;
     esac
   done

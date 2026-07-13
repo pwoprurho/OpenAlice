@@ -42,8 +42,9 @@ The preview requires Node.js 20 or newer. It installs versioned CLI files under
 launchers under `~/.openalice/bin/`, and offers to add that bin directory to the
 current shell profile. Before changing files, the interactive installer shows
 its source, version, paths, and shell changes, explains what it will not do, and
-asks for confirmation. It does not clone OpenAlice, write application state, or
-install Electron. The curl entry targets macOS, Linux, WSL, and Git Bash;
+requires an explicit `y` confirmation; blank input cancels without writing. It
+does not clone OpenAlice, write application state, or install Electron. The curl
+entry targets macOS, Linux, WSL, and Git Bash;
 native Windows desktop distribution remains the signed Electron installer.
 
 Unattended environments have no implicit consent. After reviewing the same
