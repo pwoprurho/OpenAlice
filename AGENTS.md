@@ -108,6 +108,7 @@ Add checks according to the touched surface:
 | Workspace issues, schedules, headless dispatch | Follow [Workspace issues and scheduling](docs/workspace-issues-and-scheduling.md) |
 | Guardian locks, process ownership, takeover | `pnpm test:guardian-recovery`; exercise the real launcher path |
 | Desktop, IPC, PTY, managed Pi, shell, packaging | Follow [Managed Workspace runtime](docs/managed-workspace-runtime.md) and run the matching Electron/package smoke |
+| Root installer or distributed CLI payload | Follow [CLI installer](docs/cli-installer.md) and run `pnpm test:install:docker`; manually walk the interactive playground before release |
 | Docker/server image, Compose, remote deployment | Follow [Docker deployment](docs/docker-deployment.md) and run `pnpm docker:smoke`; before release, opt into the credentialed agent/CLI check documented there |
 | Persisted data shape | Add an idempotent migration + spec, register it, then run `pnpm build:migration-index` |
 | Onboarding/first run/auth | Use isolated data; exercise dev and packaged onboarding paths where relevant |
@@ -164,8 +165,10 @@ Read the relevant guide before editing its subsystem:
   delivery modes, promotions, external contributions, and risk gates.
 - [[docs/managed-workspace-runtime.md]] — [Managed Workspace runtime](docs/managed-workspace-runtime.md): Electron
   packaging, managed Pi, PortableGit/Bash, runtime profiles, and Workspace PATH.
-- [[docs/local-runtime.md]] — [Local Runtime and CLI bootstrap](docs/local-runtime.md): curl-installed
-  CLI, source-backed localhost startup, dependency bootstrap, and the headless bundle boundary.
+- [[docs/cli-installer.md]] — [CLI installer](docs/cli-installer.md): consent, installed layout,
+  atomic updates, PATH integration, installer tests, and release checks.
+- [[docs/local-runtime.md]] — [Local Runtime and CLI bootstrap](docs/local-runtime.md): source-backed
+  localhost startup, dependency bootstrap, Runtime ownership, and the headless bundle boundary.
 - [[docs/docker-deployment.md]] — [Docker deployment](docs/docker-deployment.md): server image topology,
   remote-host safety, persistence, health, and container acceptance.
 - [[docs/remote-access.md]] — [Remote access](docs/remote-access.md): SSH tunnel experiment,

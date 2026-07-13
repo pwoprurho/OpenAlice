@@ -1,10 +1,13 @@
 # Local Runtime and CLI Bootstrap
 
-This guide owns the browser-local OpenAlice entry, the small installable CLI,
-and the boundary between dependency bootstrap, source-backed Runtime startup,
-Electron distribution, and later downloadable Runtime bundles.
+This guide owns the browser-local OpenAlice entry after CLI installation and
+the boundary between dependency bootstrap, source-backed Runtime startup,
+Electron distribution, and later downloadable Runtime bundles. Installer
+consent, installed layout, PATH integration, updates, and installer release
+checks belong to [[docs/cli-installer.md]].
 
-Related guides: [[docs/managed-workspace-runtime.md]],
+Related guides: [[docs/cli-installer.md]],
+[[docs/managed-workspace-runtime.md]],
 [[docs/docker-deployment.md]], and [[docs/remote-access.md]].
 
 ## Product Boundary
@@ -37,56 +40,16 @@ The current installer distributes the small JavaScript CLI from the `dev` ref:
 curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install | bash
 ```
 
-The preview requires Node.js 20 or newer. It installs immutable,
-content-addressed CLI releases under `~/.openalice/cli-versions/`, atomically
-switches stable `openalice` and `openalice.cmd` launchers under
-`~/.openalice/bin/`, and offers to manage that bin directory in the current
-shell profile. Before changing files, the interactive installer shows its
-source, action, version, paths, shell changes, and PATH conflicts, explains what
-it will not do, and requires an explicit `y` confirmation; blank input cancels
-without writing. Concurrent installs are locked, stale locks are recovered, and
-the downloaded package and staged launcher must execute successfully before
-the visible command changes. It does not clone OpenAlice, write application
-state, or install Electron. The curl entry targets macOS, Linux, WSL, and Git
-Bash; native Windows desktop distribution remains the signed Electron installer.
+The preview requires Node.js 20 or newer. It installs only the small CLI; it
+does not clone OpenAlice, write application state, install Electron, or start a
+service without separate consent. The curl entry targets macOS, Linux, WSL,
+and Git Bash; native Windows desktop distribution remains the signed Electron
+installer. The complete consent, update, filesystem, PATH, authenticity, and
+test contract lives in [[docs/cli-installer.md]].
 
-Unattended environments have no implicit consent. After reviewing the same
-install plan, pass `--yes` explicitly:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install \
-  | bash -s -- --yes
-```
-
-For a pinned tag or commit:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install \
-  | bash -s -- --version <git-ref>
-```
-
-For local installer development:
-
-```bash
-./install --source . --version dev --no-modify-path
-```
-
-To inspect exactly what would change without opening a prompt or writing files:
-
-```bash
-./install --source . --version dev --plan
-```
-
-To experience the real prompt in a clean, offline container and remain in its
-shell afterward for inspection:
-
-```bash
-pnpm test:install:docker --interactive
-```
-
-`OPENALICE_INSTALL_BASE_URL` may point the download branch at a local fixture
-server. It exists for installer development and the release smoke; normal user
-installs should leave it unset.
+Installer flags, non-interactive consent, development seams, the clean Docker
+fixture, and the manual prompt playground are documented only in
+[[docs/cli-installer.md]].
 
 Until release assets include a standalone headless Runtime, users keep an
 OpenAlice source checkout and run the CLI from inside it:
@@ -144,11 +107,6 @@ installer. The same dependency plan must remain inspectable and independently
 retryable, and Electron's managed-runtime policy continues to belong to
 [[docs/managed-workspace-runtime.md]].
 
-The [installer script note](reference/install-script/README.md) records the
-Claude Code bootstrap entry points, the open-source Codex installer sources,
-and the distribution boundaries worth studying. Unlicensed upstream snapshots
-remain untracked local reference material.
-
 ## Security and Network Invariants
 
 - The CLI always sets `OPENALICE_BIND_HOST=127.0.0.1` for local startup.
@@ -164,18 +122,11 @@ remain untracked local reference material.
 
 When this surface changes:
 
-1. Run the CLI unit and installer tests.
-2. Run `pnpm test:install:docker` locally. It executes the real `curl | bash`
-   download path as a non-root user with an empty home and no global pnpm,
-   then verifies stale-lock recovery, repeat installation, content-addressed
-   version switching, managed shell PATH changes, and both launchers while the
-   run container has no external network. This is a manual pre-release gate and
-   intentionally does not run in PR CI.
-3. Install from `--source` into a temporary install root and execute the
-   installed launcher.
-4. Run `pnpm build:server` and start with an isolated `--home` and test port.
-5. Open the real localhost route and verify the auth contract and Workspace UI.
-6. Run Guardian recovery checks when launcher ownership changes.
-7. Run Docker smoke when `scripts/guardian/prod.mjs` changes.
-8. Run Electron PTY/package smoke when dependency topology or shared Runtime
+1. Follow [[docs/cli-installer.md]] when the root installer or distributed CLI
+   payload changes.
+2. Run `pnpm build:server` and start with an isolated `--home` and test port.
+3. Open the real localhost route and verify the auth contract and Workspace UI.
+4. Run Guardian recovery checks when launcher ownership changes.
+5. Run Docker smoke when `scripts/guardian/prod.mjs` changes.
+6. Run Electron PTY/package smoke when dependency topology or shared Runtime
    behavior changes, even though the CLI itself does not package Electron.
