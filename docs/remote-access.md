@@ -2,9 +2,18 @@
 
 This guide owns OpenAlice's SSH access experiment and the boundary between a
 remote Runtime and local presentation. It complements
-[[docs/docker-deployment.md]] and [[docs/managed-workspace-runtime.md]].
+[[docs/local-runtime.md]], [[docs/docker-deployment.md]], and
+[[docs/managed-workspace-runtime.md]].
 
-## Stage 1: Measure the Existing TUI
+## Local Runtime First
+
+Remote access builds on the local Runtime contract in
+[[docs/local-runtime.md]]. Prove `openalice` can prepare a source checkout,
+start Guardian on `127.0.0.1`, and serve the normal browser UI before adding a
+transport. This keeps the first distribution loop independent of domains,
+cross-domain cookies, hosted Studio state, and SSH lifecycle.
+
+## SSH Experiment: Measure the Existing TUI
 
 The first remote path deliberately keeps the existing product architecture:
 
@@ -21,14 +30,15 @@ run on the SSH host. The browser loads the normal OpenAlice bundle through the
 tunnel, so HTTP, authentication, and the PTY WebSocket remain same-origin. No
 hosted Studio, relay, or second frontend protocol is involved.
 
-This stage exists to measure the real TUI experience before designing around a
+This experiment exists to measure the real TUI experience before designing around a
 latency problem that may not matter on normal developer links. WebPi remains an
 optional structured Pi surface; it is not a prerequisite or replacement for
 Shell, Claude Code, Codex, opencode, or Pi TUI sessions.
 
 ## Prerequisites
 
-1. OpenAlice is already running on the remote machine.
+1. OpenAlice is already running on the remote machine, for example with the
+   source-backed `openalice start --no-open` path.
 2. Its web listener is reachable as `127.0.0.1:47331` from that machine.
 3. The local machine has `ssh` and working key, agent, or interactive SSH auth.
 
@@ -54,7 +64,9 @@ foreground to own the tunnel. Use `--no-open` to print the URL only, or
 
 The forward binds only local `127.0.0.1` and targets only remote `127.0.0.1`.
 Closing the CLI closes the tunnel. The command does not install, update, start,
-or stop the remote Runtime in Stage 1.
+or stop the remote Runtime. A later remote lifecycle command should reuse the
+local bootstrap contract rather than embedding a second installation system in
+the SSH connector.
 
 ## Security Boundary
 
@@ -68,11 +80,11 @@ an OpenAlice tunnel open.
 Keep the remote web listener private or protected by the deployment's normal
 HTTPS/auth boundary. Never use `OPENALICE_DISABLE_AUTH=1` for remote access.
 
-## Deferred Stages
+## Deferred Remote Stages
 
-Stage 1 intentionally leaves these separate:
+The SSH experiment intentionally leaves these separate:
 
-- managed Runtime installation and daemon lifecycle;
+- managed remote Runtime installation and daemon lifecycle;
 - a hosted standalone Studio and pairing/capability protocol;
 - cloud relay or device enrollment;
 - cursor-based structured Session streaming for Pi, Codex, or other agents;

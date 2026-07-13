@@ -164,6 +164,8 @@ Read the relevant guide before editing its subsystem:
   delivery modes, promotions, external contributions, and risk gates.
 - [[docs/managed-workspace-runtime.md]] — [Managed Workspace runtime](docs/managed-workspace-runtime.md): Electron
   packaging, managed Pi, PortableGit/Bash, runtime profiles, and Workspace PATH.
+- [[docs/local-runtime.md]] — [Local Runtime and CLI bootstrap](docs/local-runtime.md): curl-installed
+  CLI, source-backed localhost startup, dependency bootstrap, and the headless bundle boundary.
 - [[docs/docker-deployment.md]] — [Docker deployment](docs/docker-deployment.md): server image topology,
   remote-host safety, persistence, health, and container acceptance.
 - [[docs/remote-access.md]] — [Remote access](docs/remote-access.md): SSH tunnel experiment,

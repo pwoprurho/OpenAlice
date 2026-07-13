@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * Guardian — production entry, used as the Docker container CMD.
+ * Guardian — built-runtime entry, used by Docker and the local CLI.
  *
  * tini runs as PID 1 (signal forwarding + zombie reaping); this script is
- * the orchestrator tini supervises. It spawns the two long-lived Node
- * processes that make up a self-hosted OpenAlice deployment:
+ * the orchestrator tini supervises. It spawns the long-lived Node services
+ * that make up a built OpenAlice Runtime:
  *
  *   1. UTA service  (services/uta/dist/uta.js, bind 127.0.0.1:47333)
  *   2. Connector Service (optional, bind 127.0.0.1:47334)
- *   3. Alice main   (dist/main.js,             bind 0.0.0.0:47331)
+ *   3. Alice main   (dist/main.js, bind OPENALICE_BIND_HOST:47331)
  *
  * Lifecycle:
  *   - spawn UTA, poll /__uta/health for observability (Alice still boots if
@@ -41,6 +41,10 @@ const DATA_HOME = process.env.OPENALICE_HOME
   ?? process.env.OPENALICE_USER_DATA_HOME // deprecated alias, one-release courtesy
   ?? '/data'
 const LAUNCHER_ROOT = process.env.AQ_LAUNCHER_ROOT ?? resolve(DATA_HOME, 'workspaces')
+const LAUNCHER = process.env.OPENALICE_LAUNCHER?.trim() || 'docker'
+const GUARDIAN_LAUNCHER = LAUNCHER.startsWith('guardian-') ? LAUNCHER : `guardian-${LAUNCHER}`
+const NODE_BINARY = process.env.OPENALICE_NODE_BINARY?.trim() || process.execPath
+const BIND_HOST = process.env.OPENALICE_BIND_HOST?.trim() || '127.0.0.1'
 const GUARDIAN_STARTED_AT = currentProcessStartedAt()
 const TAKEOVER = takeoverRequested()
 if (!process.env.OPENALICE_HOME && process.env.OPENALICE_USER_DATA_HOME) {
@@ -179,7 +183,7 @@ console.log(`[guardian/prod] mode  → ${TRADING_MODE.mode} (${TRADING_MODE.sour
 console.log(`[guardian/prod] data  → ${DATA_HOME}`)
 console.log(`[guardian/prod] UTA   → ${LITE_MODE ? 'disabled (trading mode lite)' : UTA_URL}`)
 console.log(`[guardian/prod] Connector → ${CONNECTOR_URL} (optional)`)
-console.log(`[guardian/prod] Alice → http://0.0.0.0:${WEB_PORT}`)
+console.log(`[guardian/prod] Alice → http://${BIND_HOST}:${WEB_PORT}`)
 console.log(`[guardian/prod] Tools → http://127.0.0.1:${MCP_PORT}/cli`)
 console.log(`[guardian/prod] MCP   → optional on http://127.0.0.1:${MCP_PORT}/mcp`)
 console.log(`[guardian/prod] flags → ${FLAG_PATH}, ${CONNECTOR_FLAG_PATH}`)
@@ -195,14 +199,14 @@ async function readConnectorEnabled() {
 
 function makeUTASpec() {
   return {
-    cmd: 'node',
+    cmd: NODE_BINARY,
     args: ['services/uta/dist/uta.js'],
     env: {
       ...process.env,
       OPENALICE_UTA_PORT: String(UTA_PORT),
       OPENALICE_HOME: DATA_HOME,
       AQ_LAUNCHER_ROOT: LAUNCHER_ROOT,
-      OPENALICE_LAUNCHER: 'docker',
+      OPENALICE_LAUNCHER: LAUNCHER,
       OPENALICE_GUARDIAN_PID: String(process.pid),
       OPENALICE_GUARDIAN_STARTED_AT: String(GUARDIAN_STARTED_AT),
       ...(TAKEOVER ? { OPENALICE_TAKEOVER: '1' } : {}),
@@ -221,13 +225,13 @@ function spawnUTA() {
 }
 
 function spawnConnector() {
-  const child = spawn('node', ['services/connector/dist/connector.cjs'], {
+  const child = spawn(NODE_BINARY, ['services/connector/dist/connector.cjs'], {
     env: {
       ...process.env,
       OPENALICE_CONNECTOR_PORT: String(CONNECTOR_PORT),
       OPENALICE_HOME: DATA_HOME,
       AQ_LAUNCHER_ROOT: LAUNCHER_ROOT,
-      OPENALICE_LAUNCHER: 'docker',
+      OPENALICE_LAUNCHER: LAUNCHER,
       OPENALICE_GUARDIAN_PID: String(process.pid),
       OPENALICE_GUARDIAN_STARTED_AT: String(GUARDIAN_STARTED_AT),
       ...(TAKEOVER ? { OPENALICE_TAKEOVER: '1' } : {}),
@@ -242,7 +246,7 @@ function spawnConnector() {
 }
 
 function spawnAlice() {
-  const child = spawn('node', ['dist/main.js'], {
+  const child = spawn(NODE_BINARY, ['dist/main.js'], {
     env: {
       ...process.env,
       OPENALICE_WEB_PORT: String(WEB_PORT),
@@ -252,7 +256,7 @@ function spawnAlice() {
       OPENALICE_CONNECTOR_URL: CONNECTOR_URL,
       OPENALICE_HOME: DATA_HOME,
       AQ_LAUNCHER_ROOT: LAUNCHER_ROOT,
-      OPENALICE_LAUNCHER: 'docker',
+      OPENALICE_LAUNCHER: LAUNCHER,
       OPENALICE_GUARDIAN_PID: String(process.pid),
       OPENALICE_GUARDIAN_STARTED_AT: String(GUARDIAN_STARTED_AT),
       ...(TAKEOVER ? { OPENALICE_TAKEOVER: '1' } : {}),
@@ -435,7 +439,7 @@ async function main() {
   guardianRuntimeLock = await acquireGuardianRuntime({
     userDataHome: DATA_HOME,
     launcherRoot: LAUNCHER_ROOT,
-    launcher: 'guardian-docker',
+    launcher: GUARDIAN_LAUNCHER,
     takeover: TAKEOVER,
     processStartedAt: GUARDIAN_STARTED_AT,
     onOwnershipLost: (err) => {

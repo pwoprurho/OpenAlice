@@ -4,7 +4,7 @@
  * Guardian is OpenAlice's L2 authority (see memory:port-architecture-3-layers).
  * Three carriers, one set of L2 responsibilities:
  *   - dev:    `scripts/guardian/dev.ts`, spawned by `pnpm dev`
- *   - prod:   `scripts/guardian/prod.mjs`, container CMD (Step 7)
+ *   - built:  `scripts/guardian/prod.mjs`, Docker CMD or local CLI child
  *   - desktop: Electron `main` process (future)
  *
  * Responsibilities (this module):

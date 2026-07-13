@@ -5,6 +5,7 @@ and persistent-state layout. Update it when a top-level subsystem moves or a
 new long-lived process, package, or state root is introduced.
 
 Related guides: [[docs/managed-workspace-runtime.md]],
+[[docs/local-runtime.md]],
 [[docs/docker-deployment.md]],
 [[docs/workspace-lifecycle.md]],
 [[docs/workspace-issues-and-scheduling.md]],
@@ -33,7 +34,9 @@ Launchers share the same ownership model:
 - `scripts/guardian/dev.ts` runs UTA, Alice, and Vite for `pnpm dev`.
 - `apps/desktop/src/main.ts` is the packaged Electron Guardian and renderer
   host. It starts Alice/UTA through Electron's Node mode.
-- `scripts/guardian/prod.mjs` supervises the Docker/production process pair.
+- `scripts/guardian/prod.mjs` supervises built Runtime services for Docker and
+  the source-backed local CLI. Docker defaults to the `docker` launcher;
+  `openalice` supplies the distinct `cli` launcher and a loopback bind.
 - `packages/guardian-runtime/` owns cross-launcher single-writer locks,
   heartbeat metadata, process identity, and controlled takeover.
 
@@ -73,7 +76,7 @@ services/uta/                  UTA process
 └── src/domain/trading/        all broker and trading-domain implementation
 
 packages/
-├── cli/                       installable OpenAlice connection/control CLI
+├── cli/                       installable local Runtime/connection CLI
 ├── guardian-runtime/          process ownership and recovery primitives
 ├── uta-protocol/              schemas and wire types shared by Alice + UTA
 ├── ibkr/                      IBKR TWS protocol package, owned by UTA

@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPOSITORY="TraderAlice/OpenAlice"
+VERSION="${OPENALICE_VERSION:-dev}"
+SOURCE_DIR=""
+MODIFY_PATH=1
+INSTALL_ROOT="${OPENALICE_INSTALL_DIR:-${HOME}/.openalice}"
+
+usage() {
+  cat <<'EOF'
+OpenAlice CLI installer
+
+Usage:
+  curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install | bash
+  ./install [--version <git-ref>] [--install-dir <path>] [--no-modify-path]
+
+Options:
+  --version <git-ref>   Git tag, branch, or commit to install (default: dev)
+  --install-dir <path>  OpenAlice user root (default: ~/.openalice)
+  --source <path>       Install CLI files from a local checkout (development)
+  --no-modify-path      Do not update the shell profile
+  -h, --help            Show this help
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --version)
+      [[ $# -ge 2 ]] || { echo "openalice install: --version requires a value" >&2; exit 1; }
+      VERSION="$2"
+      shift 2
+      ;;
+    --install-dir)
+      [[ $# -ge 2 ]] || { echo "openalice install: --install-dir requires a value" >&2; exit 1; }
+      INSTALL_ROOT="$2"
+      shift 2
+      ;;
+    --source)
+      [[ $# -ge 2 ]] || { echo "openalice install: --source requires a value" >&2; exit 1; }
+      SOURCE_DIR="$2"
+      shift 2
+      ;;
+    --no-modify-path)
+      MODIFY_PATH=0
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "openalice install: unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "$VERSION" == *".."* || ! "$VERSION" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+  echo "openalice install: unsupported version/ref: $VERSION" >&2
+  exit 1
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "openalice install: Node.js 20 or newer is required for the preview CLI." >&2
+  echo "Install Node.js, then run this installer again." >&2
+  exit 1
+fi
+
+NODE_MAJOR="$(node -p 'Number(process.versions.node.split(".")[0])')"
+if [[ "$NODE_MAJOR" -lt 20 ]]; then
+  echo "openalice install: Node.js 20 or newer is required (found $(node --version))." >&2
+  exit 1
+fi
+
+if [[ -z "$SOURCE_DIR" ]] && ! command -v curl >/dev/null 2>&1; then
+  echo "openalice install: curl is required." >&2
+  exit 1
+fi
+
+INSTALL_ROOT="${INSTALL_ROOT/#\~/$HOME}"
+BIN_DIR="$INSTALL_ROOT/bin"
+VERSIONS_DIR="$INSTALL_ROOT/cli-versions"
+SAFE_VERSION="${VERSION//\//_}"
+DESTINATION="$VERSIONS_DIR/$SAFE_VERSION"
+STAGING="$(mktemp -d "${TMPDIR:-/tmp}/openalice-cli.XXXXXX")"
+trap 'rm -rf "$STAGING"' EXIT
+
+mkdir -p "$STAGING/bin" "$STAGING/src" "$BIN_DIR" "$VERSIONS_DIR"
+
+FILES=(
+  "package.json"
+  "bin/openalice.mjs"
+  "src/local-start.mjs"
+  "src/runtime-client.mjs"
+  "src/ssh-connect.mjs"
+)
+
+if [[ -n "$SOURCE_DIR" ]]; then
+  SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
+  for file in "${FILES[@]}"; do
+    cp "$SOURCE_DIR/packages/cli/$file" "$STAGING/$file"
+  done
+else
+  BASE_URL="https://raw.githubusercontent.com/$REPOSITORY/$VERSION/packages/cli"
+  for file in "${FILES[@]}"; do
+    curl --fail --silent --show-error --location "$BASE_URL/$file" --output "$STAGING/$file"
+  done
+fi
+
+chmod +x "$STAGING/bin/openalice.mjs"
+node --check "$STAGING/bin/openalice.mjs"
+node --check "$STAGING/src/local-start.mjs"
+node --check "$STAGING/src/runtime-client.mjs"
+node --check "$STAGING/src/ssh-connect.mjs"
+
+rm -rf "$DESTINATION"
+mv "$STAGING" "$DESTINATION"
+trap - EXIT
+
+CLI_ENTRY="$DESTINATION/bin/openalice.mjs"
+printf -v quoted_cli_entry '%q' "$CLI_ENTRY"
+printf '#!/usr/bin/env bash\nexec node %s "$@"\n' "$quoted_cli_entry" > "$BIN_DIR/openalice"
+chmod +x "$BIN_DIR/openalice"
+
+WINDOWS_CLI_ENTRY="$CLI_ENTRY"
+if command -v cygpath >/dev/null 2>&1; then
+  WINDOWS_CLI_ENTRY="$(cygpath -w "$CLI_ENTRY")"
+fi
+WINDOWS_CLI_ENTRY="${WINDOWS_CLI_ENTRY//%/%%}"
+printf '@echo off\r\nnode "%s" %%*\r\n' "$WINDOWS_CLI_ENTRY" > "$BIN_DIR/openalice.cmd"
+
+path_present=0
+case ":$PATH:" in
+  *":$BIN_DIR:"*) path_present=1 ;;
+esac
+
+profile=""
+path_line=""
+if [[ "$MODIFY_PATH" -eq 1 && "$path_present" -eq 0 ]]; then
+  printf -v quoted_bin '%q' "$BIN_DIR"
+  case "${SHELL:-}" in
+    */zsh)
+      profile="$HOME/.zshrc"
+      path_line="export PATH=$quoted_bin:\$PATH"
+      ;;
+    */bash)
+      if [[ "$(uname -s)" == "Darwin" ]]; then profile="$HOME/.bash_profile"; else profile="$HOME/.bashrc"; fi
+      path_line="export PATH=$quoted_bin:\$PATH"
+      ;;
+    */fish)
+      profile="$HOME/.config/fish/config.fish"
+      path_line="fish_add_path $quoted_bin"
+      ;;
+  esac
+  if [[ -n "$profile" ]]; then
+    mkdir -p "$(dirname "$profile")"
+    touch "$profile"
+    if ! grep -Fqx "$path_line" "$profile"; then
+      printf '\n%s\n' "$path_line" >> "$profile"
+    fi
+  fi
+fi
+
+echo "OpenAlice CLI installed: $BIN_DIR/openalice"
+echo "Version: $VERSION"
+if [[ "$path_present" -eq 0 ]]; then
+  echo "For this shell, run:"
+  printf '  export PATH=%q:$PATH\n' "$BIN_DIR"
+  [[ -z "$profile" ]] || echo "Future shells will load it from $profile."
+fi
+echo "Then enter an OpenAlice checkout and run: openalice"
