@@ -129,7 +129,7 @@ function ExternalOrderMonitoringRow() {
   )
 }
 
-function KeylessDataSourcesRow({ ccxtPack, onPackInstalled }: {
+export function KeylessDataSourcesRow({ ccxtPack, onPackInstalled }: {
   ccxtPack?: BrokerPackStatus
   onPackInstalled: (status: BrokerPackStatus) => void
 }) {
@@ -239,7 +239,7 @@ interface EquitySummary {
   accounts: Array<{ id: string; label: string; equity: string; cash: string }>
 }
 
-function MissingBrokerPacksNotice({ packs, onInstalled }: {
+export function MissingBrokerPacksNotice({ packs, onInstalled }: {
   packs: BrokerPackStatus[]
   onInstalled: (status: BrokerPackStatus) => void
 }) {

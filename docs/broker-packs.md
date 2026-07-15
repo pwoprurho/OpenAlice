@@ -105,6 +105,11 @@ The release workflow runs this on macOS arm64, macOS x64, Windows x64, and
 Linux x64; publishes the files with the desktop release; mirrors them to the
 download CDN; and verifies every catalog and referenced archive.
 
+The build command also extracts every generated archive, verifies its catalog
+membership, size, SHA-256, package identity, and entry containment, then imports
+the entry in a clean Node process. `pnpm broker-packs:verify` repeats that
+acceptance check against an existing `dist/broker-packs/` directory.
+
 Desktop package acceptance rejects `ccxt`, `longbridge`, its native binding,
 and `@alpacahq/alpaca-trade-api` if they reappear under packaged
 `node_modules`. Adding a new Pack requires extending that assertion and the

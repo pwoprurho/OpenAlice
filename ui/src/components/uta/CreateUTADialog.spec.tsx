@@ -109,6 +109,49 @@ describe('CreateUTADialog', () => {
     expect(onPackInstalled).toHaveBeenCalledWith(expect.objectContaining({ engine: 'ccxt', installed: true }))
   })
 
+  it('skips the install step when support is already available', async () => {
+    setup()
+
+    await waitFor(() => expect(getBrokerPacks).toHaveBeenCalled())
+    fireEvent.click(screen.getByText('OKX'))
+
+    expect(screen.getByText('API key')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Install OKX support/i })).toBeNull()
+    expect(installBrokerPack).not.toHaveBeenCalled()
+  })
+
+  it('keeps a broken pack on the repair step and shows the load and repair errors', async () => {
+    getBrokerPacks.mockResolvedValueOnce({
+      packs: [{
+        engine: 'ccxt', installed: false, source: 'broken',
+        reason: 'Installed broker pack targets another OpenAlice version', requiredBy: [],
+      }],
+    })
+    installBrokerPack.mockRejectedValueOnce(new Error('checksum mismatch'))
+    setup()
+
+    await waitFor(() => expect(getBrokerPacks).toHaveBeenCalled())
+    fireEvent.click(screen.getByText('OKX'))
+
+    expect(screen.getByText(/targets another OpenAlice version/i)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Repair support' }))
+    await waitFor(() => expect(screen.getByText('checksum mismatch')).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Repair support' })).toBeTruthy()
+    expect(screen.queryByText('API key')).toBeNull()
+  })
+
+  it('still offers contextual installation when the initial status request fails', async () => {
+    getBrokerPacks.mockRejectedValueOnce(new Error('status endpoint unavailable'))
+    setup()
+
+    await waitFor(() => expect(getBrokerPacks).toHaveBeenCalled())
+    fireEvent.click(screen.getByText('OKX'))
+
+    expect(screen.getByText('status endpoint unavailable')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Install OKX support' })).toBeTruthy()
+    expect(screen.queryByText('API key')).toBeNull()
+  })
+
   it('surfaces an onboarding escape action from every wizard step', () => {
     const onEscape = vi.fn()
     setup({ escapeAction: { label: 'Continue without UTA', onClick: onEscape } })

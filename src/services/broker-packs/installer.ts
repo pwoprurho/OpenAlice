@@ -2,10 +2,10 @@
 
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { access, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import { basename, resolve } from 'node:path'
+import { basename, resolve, sep } from 'node:path'
 import * as tar from 'tar'
 import {
   BROKER_PACK_API_VERSION,
@@ -24,9 +24,11 @@ import {
   type BrokerPackReleaseCatalog,
 } from '../../core/broker-pack-catalog.js'
 import { getCurrentVersion } from '../../core/version.js'
+import { assertBrokerPackRequirements } from './requirements.js'
 
 const DEFAULT_BASE_URL = 'https://download.openalice.ai'
 const MAX_PACK_BYTES = 512 * 1024 * 1024
+const INSTALL_LOCK_STALE_MS = 10 * 60 * 1000
 
 export interface BrokerPackLocalStatus {
   engine: InstallableBrokerEngine | 'mock'
@@ -54,12 +56,7 @@ export async function installBrokerPack(engine: InstallableBrokerEngine): Promis
   const engineRoot = brokerPackEngineRoot(engine)
   const lock = resolve(engineRoot, '.install.lock')
   await mkdir(engineRoot, { recursive: true })
-  try {
-    await mkdir(lock)
-  } catch (err) {
-    if (isCode(err, 'EEXIST')) throw new Error(`Another ${engine} broker-pack install is already running`)
-    throw err
-  }
+  await acquireInstallLock(lock, engine)
 
   const workRoot = resolve(engineRoot, `.staging-${process.pid}-${Date.now()}`)
   try {
@@ -68,7 +65,10 @@ export async function installBrokerPack(engine: InstallableBrokerEngine): Promis
     const asset = catalog.packs.find((row) => row.engine === engine)
     if (!asset) throw new Error(`No ${engine} broker pack is published for ${process.platform}-${process.arch}`)
     validateAsset(asset)
-    validateRequirements(asset)
+    assertBrokerPackRequirements(asset, {
+      platform: process.platform,
+      glibcVersion: runtimeGlibcVersion(),
+    })
 
     await mkdir(workRoot, { recursive: true })
     const archivePath = resolve(workRoot, basename(asset.file))
@@ -150,15 +150,6 @@ function validateAsset(asset: BrokerPackReleaseAsset): void {
   if (!asset.entry || asset.entry.startsWith('/') || asset.entry.includes('..')) throw new Error('Invalid broker-pack entry')
 }
 
-function validateRequirements(asset: BrokerPackReleaseAsset): void {
-  const libc = asset.requirements?.libc
-  if (!libc) return
-  const runtime = runtimeGlibcVersion()
-  if (!runtime || compareNumericVersions(runtime, libc.minVersion) < 0) {
-    throw new Error(`${asset.engine} requires glibc ${libc.minVersion}+; this system reports ${runtime ?? 'an unknown libc'}`)
-  }
-}
-
 async function download(url: string, target: string, expectedSize: number): Promise<void> {
   const res = await fetch(url, { signal: AbortSignal.timeout(120_000) })
   if (!res.ok || !res.body) throw new Error(`Broker-pack download failed: HTTP ${res.status}`)
@@ -173,7 +164,13 @@ async function validateExtractedPackage(root: string, engine: InstallableBrokerE
   const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown }
   if (pkg.name !== `@traderalice/uta-broker-${engine}`) throw new Error(`Broker-pack package name mismatch for ${engine}`)
   if (pkg.version !== asset.version) throw new Error(`Broker-pack package version mismatch for ${engine}`)
-  await access(resolve(root, asset.entry))
+  const [realRoot, realEntry] = await Promise.all([
+    realpath(root),
+    realpath(resolve(root, asset.entry)),
+  ])
+  if (realEntry === realRoot || !realEntry.startsWith(`${realRoot}${sep}`)) {
+    throw new Error(`Broker-pack entry escapes the extracted package for ${engine}`)
+  }
 }
 
 function resolveCatalogUrl(): string {
@@ -197,16 +194,6 @@ function runtimeGlibcVersion(): string | null {
   return report.header?.glibcVersionRuntime ?? null
 }
 
-function compareNumericVersions(a: string, b: string): number {
-  const left = a.split('.').map(Number)
-  const right = b.split('.').map(Number)
-  for (let i = 0; i < Math.max(left.length, right.length); i++) {
-    const delta = (left[i] ?? 0) - (right[i] ?? 0)
-    if (delta !== 0) return delta
-  }
-  return 0
-}
-
 async function sha256File(path: string): Promise<string> {
   const hash = createHash('sha256')
   for await (const chunk of createReadStream(path)) hash.update(chunk)
@@ -219,4 +206,74 @@ function safePart(value: string): string {
 
 function isCode(err: unknown, code: string): boolean {
   return !!err && typeof err === 'object' && (err as NodeJS.ErrnoException).code === code
+}
+
+async function acquireInstallLock(lock: string, engine: InstallableBrokerEngine): Promise<void> {
+  try {
+    await createInstallLock(lock)
+    return
+  } catch (err) {
+    if (!isCode(err, 'EEXIST')) throw err
+  }
+
+  if (!await isRecoverableInstallLock(lock)) {
+    throw new Error(`Another ${engine} broker-pack install is already running`)
+  }
+
+  const stale = `${lock}.stale-${process.pid}-${Date.now()}`
+  try {
+    await rename(lock, stale)
+  } catch (err) {
+    if (isCode(err, 'ENOENT') || isCode(err, 'EEXIST') || isCode(err, 'ENOTEMPTY')) {
+      throw new Error(`Another ${engine} broker-pack install is already running`)
+    }
+    throw err
+  }
+  await rm(stale, { recursive: true, force: true })
+
+  try {
+    await createInstallLock(lock)
+  } catch (err) {
+    if (isCode(err, 'EEXIST')) throw new Error(`Another ${engine} broker-pack install is already running`)
+    throw err
+  }
+}
+
+async function createInstallLock(lock: string): Promise<void> {
+  await mkdir(lock)
+  try {
+    await writeFile(resolve(lock, 'owner.json'), JSON.stringify({
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+    }) + '\n')
+  } catch (err) {
+    await rm(lock, { recursive: true, force: true }).catch(() => undefined)
+    throw err
+  }
+}
+
+async function isRecoverableInstallLock(lock: string): Promise<boolean> {
+  try {
+    const owner = JSON.parse(await readFile(resolve(lock, 'owner.json'), 'utf8')) as { pid?: unknown }
+    if (Number.isSafeInteger(owner.pid) && Number(owner.pid) > 0) {
+      return !isProcessAlive(Number(owner.pid))
+    }
+  } catch {
+    // An interrupted owner write is recoverable only after the directory ages.
+  }
+  try {
+    return Date.now() - (await stat(lock)).mtimeMs >= INSTALL_LOCK_STALE_MS
+  } catch {
+    return true
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (pid === process.pid) return true
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return !isCode(err, 'ESRCH')
+  }
 }

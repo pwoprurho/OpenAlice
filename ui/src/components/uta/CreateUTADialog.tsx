@@ -53,6 +53,7 @@ export function CreateUTADialog({
   const [conflict, setConflict] = useState<BrokerConflict | null>(null)
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null)
   const [packStatuses, setPackStatuses] = useState<BrokerPackStatus[] | null>(null)
+  const [packStatusError, setPackStatusError] = useState('')
   const [installingPack, setInstallingPack] = useState(false)
 
   const preset = presets.find(p => p.id === presetId)
@@ -70,7 +71,7 @@ export function CreateUTADialog({
       .catch((err) => {
         if (!cancelled) {
           setPackStatuses([])
-          setError(err instanceof Error ? err.message : String(err))
+          setPackStatusError(err instanceof Error ? err.message : String(err))
         }
       })
     return () => { cancelled = true }
@@ -282,7 +283,7 @@ export function CreateUTADialog({
           <BrokerPackInstallPanel
             preset={preset}
             status={packStatus}
-            error={error}
+            error={error || packStatusError}
           />
         )}
 
