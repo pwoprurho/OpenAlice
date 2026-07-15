@@ -14,28 +14,34 @@ non-authoritative and lives in
 
 ## Product Boundary
 
-The installer always makes one small `openalice` command available. On Linux,
-it can also install the source Runtime's native build tools, but only after the
-user selects that option and approves the exact system command. By default it
-does not:
+The installer always makes the `openalice` command and OpenAlice's pinned Pi
+runtime available. Pi is installed inside the immutable OpenAlice release, not
+into npm's system or user-global prefix. On Linux, the installer can also
+install the source Runtime's native build tools, but only after the user
+selects that option and approves the exact system command. By default it does
+not:
 
 - clone the OpenAlice repository;
 - install or modify Electron;
 - start Alice, UTA, Connector Service, or a browser before separate consent;
-- configure credentials or native agent CLIs;
+- configure credentials or install Claude Code, Codex, opencode, or other
+  user-owned agent CLIs;
 - expose a public listener;
 - remove user data during an update.
 
 `--with-runtime-deps` is deliberately narrower than a general machine setup
 mode. It covers Git, Python 3, make, and a C++ compiler because pnpm may need to
 compile native Node modules such as `node-pty`. It does not install Node,
-optional Agent CLIs, broker SDKs, credentials, Docker, or Electron.
+additional Agent CLIs, broker SDKs, credentials, Docker, or Electron. Managed
+Pi is part of the baseline OpenAlice transaction, not a Runtime-tool option.
 
 The current browser-local distribution remains source-backed:
 
 ```text
 curl installer
-  └── installed openalice CLI
+  └── immutable OpenAlice CLI + managed Pi
+        ├── openalice command injects managed Pi into Guardian
+        ├── pi command exposes the same pinned runtime directly
         └── user-owned OpenAlice checkout
               └── localhost Runtime
 ```
@@ -53,9 +59,13 @@ The preview installer is served directly from the `dev` branch:
 curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install | bash
 ```
 
-It requires Node.js 20 or newer. The default source ref is `dev`, the default
-install root is `~/.openalice`, and the downloaded payload is the file set
-declared by `FILES` in the root `install` script.
+It requires Node.js 22.19.0 or newer, matching the pinned Pi runtime's engine
+floor. The default source ref is `dev`, the default install root is
+`~/.openalice`, and the downloaded OpenAlice payload is the file set declared
+by `FILES` in the root `install` script. The installer also downloads Pi's
+release-owned install manifest and lockfile for version `0.80.6`, verifies both
+against pinned SHA-256 values, and runs `npm ci --omit=dev --ignore-scripts` in
+the staged release.
 
 The preview URL is not yet a stable release channel. Do not present a mutable
 `dev` ref as a signed or immutable release. A stable installer needs release
@@ -79,7 +89,7 @@ assets and a release-owned authenticity chain; see
 - `scripts/remote-ssh-smoke.mjs` — local clean-host Server/SSH acceptance
   runner; its product contract belongs to [[docs/remote-access.md]].
 - `scripts/install-smoke/` — clean user, local HTTP fixture, automated smoke,
-  and manual playground.
+  manual playground, exact Pi release assets, and an offline npm fixture.
 - `docs/local-runtime.md` — behavior after the installed command starts a
   source-backed localhost Runtime.
 - `docs/reference/install-script/README.md` — Claude Code and Codex research;
@@ -108,7 +118,9 @@ preflight
   -> optional system package command
   -> installer lock
   -> download or local copy into staging
-  -> syntax, manifest, and executable validation
+  -> SHA-256 verification of pinned Pi manifest and lockfile
+  -> npm ci for managed Pi inside staging
+  -> syntax, manifest, Pi version, and executable validation
   -> content identity
   -> immutable release directory
   -> validate temporary launchers
@@ -130,7 +142,8 @@ but it cannot publish a partial OpenAlice CLI release.
 Preflight validates:
 
 - the requested Git ref syntax and length;
-- Node.js availability and major version;
+- Node.js availability and the exact `>=22.19.0` floor;
+- npm availability for the staged managed-Pi install;
 - `curl` for remote installs, or CLI sources for `--source` installs;
 - target paths and shell-profile choice;
 - whether Git, Python 3, make, and a C++ compiler are already available;
@@ -138,8 +151,9 @@ Preflight validates:
   available when Runtime-tool installation is selected;
 - whether another `openalice` currently resolves earlier on `PATH`.
 
-The visible plan includes action, source, ref, install root, command path, shell
-change, Runtime-tool action, exact package-manager command when selected, and
+The visible plan includes action, source, ref, install root, both command paths,
+the pinned Pi version and source, the exact Pi npm command, shell change,
+Runtime-tool action, exact system package-manager command when selected, and
 any PATH conflict. A check that only reads the system may happen before consent;
 no installer-owned filesystem mutation may happen there.
 
@@ -151,7 +165,7 @@ no installer-owned filesystem mutation may happen there.
 | Interactive default with tools ready | Print the plan and ask `Continue with this install? [y/N]`; only an explicit `y` proceeds |
 | Blank or `n` | Exit successfully without changing files |
 | No TTY and no `--yes` | Exit with code 2 before creating the install root |
-| `--yes` | Approve only the actions already selected by flags; never implies Runtime tools and never starts the Runtime |
+| `--yes` | Approve the baseline CLI + managed Pi transaction and only the extra actions selected by flags; never implies Runtime tools and never starts the Runtime |
 | `--with-runtime-deps` | Select missing Linux build tools; does not bypass the final confirmation |
 | `--plan` | Print the same plan and exit without opening a prompt or changing files |
 | Interactive install inside a checkout | After success, separately ask `Start OpenAlice now? [y/N]` |
@@ -201,6 +215,12 @@ Downloads first land in a temporary `openalice-cli.*` directory outside the
 visible command path. A failed or interrupted download therefore leaves the
 previous installed command untouched.
 
+Managed Pi is installed under `managed/pi/` in that same staging tree. npm
+never receives `--global` and never writes OpenAlice's Pi into a host prefix.
+The pinned lockfile supplies registry integrity values for the dependency tree;
+install scripts are disabled. A failure leaves the previous content-addressed
+OpenAlice and Pi release visible.
+
 ### Validation and content identity
 
 Before a release becomes visible, the installer:
@@ -210,7 +230,9 @@ Before a release becomes visible, the installer:
    string version;
 3. executes the staged CLI with `--version` and compares its result with the
    package manifest;
-4. hashes the ordered payload filenames and bytes with SHA-256 and uses the
+4. verifies the Pi install manifest and lockfile against the SHA-256 values
+   pinned in the installer, then requires the staged Pi CLI to report `0.80.6`;
+5. hashes the ordered OpenAlice payload plus both Pi install files with SHA-256 and uses the
    first 16 hex characters as its content identity.
 
 The resulting directory is:
@@ -219,17 +241,22 @@ The resulting directory is:
 <install-root>/cli-versions/<safe-ref>-<content-id>/
 ```
 
-Installing identical content for the same ref reuses the existing directory.
-If a directory claims that identity but its files no longer hash correctly, it
-is preserved as `<release>.damaged.<pid>` and replaced with the validated
-staging tree. The installer does not silently destroy the damaged evidence.
+Installing identical content for the same ref reuses the existing directory
+only when both the content hash and executable Pi version still match. If a
+directory claims that identity but its files no longer hash correctly or its
+managed Pi runtime is missing/damaged, it is preserved as
+`<release>.damaged.<pid>` and replaced with the validated staging tree. The
+installer does not silently destroy the damaged evidence.
 
 ### Atomic visible-command switch
 
-The installer writes temporary `openalice` and `openalice.cmd` launchers in the
-target bin directory. Both point to the complete immutable release. It executes
-the temporary shell launcher before replacing either visible command, then
-moves the launchers into place within the same directory.
+The installer writes temporary `openalice`, `openalice.cmd`, `pi`, and `pi.cmd`
+launchers in the target bin directory. All point to the complete immutable
+release. It executes both temporary shell launchers before replacing any
+visible command, then moves the launchers into place within the same directory.
+The OpenAlice launchers export `OPENALICE_MANAGED_PI_PATH` and
+`OPENALICE_MANAGED_PI_NODE_PATH`; foreground and detached Guardian trees
+therefore inherit the pinned runtime without relying on shell-profile reloads.
 
 This gives updates a simple safety property: a visible launcher points to the
 complete old release or the complete new release, never to a half-written
@@ -247,9 +274,12 @@ With the default installer and Runtime roots:
 ~/.openalice/
 ├── bin/
 │   ├── openalice
-│   └── openalice.cmd
+│   ├── openalice.cmd
+│   ├── pi
+│   └── pi.cmd
 ├── cli-versions/
 │   ├── dev-<content-id>/
+│   │   └── managed/pi/     # pinned npm runtime inside the immutable release
 │   └── <older-ref-or-content>/
 ├── .cli-install.lock/       # present only while an installer owns it
 ├── data/                    # application state, not installer debris
@@ -329,12 +359,16 @@ Environment inputs:
 | `OPENALICE_VERSION` | Default source ref when `--version` is absent |
 | `OPENALICE_INSTALL_DIR` | Default install root when `--install-dir` is absent |
 | `OPENALICE_INSTALL_BASE_URL` | Override payload base URL for local fixtures and installer tests |
+| `OPENALICE_PI_RELEASE_BASE_URL` | Override the pinned Pi release-asset base for installer tests |
+| `OPENALICE_PI_SOURCE_DIR` | Read the exact Pi manifest/lock assets from a local fixture |
+| `OPENALICE_NPM_BIN` | Use a single alternate npm executable in installer tests |
 | `NO_COLOR` | Disable installer color output |
 | `HOME`, `SHELL`, `PATH`, `TERM` | Standard environment used for paths, profile detection, conflicts, and color |
 
-`OPENALICE_INSTALL_BASE_URL` is a test/development seam, not a user-facing
-mirror selector. A real mirror design must define equivalent authenticity and
-version semantics before becoming public API.
+The three Pi overrides and `OPENALICE_INSTALL_BASE_URL` are test/development
+seams, not user-facing mirror or package-manager selectors. The same pinned
+SHA-256 checks still apply to local Pi assets. A real mirror design must define
+equivalent authenticity and version semantics before becoming public API.
 
 ## Authenticity Boundary
 
@@ -373,6 +407,8 @@ pnpm -F @traderalice/openalice-cli test
 The unit suite covers:
 
 - installed layout and a runnable launcher;
+- pinned managed Pi layout, version, direct launcher, and OpenAlice env
+  injection;
 - `--plan` no-write behavior;
 - refusal without TTY or `--yes`;
 - blank-input cancellation;
@@ -388,19 +424,22 @@ pnpm test:install:docker
 
 The smoke builds a non-root Debian fixture with an empty home, Node and curl,
 no global pnpm, and no external network during the run. A local HTTP server
-exercises the same remote-download branch as `curl | bash`. It verifies:
+exercises the same OpenAlice remote-download branch as `curl | bash`; exact
+release Pi assets plus a strict fake npm exercise the offline install contract.
+It verifies:
 
 - unattended refusal before the install root exists;
 - stale-lock recovery and lock cleanup;
 - downloaded payload equality;
-- default install does not invoke a package manager;
+- default install invokes only the declared non-global managed-Pi npm command
+  and does not invoke a system package manager;
 - `--with-runtime-deps --plan` shows the exact elevated command without
   running it;
 - approved Runtime-tool setup invokes the expected package list and re-probes
   the resulting commands;
 - installed `server status --json` execution and inclusion of every reachable
   Server/remote module;
-- runnable shell and CMD launchers;
+- runnable OpenAlice/Pi shell and CMD launchers plus managed-Pi env injection;
 - idempotent managed PATH configuration;
 - identical-release reuse;
 - ref switching without deleting the prior release.
@@ -422,6 +461,8 @@ with an explicit `y`, and run at least:
 ```bash
 command -v openalice
 openalice --version
+command -v pi
+pi --version
 cat ~/.bashrc
 curl -fsSL "$OPENALICE_INSTALL_URL" | bash -s -- --plan
 curl -fsSL "$OPENALICE_INSTALL_URL" | bash -s -- --plan --with-runtime-deps
@@ -454,8 +495,9 @@ Before publishing or promoting a change that affects the installer:
 
 1. Confirm the CLI payload list in `install` and `packages/cli/package.json`
    still match the imports reachable from `bin/openalice.mjs`.
-2. Confirm the intended source ref and CLI package version. Do not accidentally
-   advertise mutable `dev` as a stable release.
+2. Confirm the intended source ref, CLI package version, Pi version, release
+   asset hashes, lockfile engine floor, and root/CLI Node engines. Do not
+   accidentally advertise mutable `dev` as a stable release.
 3. Run the fast installer tests and the full repository-required checks.
 4. Run `pnpm test:install:docker` locally.
 5. Walk `pnpm test:install:docker --interactive` as a human.
@@ -478,6 +520,8 @@ Docker installer smoke remains a required manual gate under
 | `Another OpenAlice CLI installer is running` | Check the recorded PID and wait for the live installer; do not delete a lock owned by a live process |
 | `Removing a stale CLI installer lock` | The prior owner no longer exists; the installer recovered before downloading |
 | `PATH warning` or the wrong command runs | Use the printed absolute command, inspect `command -v openalice`, and reload the managed profile block |
+| npm is missing or Node is below 22.19.0 | Install the complete Node.js 22 LTS distribution; OpenAlice rejects the host before consent instead of publishing a broken Pi runtime |
+| Pi asset SHA-256 check fails | Stop. The pinned release metadata and downloaded asset disagree; do not bypass the check |
 | A `.damaged.<pid>` directory appears | A content-addressed release no longer matched its identity; preserve it for diagnosis while the validated replacement becomes active |
 | CLI installs but localhost startup fails | Installation succeeded; continue with [[docs/local-runtime.md]] and Guardian/runtime diagnostics |
 | Native PowerShell/CMD bootstrap is unavailable | Use the complete Electron installer, WSL, or Git Bash until a reviewed native bootstrap exists |
@@ -489,8 +533,9 @@ These decisions are intentional:
 - localhost-first browser use is the initial CLI distribution contract;
 - Electron remains a complete, independent desktop distribution;
 - installation and service start always require separate consent;
-- optional native agent CLIs and other dependencies are selected in a later,
-  inspectable setup layer, not silently installed by the curl bootstrap;
+- managed Pi is the explicit baseline agent shown in every install plan;
+  Claude Code, Codex, opencode, and other user-owned CLIs remain optional and
+  belong to a later inspectable setup layer;
 - Claude Code installer source may be read as public behavior but is not
   vendored; Codex's Apache-2.0 installer is the inspectable engineering
   reference, while OpenAlice keeps an independent implementation;

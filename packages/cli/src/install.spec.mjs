@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
-import { access, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,6 +11,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 const execFileAsync = promisify(execFile)
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..')
+const fakeNpm = join(repositoryRoot, 'scripts/install-smoke/fake-npm.sh')
+const piAssets = join(repositoryRoot, 'scripts/install-smoke/pi-assets')
 const temporaryPaths = []
 
 afterEach(async () => {
@@ -17,6 +20,29 @@ afterEach(async () => {
 })
 
 describe.skipIf(process.platform === 'win32')('OpenAlice CLI installer', () => {
+  it('keeps the CLI and desktop managed-Pi pins aligned', async () => {
+    const installer = await readFile(join(repositoryRoot, 'install'), 'utf8')
+    const desktopVendor = await readFile(join(repositoryRoot, 'scripts/vendor-managed-runtime.mjs'), 'utf8')
+    const packageBytes = await readFile(join(piAssets, 'package.json'))
+    const lockBytes = await readFile(join(piAssets, 'package-lock.json'))
+    const piManifest = JSON.parse(packageBytes.toString('utf8'))
+    const rootManifest = JSON.parse(await readFile(join(repositoryRoot, 'package.json'), 'utf8'))
+    const cliManifest = JSON.parse(await readFile(join(repositoryRoot, 'packages/cli/package.json'), 'utf8'))
+
+    expect(installer).toContain('MINIMUM_NODE_VERSION="22.19.0"')
+    expect(installer).toContain('PI_VERSION="0.80.6"')
+    expect(desktopVendor).toContain("const PI_VERSION = '0.80.6'")
+    expect(piManifest).toEqual(expect.objectContaining({
+      version: '0.80.6',
+      engines: { node: '>=22.19.0' },
+      dependencies: { '@earendil-works/pi-coding-agent': '0.80.6' },
+    }))
+    expect(rootManifest.engines.node).toBe('>=22.19.0')
+    expect(cliManifest.engines.node).toBe('>=22.19.0')
+    expect(sha256(packageBytes)).toBe('ee080db64c3732daea5547bd6d9809465ffa236ef6099051e64a16753e48b795')
+    expect(sha256(lockBytes)).toBe('0f409bf498507f93bfbde3dc6f2b4c83bc58bdea2e2f5eabf3053cc2a81568d4')
+  })
+
   it('installs a runnable, versioned CLI without touching the shell profile', async () => {
     const home = await mkdtemp(join(tmpdir(), 'openalice-install-test-'))
     temporaryPaths.push(home)
@@ -28,21 +54,28 @@ describe.skipIf(process.platform === 'win32')('OpenAlice CLI installer', () => {
       '--install-dir', installRoot,
       '--no-modify-path',
       '--yes',
-    ], { env: { ...process.env, HOME: home } })
+    ], { env: installerEnv(home) })
 
     expect(installed.stdout).toContain('Local Runtime CLI installer')
     expect(installed.stdout).toContain('System build tools are optional and listed before consent')
     expect(installed.stdout).toContain('No system packages were changed')
     expect(installed.stdout).toContain('Install plan')
-    expect(installed.stdout).toContain('OpenAlice CLI is ready')
+    expect(installed.stdout).toContain('Managed agent  Pi 0.80.6')
+    expect(installed.stdout).toContain('OpenAlice and Pi are ready')
     const releases = await readdir(join(installRoot, 'cli-versions'))
     expect(releases).toHaveLength(1)
     expect(releases[0]).toMatch(/^test_ref-[a-f0-9]{16}$/)
     await expect(access(join(installRoot, 'cli-versions', releases[0], 'bin', 'openalice.mjs'))).resolves.toBeUndefined()
+    await expect(access(join(installRoot, 'cli-versions', releases[0], 'managed', 'pi', 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'cli.js'))).resolves.toBeUndefined()
     await expect(access(join(installRoot, 'bin', 'openalice.cmd'))).resolves.toBeUndefined()
+    await expect(access(join(installRoot, 'bin', 'pi.cmd'))).resolves.toBeUndefined()
 
     const result = await execFileAsync(join(installRoot, 'bin', 'openalice'), ['--version'])
     expect(result.stdout.trim()).toBe('0.2.0')
+    const pi = await execFileAsync(join(installRoot, 'bin', 'pi'), ['--version'])
+    expect(pi.stdout.trim()).toBe('0.80.6')
+    const launcher = await readFile(join(installRoot, 'bin', 'openalice'), 'utf8')
+    expect(launcher).toContain('OPENALICE_MANAGED_PI_PATH=')
   })
 
   it('can show the complete plan without creating the install root', async () => {
@@ -56,7 +89,7 @@ describe.skipIf(process.platform === 'win32')('OpenAlice CLI installer', () => {
       '--install-dir', installRoot,
       '--no-modify-path',
       '--plan',
-    ], { env: { ...process.env, HOME: home } })
+    ], { env: installerEnv(home) })
 
     expect(result.stdout).toContain('Install plan')
     expect(result.stdout).toContain('Plan complete')
@@ -74,7 +107,7 @@ describe.skipIf(process.platform === 'win32')('OpenAlice CLI installer', () => {
       '--version', 'unattended',
       '--install-dir', installRoot,
       '--no-modify-path',
-    ], { env: { ...process.env, HOME: home } })).rejects.toMatchObject({
+    ], { env: installerEnv(home) })).rejects.toMatchObject({
       code: 2,
       stderr: expect.stringContaining('--yes'),
     })
@@ -113,7 +146,7 @@ describe.skipIf(process.platform === 'win32')('OpenAlice CLI installer', () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.output).toContain('Continue with this install?')
-    expect(result.output).toContain('OpenAlice CLI is ready')
+    expect(result.output).toContain('OpenAlice and Pi are ready')
     expect(result.output).toContain('Start OpenAlice now?')
     expect(result.output).toContain('Start it when you are ready')
     await expect(access(join(installRoot, 'bin', 'openalice'))).resolves.toBeUndefined()
@@ -134,7 +167,7 @@ describe.skipIf(process.platform === 'win32')('OpenAlice CLI installer', () => {
       '--install-dir', installRoot,
       '--no-modify-path',
       '--yes',
-    ], { env: { ...process.env, HOME: home } })).rejects.toMatchObject({
+    ], { env: installerEnv(home) })).rejects.toMatchObject({
       stderr: expect.stringContaining('Another OpenAlice CLI installer is running'),
     })
 
@@ -149,8 +182,7 @@ function runInstallerInPty(args, { home, reply }) {
       cols: 120,
       rows: 32,
       env: {
-        ...process.env,
-        HOME: home,
+        ...installerEnv(home),
         SHELL: '/bin/bash',
         TERM: 'xterm-256color',
       },
@@ -179,4 +211,17 @@ function runInstallerInPty(args, { home, reply }) {
       resolvePromise({ exitCode, signal, output })
     })
   })
+}
+
+function installerEnv(home) {
+  return {
+    ...process.env,
+    HOME: home,
+    OPENALICE_NPM_BIN: fakeNpm,
+    OPENALICE_PI_SOURCE_DIR: piAssets,
+  }
+}
+
+function sha256(bytes) {
+  return createHash('sha256').update(bytes).digest('hex')
 }

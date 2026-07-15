@@ -21,7 +21,7 @@
     "test": "vitest run --root ../.. --config vitest.config.ts --project node packages/cli/src"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.19.0"
   },
   "license": "AGPL-3.0-only",
   "publishConfig": {

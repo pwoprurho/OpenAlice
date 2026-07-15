@@ -22,6 +22,8 @@ ln -s fake-package-manager "$runtime_fixture_bin/apt-get"
 ln -s fake-package-manager "$runtime_fixture_bin/sudo"
 export OPENALICE_RUNTIME_DEPS_SHIM_DIR="$runtime_fixture_bin"
 export OPENALICE_RUNTIME_DEPS_LOG="$runtime_deps_log"
+export OPENALICE_NPM_BIN="/fixture/fake-npm.sh"
+export OPENALICE_PI_SOURCE_DIR="/fixture/pi-assets"
 export PATH="$runtime_fixture_bin:$PATH"
 node /fixture/static-server.mjs >"$server_log" 2>&1 &
 server_pid=$!
@@ -74,6 +76,7 @@ install_version smoke-v1
 bin_dir="$HOME/.openalice/bin"
 versions_dir="$HOME/.openalice/cli-versions"
 [[ "$($bin_dir/openalice --version)" == "0.2.0" ]] || fail "installed CLI version check failed"
+[[ "$($bin_dir/pi --version)" == "0.80.6" ]] || fail "installed managed Pi version check failed"
 "$bin_dir/openalice" --help | grep -Fq "OpenAlice CLI" || fail "installed CLI help check failed"
 server_status="$($bin_dir/openalice server status --home "$HOME/openalice-server-smoke" --json)"
 node -e '
@@ -81,9 +84,14 @@ const status = JSON.parse(process.argv[1]);
 if (status.class !== "absent" || status.state !== "absent") process.exit(1);
 ' "$server_status" || fail "installed CLI server status check failed"
 [[ -f "$bin_dir/openalice.cmd" ]] || fail "Windows launcher was not installed"
+[[ -f "$bin_dir/pi.cmd" ]] || fail "Windows managed Pi launcher was not installed"
 [[ ! -e "$HOME/.openalice/.cli-install.lock" ]] || fail "installer lock was not released"
 v1_release="$(find "$versions_dir" -mindepth 1 -maxdepth 1 -type d -name 'smoke-v1-*' -print -quit)"
 [[ -n "$v1_release" && -f "$v1_release/bin/openalice.mjs" ]] || fail "content-addressed CLI release was not installed"
+[[ -f "$v1_release/managed/pi/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" ]] \
+  || fail "content-addressed managed Pi runtime was not installed"
+grep -Fq "OPENALICE_MANAGED_PI_PATH" "$bin_dir/openalice" \
+  || fail "OpenAlice launcher does not inject the managed Pi path"
 cmp /fixture/packages/cli/src/local-start.mjs "$v1_release/src/local-start.mjs" \
   || fail "downloaded CLI file differs from the fixture"
 cmp /fixture/packages/cli/src/remote.mjs "$v1_release/src/remote.mjs" \

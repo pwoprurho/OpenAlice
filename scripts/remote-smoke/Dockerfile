@@ -11,6 +11,8 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update \
 COPY install /fixture/install
 COPY packages/cli /fixture/packages/cli
 COPY scripts/install-smoke/static-server.mjs /fixture/static-server.mjs
+COPY scripts/install-smoke/fake-npm.sh /fixture/fake-npm.sh
+COPY scripts/install-smoke/pi-assets /fixture/pi-assets
 COPY scripts/guardian/control-server.mjs /fixture/OpenAlice/scripts/guardian/control-server.mjs
 COPY scripts/remote-smoke/fixture-guardian.mjs /fixture/OpenAlice/scripts/guardian/prod.mjs
 COPY scripts/remote-smoke/fixture-package.json /fixture/OpenAlice/package.json
@@ -23,13 +25,15 @@ RUN mkdir -p \
     /fixture/OpenAlice/services/connector/dist \
     /fixture/OpenAlice/packages/guardian-runtime/dist \
     /fixture/OpenAlice/node_modules \
+  && cp /fixture/pi-assets/package.json /fixture/pi-assets/pi-coding-agent-install-package.json \
+  && cp /fixture/pi-assets/package-lock.json /fixture/pi-assets/pi-coding-agent-install-package-lock.json \
   && touch \
     /fixture/OpenAlice/dist/main.js \
     /fixture/OpenAlice/ui/dist/index.html \
     /fixture/OpenAlice/services/uta/dist/uta.js \
     /fixture/OpenAlice/services/connector/dist/connector.cjs \
     /fixture/OpenAlice/packages/guardian-runtime/dist/index.js \
-  && chmod +x /fixture/entrypoint.sh \
+  && chmod +x /fixture/entrypoint.sh /fixture/fake-npm.sh \
   && chown -R smoke:smoke /fixture/OpenAlice /home/smoke
 
 EXPOSE 22

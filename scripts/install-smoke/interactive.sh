@@ -28,6 +28,8 @@ ln -s fake-package-manager "$runtime_fixture_bin/apt-get"
 ln -s fake-package-manager "$runtime_fixture_bin/sudo"
 export OPENALICE_RUNTIME_DEPS_SHIM_DIR="$runtime_fixture_bin"
 export OPENALICE_RUNTIME_DEPS_LOG="$runtime_deps_log"
+export OPENALICE_NPM_BIN="/fixture/fake-npm.sh"
+export OPENALICE_PI_SOURCE_DIR="/fixture/pi-assets"
 export PATH="$runtime_fixture_bin:$PATH"
 
 for _ in $(seq 1 100); do
@@ -52,7 +54,7 @@ if [[ -x "$HOME/.openalice/bin/openalice" ]]; then
 fi
 
 printf '\n[install-playground] You are now in the container after the installer.\n'
-printf 'Try: command -v openalice; openalice --version; cat ~/.bashrc\n'
+printf 'Try: command -v openalice; openalice --version; pi --version; cat ~/.bashrc\n'
 printf 'Re-run: curl -fsSL "$OPENALICE_INSTALL_URL" | bash\n'
 printf 'Preview only: curl -fsSL "$OPENALICE_INSTALL_URL" | bash -s -- --plan\n'
 printf 'Runtime plan: curl -fsSL "$OPENALICE_INSTALL_URL" | bash -s -- --plan --with-runtime-deps\n'

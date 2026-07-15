@@ -25,9 +25,13 @@ removes the CLI/toolchain prerequisite; it does not bundle a model account or
 API key. User-installed Claude Code, Codex, opencode, or Pi remain supported as
 additional runtimes and may use their own subscription login or local config.
 
-Source/dev and Docker installs are different deployment shapes. They do not
-inherit the packaged desktop's managed-agent promise and may require an agent
-CLI to be installed in the host environment or image.
+Plain `pnpm dev` and Docker installs are different deployment shapes. They do
+not inherit the packaged desktop's managed-agent promise and may require an
+agent CLI in the host environment or image. The curl-installed CLI is a third
+shape: it installs the same pinned Pi version under the OpenAlice install root
+and injects `OPENALICE_MANAGED_PI_*` when it starts a source-backed Runtime. It
+still relies on host Node/npm and does not inherit Electron's managed
+Git/Bash/search-tool payload.
 
 ### Desktop data-location selection
 
@@ -184,9 +188,12 @@ remain at the OpenAlice/UTA boundary.
   `[managedPiNodePath, managedPiPath, ...args]` and writes the managed shell
   path into `.pi-agent/settings.json` during Windows Workspace bootstrap.
 
-The managed npm runtime is not added to `PATH` as a fake `pi` binary; the Pi
-adapter owns its explicit launch command. User-installed standalone Pi still
-uses the normal `pi` command path.
+The packaged Electron managed npm runtime is not added to `PATH` as a fake
+`pi` binary; the Pi adapter owns its explicit launch command. The curl
+installer additionally creates `<install-root>/bin/pi` as a direct launcher to
+the same immutable managed runtime while the `openalice` launcher still uses
+the explicit env contract. User-installed standalone Pi in plain source/dev
+continues to use the normal `pi` command path.
 
 Pi project trust follows the runtime boundary:
 
@@ -201,9 +208,10 @@ Pi project trust follows the runtime boundary:
   its normal `trust.json` state;
 - packaged headless sessions pass `--approve` because no user is present and
   OpenAlice controls the pinned managed Pi and Workspace contents;
-- source/dev headless sessions do not receive version-specific approval flags.
-  The Pi executable on `PATH`, its version, and its upgrade policy belong to
-  the contributor running `pnpm dev`.
+- plain `pnpm dev` headless sessions do not receive version-specific approval
+  flags. The Pi executable on `PATH`, its version, and its upgrade policy
+  belong to the contributor. A curl-installed CLI Runtime has an explicit
+  managed Pi path and therefore follows the pinned managed approval contract.
 
 Do not add external-Pi version probing or upgrade UX to preserve flags used by
 the packaged runtime. Compatibility for the packaged app is maintained by

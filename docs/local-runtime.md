@@ -41,10 +41,12 @@ The current installer distributes the small JavaScript CLI from the `dev` ref:
 curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install | bash
 ```
 
-The preview requires Node.js 20 or newer. It always installs the small CLI and,
-when explicitly selected, can install missing Linux Git/Python/make/C++ tools
-needed to build the source Runtime. It does not clone OpenAlice, write
-application state, install Electron, or start a service without separate
+The preview requires Node.js 22.19.0 or newer. It always installs the small CLI
+plus OpenAlice's pinned Pi runtime inside the same immutable install release;
+the two visible commands are `openalice` and `pi`. When explicitly selected,
+it can also install missing Linux Git/Python/make/C++ tools needed to build the
+source Runtime. It does not clone OpenAlice, write application state, install
+Electron, configure a provider credential, or start a service without separate
 consent. The curl entry targets macOS, Linux, WSL, and Git Bash; native Windows
 desktop distribution remains the signed Electron installer. The complete
 consent, update, filesystem, PATH, authenticity, and test contract lives in
@@ -142,14 +144,16 @@ future standalone bundle changes preparation, not these ownership semantics.
 
 Keep bootstrap observable and layered:
 
-1. The shell installer validates Node and makes the `openalice` command
-   available. Its optional, explicit Linux Runtime plan installs only Git,
-   Python 3, make, and a C++ compiler.
+1. The shell installer validates Node/npm and makes the `openalice` command plus
+   pinned managed Pi available. Pi stays under the OpenAlice install root; the
+   `openalice` launcher injects its explicit runtime paths into Guardian. The
+   optional, explicit Linux Runtime plan installs only Git, Python 3, make, and
+   a C++ compiler.
 2. Local start validates the source and built artifacts. Before pnpm or
    Corepack preparation, it rechecks those native build tools and points Linux
    users back to `--with-runtime-deps` instead of exposing a late `node-gyp`
    failure.
-3. A later guided setup layer may present optional native Agent CLIs,
+3. A later guided setup layer may present additional native Agent CLIs,
    installing only the user's selections with explicit commands, versions,
    and retry status.
 4. A future release asset can replace the source/build requirement with a
@@ -161,8 +165,10 @@ standalone-bundle Runtime providers differ in preparation, not in ownership,
 status, stop, browser, or SSH behavior.
 
 Do not silently place every optional agent runtime into Electron or the curl
-installer. The same dependency plan must remain inspectable and independently
-retryable, and Electron's managed-runtime policy continues to belong to
+installer. Managed Pi is the one visible baseline; Claude Code, Codex,
+opencode, and future runtimes remain user choices. The same dependency plan
+must remain inspectable and independently retryable, and Electron's
+managed-runtime policy continues to belong to
 [[docs/managed-workspace-runtime.md]].
 
 ## Security and Network Invariants

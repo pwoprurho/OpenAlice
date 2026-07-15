@@ -10,6 +10,7 @@ import {
   buildRemoteCheckoutProbeCommand,
   buildRemoteInstallCommand,
   buildRemoteServerStartCommand,
+  buildRemoteServerStopCommand,
   buildRemoteSshArgs,
   connectRemote,
   createRemotePlan,
@@ -60,7 +61,7 @@ describe('OpenAlice managed remote connector', () => {
     const options = parseRemoteArgs(['host', '--app-dir', '/srv/OpenAlice'])
     const plan = createRemotePlan(options, {
       platform: { os: 'linux', label: 'Linux x86_64' },
-      nodeVersion: 'v22.0.0',
+      nodeVersion: 'v22.23.1',
       hasCurl: true,
       sourceCheckoutPresent: true,
       sourceArtifactsReady: false,
@@ -70,10 +71,12 @@ describe('OpenAlice managed remote connector', () => {
       status: null,
     })
     expect(plan.installCli).toBe(true)
+    expect(plan.installManagedPi).toBe(true)
     expect(plan.installRuntimeDeps).toBe(true)
     expect(plan.startServer).toBe(true)
     expect(plan.mutations).toEqual([
       'install remote OpenAlice CLI',
+      'install managed Pi 0.80.6',
       'install source Runtime build tools',
       'start remote OpenAlice Server',
     ])
@@ -94,6 +97,22 @@ describe('OpenAlice managed remote connector', () => {
     expect(plan.blocker).toBe('')
   })
 
+  it('installs missing managed Pi and plans a self-owned Server restart from its recorded source', () => {
+    const remote = compatibleRemote()
+    remote.piPath = null
+    remote.piVersion = null
+    remote.piCompatible = false
+    const plan = createRemotePlan(parseRemoteArgs(['host']), remote)
+
+    expect(plan.installManagedPi).toBe(true)
+    expect(plan.restartServer).toBe(true)
+    expect(plan.serverAppDir).toBe('/srv/OpenAlice')
+    expect(plan.mutations).toEqual([
+      'install managed Pi 0.80.6',
+      'restart remote OpenAlice Server with managed Pi 0.80.6',
+    ])
+  })
+
   it('does not install build tools when a source Runtime is already built', () => {
     const plan = createRemotePlan(parseRemoteArgs(['host', '--app-dir', '/srv/OpenAlice']), {
       ...missingRemote(),
@@ -102,6 +121,7 @@ describe('OpenAlice managed remote connector', () => {
     expect(plan.installRuntimeDeps).toBe(false)
     expect(plan.mutations).toEqual([
       'install remote OpenAlice CLI',
+      'install managed Pi 0.80.6',
       'start remote OpenAlice Server',
     ])
   })
@@ -115,6 +135,13 @@ describe('OpenAlice managed remote connector', () => {
     expect(plan.installRuntimeDeps).toBe(false)
   })
 
+  it('rejects Node 22 releases below the managed Pi engine floor', () => {
+    const remote = missingRemote()
+    remote.nodeVersion = 'v22.18.0'
+    const plan = createRemotePlan(parseRemoteArgs(['host', '--app-dir', '/srv/OpenAlice']), remote)
+    expect(plan.blocker).toContain('22.19.0')
+  })
+
   it('blocks a missing checkout before proposing system-package changes', () => {
     const plan = createRemotePlan(parseRemoteArgs(['host', '--app-dir', '/srv/missing']), {
       ...missingRemote(),
@@ -123,7 +150,10 @@ describe('OpenAlice managed remote connector', () => {
     })
     expect(plan.blocker).toContain('Clone it first')
     expect(plan.installRuntimeDeps).toBe(false)
-    expect(plan.mutations).toEqual(['install remote OpenAlice CLI'])
+    expect(plan.mutations).toEqual([
+      'install remote OpenAlice CLI',
+      'install managed Pi 0.80.6',
+    ])
   })
 
   it('uses the detected Server port and blocks an explicit mismatch', () => {
@@ -149,6 +179,8 @@ describe('OpenAlice managed remote connector', () => {
     expect(command).toContain("'/srv/Alice'\\''s home'")
     expect(command).toContain('OPENALICE_PREPARE_OUTPUT=compact')
     expect(command).toContain('TURBO_TELEMETRY_DISABLED=1')
+    expect(buildRemoteServerStopCommand(options, "/opt/Alice's bin/openalice"))
+      .toContain("'/opt/Alice'\\''s bin/openalice' server stop")
     expect(buildRemoteSshArgs(options, command)).toEqual(expect.arrayContaining([
       '-i', '/tmp/id key', 'host', command,
     ]))
@@ -240,6 +272,35 @@ describe('OpenAlice managed remote connector', () => {
 
     expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining('remote install completed before the disconnect'))
     expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining('remote Server became ready before the disconnect'))
+  })
+
+  it('installs Pi, gracefully restarts an existing CLI Server, and reconnects', async () => {
+    const options = parseRemoteArgs(['host', '--yes', '--no-open'])
+    const initial = compatibleRemote()
+    initial.piPath = null
+    initial.piVersion = null
+    initial.piCompatible = false
+    const absent = compatibleRemote({ class: 'absent', state: 'absent', owner: null, endpoints: {} })
+    const probeRemote = vi.fn()
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(compatibleRemote())
+      .mockResolvedValueOnce(absent)
+      .mockResolvedValueOnce(compatibleRemote())
+    const runRemote = vi.fn(async () => '')
+    const connectTunnel = vi.fn(async () => 0)
+
+    await expect(connectRemote(options, {
+      probeRemote,
+      runRemote,
+      connectTunnel,
+      stdout: { write: vi.fn() },
+    })).resolves.toBe(0)
+
+    expect(runRemote).toHaveBeenCalledTimes(3)
+    expect(runRemote.mock.calls[0][1]).toContain('openalice-install')
+    expect(runRemote.mock.calls[1][1]).toContain('server stop')
+    expect(runRemote.mock.calls[2][1]).toContain("--app-dir '/srv/OpenAlice'")
+    expect(connectTunnel).toHaveBeenCalledOnce()
   })
 
   it('remembers the successful local port per remote target and reuses it next time', async () => {
@@ -350,8 +411,11 @@ function commandChild({ code, stdout = '', stderr = '' }) {
 function missingRemote() {
   return {
     platform: { os: 'linux', label: 'Linux x86_64' },
-    nodeVersion: 'v22.0.0',
+    nodeVersion: 'v22.23.1',
     hasCurl: true,
+    piPath: null,
+    piVersion: null,
+    piCompatible: false,
     sourceCheckoutPresent: true,
     sourceArtifactsReady: false,
     runtimeBuildToolsMissing: ['git', 'python3', 'make', 'cxx'],
@@ -365,8 +429,11 @@ function missingRemote() {
 function compatibleRemote(statusOverrides = {}) {
   return {
     platform: { os: 'linux', label: 'Linux x86_64' },
-    nodeVersion: 'v22.0.0',
+    nodeVersion: 'v22.23.1',
     hasCurl: true,
+    piPath: '/home/alice/.openalice/bin/pi',
+    piVersion: '0.80.6',
+    piCompatible: true,
     sourceCheckoutPresent: null,
     sourceArtifactsReady: null,
     runtimeBuildToolsMissing: [],
@@ -378,7 +445,7 @@ function compatibleRemote(statusOverrides = {}) {
       class: 'running',
       state: 'running',
       home: '/home/alice/.openalice',
-      owner: { surface: 'cli-server', pid: 99 },
+      owner: { surface: 'cli-server', pid: 99, launchRoot: '/srv/OpenAlice' },
       endpoints: { web: 'http://127.0.0.1:47331' },
       components: { alice: 'ready', uta: 'disabled', connector: 'disabled' },
       capabilities: ['runtime.stop'],

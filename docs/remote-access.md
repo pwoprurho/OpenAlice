@@ -605,7 +605,11 @@ Runtime model.
 ### Stage 2 — managed source-backed remote (implemented baseline)
 
 - `openalice remote` plan/apply orchestration;
-- probe and bootstrap the existing CLI with explicit consent;
+- probe and bootstrap the existing CLI plus pinned managed Pi with explicit
+  consent;
+- when an older healthy CLI Server lacks managed Pi, infer its recorded source
+  root, install Pi, stop that self-owned Server through `runtime.stop`, and
+  restart it so the Guardian tree inherits the managed runtime;
 - start/reuse the remote Server;
 - reuse the existing SSH loopback tunnel;
 - leave the Server alive after disconnect;
@@ -661,6 +665,16 @@ open across the final disconnect first showed its normal fetch failure, then
 recovered in place after the tunnel returned on the same origin. The Server was
 stopped through its control endpoint and the Sandbox was destroyed.
 
+A later user-facing Railway Sandbox completed the missing authenticated Agent
+loop. Pi `0.80.6` was installed on the live remote host, OpenAlice selected Pi
+as the Workspace default, injected a sealed LongCat-compatible provider
+credential through the normal AI Provider flow, and started a trusted Pi TUI
+without the project-trust deadlock. The prompt `请只回复：远程 OpenAlice Pi
+已经工作` returned exactly `远程 OpenAlice Pi 已经工作` through the macOS
+browser, SSH tunnel, remote PTY, remote Pi process, and provider round trip.
+This validates the functional Pi path; representative 20/80/150 ms network
+shaping remains a separate latency observation.
+
 ### Stage 3 — terminal transport optimization
 
 - build only if Stage 2 measurements justify it;
@@ -707,6 +721,7 @@ stopped through its control endpoint and the Sandbox was destroyed.
 | Scenario | Required result |
 |---|---|
 | compatible remote CLI/Server | reuses both without mutation |
+| compatible CLI Server but managed Pi missing | plan names Pi install and self-owned Server restart; refreshed Server reports pinned Pi |
 | missing remote CLI, interactive | shows plan; default no leaves host unchanged |
 | missing remote CLI, non-interactive | fails unless explicit approval is present |
 | incompatible running Server | explains process impact before update/restart |
@@ -769,5 +784,6 @@ behavior.
 - simultaneous writable control from multiple clients;
 - replacing Electron with a browser wrapper;
 - replacing Shell or native Agent TUIs with Pi/WebPi;
-- silently cloning OpenAlice or installing optional Agent CLIs on a remote host;
+- silently cloning OpenAlice or installing optional additional Agent CLIs on a
+  remote host; pinned managed Pi is part of the visible baseline plan;
 - moving broker credentials, account state, or trading writes out of UTA.

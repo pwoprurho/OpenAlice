@@ -58,6 +58,9 @@
     "url": "git+https://github.com/TraderAlice/OpenAlice.git"
   },
   "homepage": "https://traderalice.com",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "packageManager": "pnpm@11.7.0",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
