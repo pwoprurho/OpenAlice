@@ -100,7 +100,13 @@ export class WorkspaceRegistry {
     }
     this.byId.set(ws.id, ws);
     this.tagsInUse.add(ws.tag);
-    await this.flush();
+    try {
+      await this.flush();
+    } catch (error) {
+      this.byId.delete(ws.id);
+      this.tagsInUse.delete(ws.tag);
+      throw error;
+    }
   }
 
   async remove(id: string): Promise<WorkspaceMeta | undefined> {

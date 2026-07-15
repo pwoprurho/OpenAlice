@@ -716,6 +716,7 @@ export function createWorkspaceRoutes(
         : result.code === 'unknown_template' ? 400
         : result.code === 'unknown_agent' ? 400
         : result.code === 'tag_in_use' ? 409
+        : result.code === 'insufficient_storage' ? 507
         : 500;
       return c.json({
         error: result.code,

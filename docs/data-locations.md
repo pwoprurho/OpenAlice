@@ -108,6 +108,12 @@ to the same physical location. A missing saved location is not silently
 re-created as an empty folder. The user must reconnect it, choose another
 location, or explicitly use the default.
 
+Workspace creation keeps a small free-space safety margin before bootstrap.
+An `ENOSPC` during bootstrap, context injection, git initialization, or
+registry persistence returns `insufficient_storage` without registering the
+Workspace. Partial directories are removed with bounded retries or renamed as
+failed bootstrap quarantine directories when Windows still holds a handle.
+
 ## Load-Bearing Code and Verification
 
 - `apps/desktop/src/data-home.ts` — preference parsing, canonicalization,

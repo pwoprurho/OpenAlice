@@ -59,6 +59,7 @@ export interface CreateError {
     | 'invalid_tag'
     | 'tag_in_use'
     | 'tag_required'
+    | 'insufficient_storage'
     | 'bootstrap_failed'
     | 'unknown_template'
     | 'unknown_agent'
