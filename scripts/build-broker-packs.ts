@@ -87,6 +87,7 @@ try {
 
 function deployPackage(packageName: string, target: string): void {
   const result = runPnpmSync([
+    '--config.node-linker=hoisted',
     '--config.inject-workspace-packages=true',
     '--filter', packageName,
     'deploy', '--prod', target,

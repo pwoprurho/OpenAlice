@@ -55,6 +55,7 @@ describe.runIf(process.platform === 'win32')('runPnpmSync on Windows', () => {
 
   it('preserves a leading config flag, spaces, and cmd metacharacters', () => {
     const result = runPnpmSync([
+      '--config.node-linker=hoisted',
       '--config.inject-workspace-packages=true',
       'exec',
       'node',

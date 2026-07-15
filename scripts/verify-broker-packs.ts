@@ -3,7 +3,7 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
+import { access, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -113,6 +113,20 @@ async function verifyPortableDeployment(
     if (name.startsWith('@traderalice/')) throw new Error(`${engine} archive contains an unbundled workspace dependency: ${name}`)
     if (typeof spec !== 'string' || /^(?:file|link|workspace):/.test(spec) || spec.includes('file://')) {
       throw new Error(`${engine} archive contains a non-portable dependency spec: ${name}@${String(spec)}`)
+    }
+
+    const dependencyPath = resolve(packageRoot, 'node_modules', ...name.split('/'))
+    let dependencyStat
+    try {
+      dependencyStat = await lstat(dependencyPath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`${engine} archive is missing declared dependency: ${name}`)
+      }
+      throw error
+    }
+    if (!dependencyStat.isDirectory() || dependencyStat.isSymbolicLink()) {
+      throw new Error(`${engine} archive dependency must be a portable directory: ${name}`)
     }
   }
 

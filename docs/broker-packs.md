@@ -100,7 +100,7 @@ the native module is loaded instead of crashing UTA with `ERR_DLOPEN_FAILED`.
 ## Release Assets
 
 `pnpm broker-packs:build` builds all wrapper packages, runs `pnpm deploy --prod`
-for each engine, and emits:
+with the hoisted node linker for each engine, and emits:
 
 ```text
 OpenAlice-Broker-Packs-<version>-<platform>-<arch>.json
@@ -117,6 +117,10 @@ workspace/deployment metadata, then imports the entry in a clean Node process.
 Archive files are written synchronously because Pack assembly is serial and
 the asynchronous tar file writer can leave an unresolved top-level await on
 Windows after `pnpm deploy` exits.
+The hoisted deployment is also part of the portability contract: every
+manifest dependency must be an actual directory in the archive, not a pnpm
+symlink or Windows junction. Verification rejects missing or linked dependency
+roots before attempting the clean-process import.
 `pnpm broker-packs:verify` repeats that acceptance check against an existing
 `dist/broker-packs/` directory. Release scripts invoke Corepack's `pnpm.cmd`
 through `ComSpec` on Windows; the shared runner supplies the already-quoted
