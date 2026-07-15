@@ -57,6 +57,7 @@ printf '\n[install-playground] You are now in the container after the installer.
 printf 'Try: command -v openalice; openalice --version; pi --version; cat ~/.bashrc\n'
 printf 'Re-run: curl -fsSL "$OPENALICE_INSTALL_URL" | bash\n'
 printf 'Preview only: curl -fsSL "$OPENALICE_INSTALL_URL" | bash -s -- --plan\n'
+printf 'Dev channel: curl -fsSL "$OPENALICE_INSTALL_URL" | bash -s -- --plan --branch dev\n'
 printf 'Runtime plan: curl -fsSL "$OPENALICE_INSTALL_URL" | bash -s -- --plan --with-runtime-deps\n'
 printf 'Package log: cat "$OPENALICE_RUNTIME_DEPS_LOG"\n'
 printf 'After a successful re-run: source ~/.bashrc\n'

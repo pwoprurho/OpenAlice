@@ -36,6 +36,7 @@ cleanup() {
 trap cleanup EXIT
 
 installer_url="http://127.0.0.1:18080/install"
+export OPENALICE_INSTALL_URL="$installer_url"
 for _ in $(seq 1 100); do
   if curl --fail --silent --output /dev/null "$installer_url"; then
     break
@@ -53,29 +54,47 @@ curl --fail --silent --output /dev/null "$installer_url" || {
 
 export OPENALICE_INSTALL_BASE_URL="http://127.0.0.1:18080/packages/cli/"
 
-if curl -fsSL "$installer_url" | bash -s -- --version smoke-unattended >"$refusal_log" 2>&1; then
+default_plan="$(curl -fsSL "$installer_url" | bash -s -- --plan)"
+grep -Fq "Branch         master" <<<"$default_plan" || fail "installer did not default to master"
+dev_plan="$(curl -fsSL "$installer_url" | bash -s -- --plan --branch dev)"
+grep -Fq "Branch         dev" <<<"$dev_plan" || fail "installer did not accept an explicit dev branch"
+if curl -fsSL "$installer_url" | bash -s -- --plan --branch dev --version v0.2.0 >"$refusal_log" 2>&1; then
+  fail "installer accepted both --branch and --version"
+fi
+grep -Fq "Use only one of --branch or --version" "$refusal_log" \
+  || fail "installer selector conflict was not explained"
+
+if curl -fsSL "$installer_url" | bash -s -- --branch smoke-unattended >"$refusal_log" 2>&1; then
   fail "installer proceeded without interactive or explicit approval"
 fi
 grep -Fq -- "--yes" "$refusal_log" || fail "unattended refusal did not explain --yes"
 [[ ! -e "$HOME/.openalice" ]] || fail "unattended refusal changed the install root"
 
-install_version() {
-  local version="$1"
-  curl -fsSL "$installer_url" | bash -s -- --yes --version "$version"
+install_branch() {
+  local branch="$1"
+  curl -fsSL "$installer_url" | bash -s -- --yes --branch "$branch"
 }
 
-install_version_with_runtime_deps() {
-  local version="$1"
-  curl -fsSL "$installer_url" | bash -s -- --yes --with-runtime-deps --version "$version"
+install_branch_with_runtime_deps() {
+  local branch="$1"
+  curl -fsSL "$installer_url" | bash -s -- --yes --with-runtime-deps --branch "$branch"
 }
 
 mkdir -p "$HOME/.openalice/.cli-install.lock"
 printf '99999999\n' > "$HOME/.openalice/.cli-install.lock/pid"
-install_version smoke-v1
+install_branch smoke-v1
 
 bin_dir="$HOME/.openalice/bin"
 versions_dir="$HOME/.openalice/cli-versions"
 [[ "$($bin_dir/openalice --version)" == "0.2.0" ]] || fail "installed CLI version check failed"
+install_source="$($bin_dir/openalice version --json)"
+node -e '
+const value = JSON.parse(process.argv[1]);
+if (value.version !== "0.2.0") process.exit(1);
+if (value.installSource?.cliVersion !== "0.2.0") process.exit(1);
+if (value.installSource?.selector?.kind !== "branch" || value.installSource?.selector?.value !== "smoke-v1") process.exit(1);
+if (value.installSource?.installerUrl !== "http://127.0.0.1:18080/install") process.exit(1);
+' "$install_source" || fail "installed CLI did not preserve its install source"
 [[ "$($bin_dir/pi --version)" == "0.80.6" ]] || fail "installed managed Pi version check failed"
 "$bin_dir/openalice" --help | grep -Fq "OpenAlice CLI" || fail "installed CLI help check failed"
 server_status="$($bin_dir/openalice server status --home "$HOME/openalice-server-smoke" --json)"
@@ -88,12 +107,15 @@ if (status.class !== "absent" || status.state !== "absent") process.exit(1);
 [[ ! -e "$HOME/.openalice/.cli-install.lock" ]] || fail "installer lock was not released"
 v1_release="$(find "$versions_dir" -mindepth 1 -maxdepth 1 -type d -name 'smoke-v1-*' -print -quit)"
 [[ -n "$v1_release" && -f "$v1_release/bin/openalice.mjs" ]] || fail "content-addressed CLI release was not installed"
+[[ -f "$v1_release/install-source.json" ]] || fail "content-addressed CLI release omitted install source metadata"
 [[ -f "$v1_release/managed/pi/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" ]] \
   || fail "content-addressed managed Pi runtime was not installed"
 grep -Fq "OPENALICE_MANAGED_PI_PATH" "$bin_dir/openalice" \
   || fail "OpenAlice launcher does not inject the managed Pi path"
 cmp /fixture/packages/cli/src/local-start.mjs "$v1_release/src/local-start.mjs" \
   || fail "downloaded CLI file differs from the fixture"
+cmp /fixture/packages/cli/src/install-source.mjs "$v1_release/src/install-source.mjs" \
+  || fail "downloaded install-source module differs from the fixture"
 cmp /fixture/packages/cli/src/remote.mjs "$v1_release/src/remote.mjs" \
   || fail "downloaded Remote CLI file differs from the fixture"
 cmp /fixture/packages/cli/src/runtime-deps.mjs "$v1_release/src/runtime-deps.mjs" \
@@ -110,12 +132,12 @@ path_count="$(grep -Fxc "$expected_path_line" "$HOME/.bashrc" || true)"
   || fail "installer did not add its managed PATH block"
 
 [[ ! -s "$runtime_deps_log" ]] || fail "default install changed system packages"
-runtime_plan="$(curl -fsSL "$installer_url" | bash -s -- --plan --with-runtime-deps --version smoke-v1)"
+runtime_plan="$(curl -fsSL "$installer_url" | bash -s -- --plan --with-runtime-deps --branch smoke-v1)"
 grep -Fq "sudo apt-get update && sudo apt-get install -y git python3 make g++" <<<"$runtime_plan" \
   || fail "runtime dependency plan did not show the exact package command"
 [[ ! -s "$runtime_deps_log" ]] || fail "runtime dependency plan changed system packages"
 
-install_version_with_runtime_deps smoke-v1
+install_branch_with_runtime_deps smoke-v1
 grep -Fxq "apt-get update" "$runtime_deps_log" || fail "runtime dependency setup skipped apt-get update"
 grep -Fxq "apt-get install -y git python3 make g++" "$runtime_deps_log" \
   || fail "runtime dependency setup used the wrong package list"
@@ -123,13 +145,13 @@ for tool in git python3 make g++; do
   command -v "$tool" >/dev/null 2>&1 || fail "runtime dependency setup did not provide $tool"
 done
 
-install_version smoke-v1
+install_branch smoke-v1
 path_count="$(grep -Fxc "$expected_path_line" "$HOME/.bashrc" || true)"
 [[ "$path_count" == "1" ]] || fail "repeat install duplicated the shell PATH entry"
 v1_count="$(find "$versions_dir" -mindepth 1 -maxdepth 1 -type d -name 'smoke-v1-*' | wc -l | tr -d ' ')"
 [[ "$v1_count" == "1" ]] || fail "repeat install duplicated an identical CLI release"
 
-install_version smoke-v2
+curl -fsSL "$installer_url" | bash -s -- --yes --version smoke-v2
 v2_release="$(find "$versions_dir" -mindepth 1 -maxdepth 1 -type d -name 'smoke-v2-*' -print -quit)"
 [[ -d "$v1_release" ]] || fail "version switch removed the previous CLI"
 [[ -n "$v2_release" && -d "$v2_release" ]] || fail "version switch did not install the new CLI"

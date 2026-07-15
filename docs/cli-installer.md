@@ -56,16 +56,18 @@ weaken or silently replace the Electron lane.
 The preview installer is served directly from the `dev` branch:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install | bash
+curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install | bash -s -- --branch dev
 ```
 
 It requires Node.js 22.19.0 or newer, matching the pinned Pi runtime's engine
-floor. The default source ref is `dev`, the default install root is
-`~/.openalice`, and the downloaded OpenAlice payload is the file set declared
-by `FILES` in the root `install` script. The installer also downloads Pi's
-release-owned install manifest and lockfile for version `0.80.6`, verifies both
-against pinned SHA-256 values, and runs `npm ci --omit=dev --ignore-scripts` in
-the staged release.
+floor. With no selector, the installer targets the stable `master` branch;
+development dogfooding must opt into `--branch dev`. `--version` is reserved
+for a tag or commit, and the two selectors are mutually exclusive. The default
+install root is `~/.openalice`, and the downloaded OpenAlice payload is the file
+set declared by `FILES` in the root `install` script. The installer also
+downloads Pi's release-owned install manifest and lockfile for version `0.80.6`,
+verifies both against pinned SHA-256 values, and runs
+`npm ci --omit=dev --ignore-scripts` in the staged release.
 
 The preview URL is not yet a stable release channel. Do not present a mutable
 `dev` ref as a signed or immutable release. A stable installer needs release
@@ -78,6 +80,8 @@ assets and a release-owned authenticity chain; see
 - `packages/cli/package.json` — CLI version, engine requirement, bin entry, and
   published file list.
 - `packages/cli/bin/openalice.mjs` — installed command entry point.
+- `packages/cli/src/install-source.mjs` — validated installation-source
+  metadata used when managed remote reproduces the invoking CLI.
 - `packages/cli/src/server{,-control}.mjs` — detached lifecycle and the
   Guardian control client.
 - `packages/cli/src/remote.mjs` — consent-first managed SSH orchestration.
@@ -121,6 +125,7 @@ preflight
   -> SHA-256 verification of pinned Pi manifest and lockfile
   -> npm ci for managed Pi inside staging
   -> syntax, manifest, Pi version, and executable validation
+  -> record branch/tag/commit installer provenance
   -> content identity
   -> immutable release directory
   -> validate temporary launchers
@@ -141,7 +146,7 @@ but it cannot publish a partial OpenAlice CLI release.
 
 Preflight validates:
 
-- the requested Git ref syntax and length;
+- the requested branch/tag/commit selector syntax and length;
 - Node.js availability and the exact `>=22.19.0` floor;
 - npm availability for the staged managed-Pi install;
 - `curl` for remote installs, or CLI sources for `--source` installs;
@@ -151,11 +156,11 @@ Preflight validates:
   available when Runtime-tool installation is selected;
 - whether another `openalice` currently resolves earlier on `PATH`.
 
-The visible plan includes action, source, ref, install root, both command paths,
-the pinned Pi version and source, the exact Pi npm command, shell change,
-Runtime-tool action, exact system package-manager command when selected, and
-any PATH conflict. A check that only reads the system may happen before consent;
-no installer-owned filesystem mutation may happen there.
+The visible plan includes action, source, branch or version, install root, both
+command paths, the pinned Pi version and source, the exact Pi npm command,
+shell change, Runtime-tool action, exact system package-manager command when
+selected, and any PATH conflict. A check that only reads the system may happen
+before consent; no installer-owned filesystem mutation may happen there.
 
 ### Consent contract
 
@@ -232,8 +237,15 @@ Before a release becomes visible, the installer:
    package manifest;
 4. verifies the Pi install manifest and lockfile against the SHA-256 values
    pinned in the installer, then requires the staged Pi CLI to report `0.80.6`;
-5. hashes the ordered OpenAlice payload plus both Pi install files with SHA-256 and uses the
-   first 16 hex characters as its content identity.
+5. writes `install-source.json` with the CLI version, selected branch/tag/commit,
+   and installer URL that produced this CLI;
+6. hashes the ordered OpenAlice payload, install-source metadata, and both Pi
+   install files with SHA-256 and uses the first 16 hex characters as its
+   content identity.
+
+That metadata is also returned by `openalice version --json`. Managed
+`openalice remote` uses it to invoke the same ordinary installer source and
+selector on a remote host. `remote` has no independent branch/version option.
 
 The resulting directory is:
 
@@ -278,8 +290,10 @@ With the default installer and Runtime roots:
 │   ├── pi
 │   └── pi.cmd
 ├── cli-versions/
-│   ├── dev-<content-id>/
+│   ├── master-<content-id>/
+│   │   ├── install-source.json
 │   │   └── managed/pi/     # pinned npm runtime inside the immutable release
+│   ├── dev-<content-id>/   # only after an explicit --branch dev install
 │   └── <older-ref-or-content>/
 ├── .cli-install.lock/       # present only while an installer owns it
 ├── data/                    # application state, not installer debris
@@ -338,7 +352,8 @@ Public options:
 
 | Option | Meaning |
 |---|---|
-| `--version <git-ref>` | Select a tag, branch, or commit for remote payloads and the installed source-ref label |
+| `--branch <name>` | Select a named Git branch (default: `master`) |
+| `--version <git-ref>` | Select a Git tag or commit; mutually exclusive with `--branch` |
 | `--install-dir <path>` | Override the OpenAlice install/user root |
 | `--with-runtime-deps` | Include missing Linux Git/Python/make/C++ source-build tools in the approved plan |
 | `--no-modify-path` | Install launchers without editing a shell profile |
@@ -356,8 +371,8 @@ Environment inputs:
 
 | Variable | Meaning |
 |---|---|
-| `OPENALICE_VERSION` | Default source ref when `--version` is absent |
 | `OPENALICE_INSTALL_DIR` | Default install root when `--install-dir` is absent |
+| `OPENALICE_INSTALL_URL` | Record the distributor-owned installer URL in installed provenance; used by fixtures and future CDN entry points |
 | `OPENALICE_INSTALL_BASE_URL` | Override payload base URL for local fixtures and installer tests |
 | `OPENALICE_PI_RELEASE_BASE_URL` | Override the pinned Pi release-asset base for installer tests |
 | `OPENALICE_PI_SOURCE_DIR` | Read the exact Pi manifest/lock assets from a local fixture |
@@ -365,19 +380,21 @@ Environment inputs:
 | `NO_COLOR` | Disable installer color output |
 | `HOME`, `SHELL`, `PATH`, `TERM` | Standard environment used for paths, profile detection, conflicts, and color |
 
-The three Pi overrides and `OPENALICE_INSTALL_BASE_URL` are test/development
-seams, not user-facing mirror or package-manager selectors. The same pinned
-SHA-256 checks still apply to local Pi assets. A real mirror design must define
-equivalent authenticity and version semantics before becoming public API.
+The three Pi overrides, `OPENALICE_INSTALL_URL`, and
+`OPENALICE_INSTALL_BASE_URL` are distributor/test seams, not user-facing
+branch selectors. The same pinned SHA-256 checks still apply to local Pi
+assets. A real mirror design must define equivalent authenticity and version
+semantics before becoming public API.
 
 ## Authenticity Boundary
 
 The current content identity protects update layout and detects accidental or
 local modification. It does not prove who supplied the downloaded files. The
-script is normally fetched from the mutable `dev` URL and then chooses payload
-files from the requested raw GitHub ref. Even when that payload ref is an
-immutable commit, a hash computed by the same downloaded installer is not an
-independent trust anchor.
+current preview script is fetched from the mutable `dev` URL with an explicit
+`--branch dev`, while the selector-free release contract targets `master`.
+Both paths choose payload files from the selected raw GitHub ref. Even when
+that payload ref is an immutable commit, a hash computed by the same downloaded
+installer is not an independent trust anchor.
 
 Do not describe the preview as cryptographically verified. A stable release
 path should establish this chain:
@@ -406,6 +423,8 @@ pnpm -F @traderalice/openalice-cli test
 
 The unit suite covers:
 
+- default-`master`, explicit-branch, tag/commit, and selector-conflict behavior;
+- persisted install provenance and `openalice version --json`;
 - installed layout and a runnable launcher;
 - pinned managed Pi layout, version, direct launcher, and OpenAlice env
   injection;
@@ -428,6 +447,7 @@ exercises the same OpenAlice remote-download branch as `curl | bash`; exact
 release Pi assets plus a strict fake npm exercise the offline install contract.
 It verifies:
 
+- default `master`, explicit `dev`, and mutually exclusive selectors;
 - unattended refusal before the install root exists;
 - stale-lock recovery and lock cleanup;
 - downloaded payload equality;
@@ -461,10 +481,12 @@ with an explicit `y`, and run at least:
 ```bash
 command -v openalice
 openalice --version
+openalice version --json
 command -v pi
 pi --version
 cat ~/.bashrc
 curl -fsSL "$OPENALICE_INSTALL_URL" | bash -s -- --plan
+curl -fsSL "$OPENALICE_INSTALL_URL" | bash -s -- --plan --branch dev
 curl -fsSL "$OPENALICE_INSTALL_URL" | bash -s -- --plan --with-runtime-deps
 cat "$OPENALICE_RUNTIME_DEPS_LOG"
 ```

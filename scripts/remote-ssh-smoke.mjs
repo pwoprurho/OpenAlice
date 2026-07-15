@@ -90,9 +90,10 @@ try {
     HOME: localHome,
     PATH: `${fixtureBin}:${process.env.PATH ?? ''}`,
     OPENALICE_REMOTE_SMOKE_SSH_CONFIG: join(sshDir, 'config'),
-    OPENALICE_REMOTE_INSTALL_URL: 'http://127.0.0.1:18080/install',
-    OPENALICE_REMOTE_INSTALL_BASE_URL: 'http://127.0.0.1:18080/packages/cli/',
-    OPENALICE_REMOTE_VERSION: 'remote-smoke',
+    OPENALICE_REMOTE_TEST_INSTALL_URL: 'http://127.0.0.1:18080/install',
+    OPENALICE_REMOTE_TEST_INSTALL_SELECTOR_KIND: 'version',
+    OPENALICE_REMOTE_TEST_INSTALL_SELECTOR_VALUE: 'remote-smoke',
+    OPENALICE_REMOTE_TEST_INSTALL_BASE_URL: 'http://127.0.0.1:18080/packages/cli/',
   }
   await waitForSsh(remoteTarget, smokeEnv)
 

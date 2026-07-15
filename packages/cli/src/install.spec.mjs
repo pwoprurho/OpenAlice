@@ -29,6 +29,7 @@ describe.skipIf(process.platform === 'win32')('OpenAlice CLI installer', () => {
     const rootManifest = JSON.parse(await readFile(join(repositoryRoot, 'package.json'), 'utf8'))
     const cliManifest = JSON.parse(await readFile(join(repositoryRoot, 'packages/cli/package.json'), 'utf8'))
 
+    expect(installer).toContain('DEFAULT_BRANCH="master"')
     expect(installer).toContain('MINIMUM_NODE_VERSION="22.19.0"')
     expect(installer).toContain('PI_VERSION="0.80.6"')
     expect(desktopVendor).toContain("const PI_VERSION = '0.80.6'")
@@ -41,6 +42,32 @@ describe.skipIf(process.platform === 'win32')('OpenAlice CLI installer', () => {
     expect(cliManifest.engines.node).toBe('>=22.19.0')
     expect(sha256(packageBytes)).toBe('ee080db64c3732daea5547bd6d9809465ffa236ef6099051e64a16753e48b795')
     expect(sha256(lockBytes)).toBe('0f409bf498507f93bfbde3dc6f2b4c83bc58bdea2e2f5eabf3053cc2a81568d4')
+  })
+
+  it('defaults to master, accepts an explicit branch, and rejects multiple selectors', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'openalice-install-selectors-'))
+    temporaryPaths.push(home)
+    const installer = join(repositoryRoot, 'install')
+    const commonArgs = [
+      '--source', repositoryRoot,
+      '--install-dir', join(home, '.openalice'),
+      '--no-modify-path',
+      '--plan',
+    ]
+
+    const stable = await execFileAsync('bash', [installer, ...commonArgs], { env: installerEnv(home) })
+    expect(stable.stdout).toContain('Branch         master')
+
+    const preview = await execFileAsync('bash', [installer, ...commonArgs, '--branch', 'dev'], { env: installerEnv(home) })
+    expect(preview.stdout).toContain('Branch         dev')
+
+    await expect(execFileAsync('bash', [installer,
+      ...commonArgs,
+      '--branch', 'dev',
+      '--version', 'v0.2.0',
+    ], { env: installerEnv(home) })).rejects.toMatchObject({
+      stderr: expect.stringContaining('Use only one of --branch or --version'),
+    })
   })
 
   it('installs a runnable, versioned CLI without touching the shell profile', async () => {
@@ -72,6 +99,18 @@ describe.skipIf(process.platform === 'win32')('OpenAlice CLI installer', () => {
 
     const result = await execFileAsync(join(installRoot, 'bin', 'openalice'), ['--version'])
     expect(result.stdout.trim()).toBe('0.2.0')
+    const versionInfo = await execFileAsync(join(installRoot, 'bin', 'openalice'), ['version', '--json'])
+    expect(JSON.parse(versionInfo.stdout)).toEqual({
+      version: '0.2.0',
+      installSource: {
+        schemaVersion: 1,
+        repository: 'TraderAlice/OpenAlice',
+        cliVersion: '0.2.0',
+        selector: { kind: 'version', value: 'test/ref' },
+        installerUrl: 'https://raw.githubusercontent.com/TraderAlice/OpenAlice/test/ref/install',
+      },
+    })
+    await expect(access(join(installRoot, 'cli-versions', releases[0], 'install-source.json'))).resolves.toBeUndefined()
     const pi = await execFileAsync(join(installRoot, 'bin', 'pi'), ['--version'])
     expect(pi.stdout.trim()).toBe('0.80.6')
     const launcher = await readFile(join(installRoot, 'bin', 'openalice'), 'utf8')

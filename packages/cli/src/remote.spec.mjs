@@ -19,6 +19,14 @@ import {
   runSshCommand,
 } from './remote.mjs'
 
+const masterInstallSource = {
+  schemaVersion: 1,
+  repository: 'TraderAlice/OpenAlice',
+  cliVersion: '0.2.0',
+  selector: { kind: 'branch', value: 'master' },
+  installerUrl: 'https://raw.githubusercontent.com/TraderAlice/OpenAlice/master/install',
+}
+
 describe('OpenAlice managed remote connector', () => {
   it('parses an explicit SSH and remote Runtime surface', () => {
     expect(parseRemoteArgs([
@@ -55,6 +63,14 @@ describe('OpenAlice managed remote connector', () => {
     expect(() => parseRemoteArgs(['-oProxyCommand=bad'])).toThrow('Unknown option')
     expect(() => parseRemoteArgs(['host name'])).toThrow('unsupported characters')
     expect(() => parseRemoteArgs(['host', '--app-dir', '~/OpenAlice'])).toThrow('absolute path')
+    expect(() => parseRemoteArgs(['host', '--branch', 'dev'])).toThrow('Unknown option')
+  })
+
+  it('builds a remote installer command from local provenance, not remote flags', () => {
+    const command = buildRemoteInstallCommand(masterInstallSource)
+    expect(command).toContain('OPENALICE_INSTALL_URL=')
+    expect(command).toContain("--branch 'master'")
+    expect(command).not.toContain('--version')
   })
 
   it('plans install and start separately, with no implicit takeover', () => {
@@ -95,6 +111,28 @@ describe('OpenAlice managed remote connector', () => {
     expect(plan.installCli).toBe(false)
     expect(plan.startServer).toBe(false)
     expect(plan.blocker).toBe('')
+  })
+
+  it('updates a protocol-compatible remote CLI when its install source differs from local', () => {
+    const remote = compatibleRemote()
+    remote.installSource = {
+      ...masterInstallSource,
+      selector: { kind: 'branch', value: 'dev' },
+      installerUrl: 'https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install',
+    }
+    const plan = createRemotePlan(parseRemoteArgs(['host']), remote)
+    expect(plan.installCli).toBe(true)
+    expect(plan.mutations).toEqual(['update remote OpenAlice CLI'])
+  })
+
+  it('updates a protocol-compatible remote CLI when only its CLI version differs', () => {
+    const remote = compatibleRemote()
+    remote.cliVersion = '0.1.0'
+    remote.installSource = { ...masterInstallSource, cliVersion: '0.1.0' }
+    const plan = createRemotePlan(parseRemoteArgs(['host']), remote)
+    expect(plan.cliCompatible).toBe(true)
+    expect(plan.cliMatchesLocal).toBe(false)
+    expect(plan.mutations).toEqual(['update remote OpenAlice CLI'])
   })
 
   it('installs missing managed Pi and plans a self-owned Server restart from its recorded source', () => {
@@ -219,10 +257,19 @@ describe('OpenAlice managed remote connector', () => {
 
   it('applies the normal installer, starts the Server, re-probes, then opens the tunnel', async () => {
     const options = parseRemoteArgs(['host', '--app-dir', '/srv/OpenAlice', '--yes', '--no-open'])
+    const installSource = {
+      ...masterInstallSource,
+      selector: { kind: 'version', value: 'dev-test' },
+      installerUrl: 'https://example.test/install',
+    }
+    const installedRemote = compatibleRemote({ class: 'absent', state: 'absent', owner: null, endpoints: {} })
+    installedRemote.installSource = installSource
+    const runningRemote = compatibleRemote()
+    runningRemote.installSource = installSource
     const probeRemote = vi.fn()
       .mockResolvedValueOnce(missingRemote())
-      .mockResolvedValueOnce(compatibleRemote({ class: 'absent', state: 'absent', owner: null, endpoints: {} }))
-      .mockResolvedValueOnce(compatibleRemote())
+      .mockResolvedValueOnce(installedRemote)
+      .mockResolvedValueOnce(runningRemote)
     const runRemote = vi.fn(async () => '')
     const connectTunnel = vi.fn(async () => 0)
     const stdout = { write: vi.fn() }
@@ -231,16 +278,14 @@ describe('OpenAlice managed remote connector', () => {
       probeRemote,
       runRemote,
       connectTunnel,
-      installUrl: 'https://example.test/install',
-      installVersion: 'dev-test',
+      installSource,
       installBaseUrl: 'https://example.test/packages/cli/',
       stdout,
     })).resolves.toBe(0)
 
     expect(runRemote).toHaveBeenCalledTimes(2)
     expect(runRemote.mock.calls[0][1]).toBe(buildRemoteInstallCommand(
-      'https://example.test/install',
-      'dev-test',
+      installSource,
       'https://example.test/packages/cli/',
       true,
     ))
@@ -421,6 +466,7 @@ function missingRemote() {
     runtimeBuildToolsMissing: ['git', 'python3', 'make', 'cxx'],
     cliPath: null,
     cliVersion: null,
+    installSource: null,
     cliCompatible: false,
     status: null,
   }
@@ -439,6 +485,7 @@ function compatibleRemote(statusOverrides = {}) {
     runtimeBuildToolsMissing: [],
     cliPath: '/home/alice/.openalice/bin/openalice',
     cliVersion: '0.2.0',
+    installSource: masterInstallSource,
     cliCompatible: true,
     status: {
       protocol: 1,

@@ -320,6 +320,13 @@ OpenAlice should reuse its own installer/update trust chain for remote hosts.
 It should not copy Herdr's binary transfer implementation or grow a second
 remote-only installer inside `openalice remote`.
 
+Concretely, OpenAlice SSH carries the approved installer command, not the full
+Runtime artifact. The remote host pulls the small control CLI from the same
+installer source recorded by the invoking local CLI. The current large Runtime
+comes from the remote source checkout; a future standalone headless bundle
+should be pulled from a versioned CDN asset with release verification rather
+than streamed from the laptop.
+
 ## Stable API Versus Private Presentation Protocol
 
 Herdr currently exposes two materially different interfaces:

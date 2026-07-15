@@ -2,7 +2,10 @@
 set -euo pipefail
 
 REPOSITORY="TraderAlice/OpenAlice"
-VERSION="${OPENALICE_VERSION:-dev}"
+DEFAULT_BRANCH="master"
+VERSION=""
+REF_KIND=""
+REF_OPTION=""
 MINIMUM_NODE_VERSION="22.19.0"
 PI_VERSION="0.80.6"
 PI_RELEASE_BASE="${OPENALICE_PI_RELEASE_BASE_URL:-https://github.com/earendil-works/pi/releases/download/v${PI_VERSION}}"
@@ -91,11 +94,14 @@ usage() {
 OpenAlice CLI installer
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install | bash
-  ./install [--version <git-ref>] [--install-dir <path>] [--with-runtime-deps] [--no-modify-path] [--yes]
+  ./install
+  ./install --branch dev
+  ./install --version <tag-or-commit>
+  curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install | bash -s -- --branch dev
 
 Options:
-  --version <git-ref>   Git tag, branch, or commit to install (default: dev)
+  --branch <name>       Git branch to install (default: master)
+  --version <git-ref>   Git tag or commit to install
   --install-dir <path>  OpenAlice user root (default: ~/.openalice)
   --source <path>       Install CLI files from a local checkout (development)
   --with-runtime-deps   Install missing Linux source-build tools after consent
@@ -352,9 +358,20 @@ install_runtime_deps() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --branch)
+      [[ $# -ge 2 ]] || { echo "openalice install: --branch requires a value" >&2; exit 1; }
+      [[ -z "$REF_OPTION" ]] || die "Use only one of --branch or --version."
+      VERSION="$2"
+      REF_KIND="branch"
+      REF_OPTION="--branch"
+      shift 2
+      ;;
     --version)
       [[ $# -ge 2 ]] || { echo "openalice install: --version requires a value" >&2; exit 1; }
+      [[ -z "$REF_OPTION" ]] || die "Use only one of --branch or --version."
       VERSION="$2"
+      REF_KIND="version"
+      REF_OPTION="--version"
       shift 2
       ;;
     --install-dir)
@@ -395,9 +412,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -z "$VERSION" ]]; then
+  VERSION="$DEFAULT_BRANCH"
+  REF_KIND="branch"
+fi
+
 if [[ ${#VERSION} -gt 128 || "$VERSION" == *".."* || ! "$VERSION" =~ ^[A-Za-z0-9._/-]+$ ]]; then
   die "Unsupported version/ref: $VERSION"
 fi
+
+INSTALLER_URL="${OPENALICE_INSTALL_URL:-https://raw.githubusercontent.com/$REPOSITORY/$VERSION/install}"
 
 INSTALL_ROOT="${INSTALL_ROOT/#\~/$HOME}"
 BIN_DIR="$INSTALL_ROOT/bin"
@@ -468,6 +492,13 @@ if ! node_version_supported; then
 fi
 ok "Node.js $(node --version)"
 
+if ! node -e '
+  const url = new URL(process.argv[1]);
+  if (url.protocol !== "https:" && url.protocol !== "http:") process.exit(1);
+' "$INSTALLER_URL" >/dev/null 2>&1; then
+  die "OPENALICE_INSTALL_URL must be an HTTP(S) URL."
+fi
+
 if [[ "$NPM_BIN" == *[[:space:]]* ]]; then
   die "OPENALICE_NPM_BIN must name one executable without arguments."
 fi
@@ -491,6 +522,8 @@ else
   BASE_URL="${BASE_URL%/}"
   if [[ -n "${OPENALICE_INSTALL_BASE_URL:-}" ]]; then
     install_source="Download URL: $BASE_URL"
+  elif [[ "$REF_KIND" == "branch" ]]; then
+    install_source="GitHub branch: $REPOSITORY@$VERSION"
   else
     install_source="GitHub ref: $REPOSITORY@$VERSION"
   fi
@@ -543,7 +576,11 @@ fi
 printf '\n%bInstall plan%b\n' "$BOLD" "$RESET"
 printf '  %-14s %s\n' "Action" "$install_action"
 printf '  %-14s %s\n' "Source" "$install_source"
-printf '  %-14s %s\n' "Version" "$VERSION"
+if [[ "$REF_KIND" == "branch" ]]; then
+  printf '  %-14s %s\n' "Branch" "$VERSION"
+else
+  printf '  %-14s %s\n' "Version" "$VERSION"
+fi
 printf '  %-14s %s\n' "Install root" "$INSTALL_ROOT"
 printf '  %-14s %s\n' "Command" "$BIN_DIR/openalice"
 printf '  %-14s %s\n' "Managed agent" "Pi $PI_VERSION -> $BIN_DIR/pi"
@@ -610,6 +647,7 @@ fi
 FILES=(
   "package.json"
   "bin/openalice.mjs"
+  "src/install-source.mjs"
   "src/local-start.mjs"
   "src/remote.mjs"
   "src/runtime-deps.mjs"
@@ -672,6 +710,7 @@ ok "Managed Pi $PI_VERSION is ready"
 step 5 "Verifying the OpenAlice CLI"
 chmod +x "$STAGING/bin/openalice.mjs"
 node --check "$STAGING/bin/openalice.mjs"
+node --check "$STAGING/src/install-source.mjs"
 node --check "$STAGING/src/local-start.mjs"
 node --check "$STAGING/src/remote.mjs"
 node --check "$STAGING/src/runtime-deps.mjs"
@@ -687,7 +726,33 @@ CLI_VERSION="$(node -e '
 ' "$STAGING/package.json")" || die "The downloaded package manifest is not an OpenAlice CLI package"
 STAGED_VERSION="$(node "$STAGING/bin/openalice.mjs" --version)"
 [[ "$STAGED_VERSION" == "$CLI_VERSION" ]] || die "The downloaded CLI did not report its package version"
-CONTENT_FILES=("${FILES[@]}" "managed/pi/package.json" "managed/pi/package-lock.json")
+node -e '
+  const { writeFileSync } = require("node:fs");
+  const [path, repository, cliVersion, kind, value, installerUrl] = process.argv.slice(1);
+  writeFileSync(path, `${JSON.stringify({
+    schemaVersion: 1,
+    repository,
+    cliVersion,
+    selector: { kind, value },
+    installerUrl,
+  }, null, 2)}\n`, { mode: 0o644 });
+' "$STAGING/install-source.json" "$REPOSITORY" "$CLI_VERSION" "$REF_KIND" "$VERSION" "$INSTALLER_URL"
+node "$STAGING/bin/openalice.mjs" version --json | node -e '
+  let input = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { input += chunk; });
+  process.stdin.on("end", () => {
+    const [kind, value, installerUrl, cliVersion] = process.argv.slice(1);
+    const info = JSON.parse(input);
+    if (info.version !== cliVersion
+      || info.installSource?.cliVersion !== cliVersion
+      || info.installSource?.selector?.kind !== kind
+      || info.installSource?.selector?.value !== value
+      || info.installSource?.installerUrl !== installerUrl) process.exit(1);
+  });
+' "$REF_KIND" "$VERSION" "$INSTALLER_URL" "$CLI_VERSION" \
+  || die "The downloaded CLI did not preserve its installation source"
+CONTENT_FILES=("${FILES[@]}" "install-source.json" "managed/pi/package.json" "managed/pi/package-lock.json")
 CONTENT_ID="$(content_id "$STAGING" "${CONTENT_FILES[@]}")"
 ok "OpenAlice CLI $CLI_VERSION passed validation ($CONTENT_ID)"
 
@@ -782,7 +847,11 @@ printf '  %-12s %s\n' "Command" "$BIN_DIR/openalice"
 printf '  %-12s %s\n' "CLI version" "$CLI_VERSION"
 printf '  %-12s %s\n' "Agent" "$BIN_DIR/pi"
 printf '  %-12s %s\n' "Pi version" "$PI_VERSION"
-printf '  %-12s %s\n' "Source ref" "$VERSION"
+if [[ "$REF_KIND" == "branch" ]]; then
+  printf '  %-12s %s\n' "Branch" "$VERSION"
+else
+  printf '  %-12s %s\n' "Source ref" "$VERSION"
+fi
 if [[ "$path_updated" -eq 1 ]]; then
   printf '  %-12s %s\n' "Shell" "Future terminals will load the managed block in $profile"
 fi

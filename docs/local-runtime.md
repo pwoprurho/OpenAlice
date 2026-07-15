@@ -38,12 +38,14 @@ behavior.
 The current installer distributes the small JavaScript CLI from the `dev` ref:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install | bash
+curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install | bash -s -- --branch dev
 ```
 
-The preview requires Node.js 22.19.0 or newer. It always installs the small CLI
-plus OpenAlice's pinned Pi runtime inside the same immutable install release;
-the two visible commands are `openalice` and `pi`. When explicitly selected,
+The installer defaults to the stable `master` branch; this preview command
+opts into `dev` explicitly. It requires Node.js 22.19.0 or newer and always
+installs the small CLI plus OpenAlice's pinned Pi runtime inside the same
+immutable install release; the two visible commands are `openalice` and `pi`.
+When explicitly selected,
 it can also install missing Linux Git/Python/make/C++ tools needed to build the
 source Runtime. It does not clone OpenAlice, write application state, install
 Electron, configure a provider credential, or start a service without separate

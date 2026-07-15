@@ -8,6 +8,7 @@
   },
   "files": [
     "bin/openalice.mjs",
+    "src/install-source.mjs",
     "src/local-start.mjs",
     "src/remote.mjs",
     "src/runtime-deps.mjs",
@@ -17,7 +18,7 @@
     "src/ssh-connect.mjs"
   ],
   "scripts": {
-    "build": "node --check bin/openalice.mjs && node --check src/local-start.mjs && node --check src/remote.mjs && node --check src/runtime-deps.mjs && node --check src/runtime-client.mjs && node --check src/server.mjs && node --check src/server-control.mjs && node --check src/ssh-connect.mjs",
+    "build": "node --check bin/openalice.mjs && node --check src/install-source.mjs && node --check src/local-start.mjs && node --check src/remote.mjs && node --check src/runtime-deps.mjs && node --check src/runtime-client.mjs && node --check src/server.mjs && node --check src/server-control.mjs && node --check src/ssh-connect.mjs",
     "test": "vitest run --root ../.. --config vitest.config.ts --project node packages/cli/src"
   },
   "engines": {

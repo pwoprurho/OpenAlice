@@ -3,6 +3,7 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
+import { readInstallSource } from '../src/install-source.mjs'
 import { formatLocalStartHelp, parseLocalStartArgs, startLocal } from '../src/local-start.mjs'
 import { connectRemote, formatRemoteHelp, parseRemoteArgs } from '../src/remote.mjs'
 import { formatServerHelp, parseServerArgs, runServerCommand } from '../src/server.mjs'
@@ -12,6 +13,13 @@ export async function main(argv = process.argv.slice(2)) {
   const [command, ...args] = argv
   if (command === '--help' || command === '-h' || command === 'help') {
     process.stdout.write(formatHelp())
+    return 0
+  }
+  if (command === 'version' && args[0] === '--json') {
+    process.stdout.write(`${JSON.stringify({
+      version: readVersion(),
+      installSource: await readInstallSource(),
+    })}\n`)
     return 0
   }
   if (command === '--version' || command === '-v' || command === 'version') {
@@ -56,12 +64,14 @@ function formatHelp() {
 
 Usage:
   openalice
+  openalice version --json
   openalice start [path] [options]
   openalice server <run|start|status|stop> [options]
   openalice ssh <user@host> [options]
   openalice remote <user@host> [options]
 
 Commands:
+  version   Print the CLI version; --json also reports its recorded install source
   start     Start OpenAlice from a source checkout on local loopback (default)
   server    Run, detach, inspect, or stop a browserless local Runtime
   ssh       Open a loopback-only SSH tunnel to an already-running OpenAlice

@@ -93,8 +93,9 @@ protocol is deferred until the local/server boundary is stable.
    completion. It does not signal a guessed PID or delete a live lock.
 8. `--takeover` remains the only command-line authority to replace another
    recorded Guardian owner.
-9. Remote bootstrap reuses the ordinary OpenAlice CLI installer and release
-   trust chain. It does not carry a second SSH-only installer.
+9. Remote bootstrap reuses the invoking local CLI's recorded ordinary
+   installer source and selector. It does not carry a second SSH-only installer
+   or upload the full OpenAlice Runtime through SSH.
 10. Shared Runtime facts use presentation-neutral names and versioned schemas.
     Browser layout, Electron chrome, modal state, and other client UI state do
     not become server truth.
@@ -191,9 +192,10 @@ openalice remote <target> --app-dir <remote-checkout>
 1. verify ordinary SSH connectivity and host-key policy;
 2. detect remote platform and an installed `openalice` CLI;
 3. probe `openalice server status --json` and protocol compatibility;
-4. if CLI install or update is required, show the exact plan and ask separately
-   before changing the remote host;
-5. call the normal remote installer non-interactively only after that consent;
+4. compare the remote CLI version and recorded installer source/selector with
+   the invoking local CLI;
+5. if CLI install or update is required, show the exact matching plan and ask
+   separately before calling the normal installer on the remote host;
 6. re-probe and re-plan after installation so a newly visible owner can block
    or require a second explicit takeover decision;
 7. run `openalice server start --app-dir ...` remotely and wait for readiness;
@@ -518,7 +520,8 @@ Managed bootstrap uses a plan/apply split.
 The read-only plan reports:
 
 - SSH target and resolved remote platform/architecture;
-- detected OpenAlice CLI path and version;
+- detected OpenAlice CLI path, version, and whether its version/install source
+  match the invoking local CLI;
 - control protocol compatibility;
 - Server state and source/bundle root;
 - whether the selected source checkout already has complete Runtime artifacts;
@@ -531,7 +534,8 @@ The read-only plan reports:
 
 Apply rules:
 
-1. no compatible CLI: ask before invoking the normal installer;
+1. no matching compatible CLI: ask before invoking the normal installer with
+   the local CLI's recorded branch/tag/commit selector;
 2. source artifacts absent and Linux build tools missing: include
    `--with-runtime-deps` in that same normal installer invocation after plan
    consent;
@@ -554,11 +558,12 @@ or Server is already present and compatible, otherwise it returns the original
 failure. Source preparation uses compact phase output and suppresses successful
 package/build chatter; a failed phase still includes a bounded diagnostic tail.
 
-The local orchestrator must compare protocol ranges, not only human version
-strings. It may tolerate a newer compatible Runtime, but it must fail clearly
-when a method or schema is unsupported. Development overrides for a local CLI
-payload or checkout are allowed only behind explicit flags and are not the
-release path.
+The local orchestrator compares protocol ranges, CLI version, and install
+source; human version strings alone are insufficient. It may tolerate a newer
+compatible Runtime, but its remote control CLI must match the invoking local
+CLI. The managed command exposes no independent branch/version selector. Test
+fixtures may replace the installer URL and payload base through test-only
+environment seams; those are not a release path.
 
 ## Future Independent Studio Protocol
 
@@ -721,7 +726,8 @@ shaping remains a separate latency observation.
 
 | Scenario | Required result |
 |---|---|
-| compatible remote CLI/Server | reuses both without mutation |
+| matching compatible remote CLI/Server | reuses both without mutation |
+| protocol-compatible CLI from a different branch/tag/commit | plan names a matching CLI update before connection |
 | compatible CLI Server but managed Pi missing | plan names Pi install and self-owned Server restart; refreshed Server reports pinned Pi |
 | missing remote CLI, interactive | shows plan; default no leaves host unchanged |
 | missing remote CLI, non-interactive | fails unless explicit approval is present |

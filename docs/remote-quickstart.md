@@ -117,7 +117,7 @@ The examples below use `/home/alice/OpenAlice`; replace it with that output.
 The preview installer shows its complete plan before asking for consent:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install | bash
+curl -fsSL https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install | bash -s -- --branch dev
 ```
 
 Open a new terminal so the managed PATH block is active, then verify both
@@ -125,12 +125,17 @@ commands:
 
 ```bash
 openalice --version
+openalice version --json
 pi --version
 ```
 
 The installer adds the small `openalice` CLI and a pinned, release-local Pi. It
 does not install Electron, clone OpenAlice, start a service, or configure an AI
-provider. See [[docs/cli-installer.md]] for the transaction and trust model.
+provider. The JSON version output records this local CLI's version, installer
+source, and selector. Managed remote uses that record when the remote control
+CLI is missing or different; `openalice remote` has no separate branch/version
+flag.
+See [[docs/cli-installer.md]] for the transaction and trust model.
 
 ### 3. Review the remote plan
 
@@ -163,6 +168,11 @@ After explicit consent, the command can:
 4. prepare the source Runtime;
 5. start or reuse a detached Guardian-owned Server;
 6. open a local SSH loopback tunnel and browser URL.
+
+The first step makes the remote host pull the small matching control CLI from
+its recorded installer URL. OpenAlice is not uploaded from the laptop through
+SSH. The large source Runtime remains the checkout named by `--app-dir` and is
+prepared on that host; `remote` never checks out or switches its Git branch.
 
 The first preparation can take several minutes. Successful build output is
 compact; a failed phase includes a bounded diagnostic tail.
@@ -289,6 +299,11 @@ state and PTYs from attached clients. Its remote mode keeps a thin client local,
 reaches the server through SSH, and leaves agents running after detach. The
 important lesson is ownership: the host with the files owns execution and
 durable Runtime facts; presentation can disconnect and return.
+
+Herdr can stream a matching compact binary to the host. OpenAlice deliberately
+does not copy that mechanism for its much larger Runtime: SSH carries control
+commands, the remote host pulls the small CLI itself, and a future standalone
+headless bundle must be a versioned CDN download rather than a laptop upload.
 
 OpenAlice starts with a simpler transport than Herdr's private framed TUI
 protocol: the existing HTTP and Workspace WebSocket cross an SSH loopback
