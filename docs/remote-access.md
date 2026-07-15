@@ -13,18 +13,24 @@ this guide is the OpenAlice contract.
 
 ## Status
 
-The repository currently ships the Stage 0 path:
+The repository now contains the source-backed Stage 0 through Stage 2 path:
 
 - `openalice start` prepares a source checkout, runs Guardian in the
   foreground, and optionally opens the local browser;
 - `openalice ssh <target>` creates a loopback SSH tunnel to an already-running
   remote OpenAlice Runtime;
+- `openalice server run|start|status|stop` provides a browserless foreground or
+  detached Runtime lifecycle backed by Guardian's local control endpoint;
+- `openalice remote <target>` probes, plans, installs the ordinary CLI when
+  approved, starts or reuses the remote Server, and opens the same loopback
+  tunnel;
 - Electron remains a complete local desktop distribution.
 
-The `openalice server` lifecycle and `openalice remote` managed-host flow below
-are the next implementation stages. Commands described as target behavior must
-not be documented to users as already released until their acceptance rows are
-complete.
+These commands are still source-backed preview behavior on the `dev` lane, not
+a standalone headless release. The clean Docker SSH acceptance covers the
+management and tunnel loop; real long-latency Agent TUI measurements remain a
+separate release observation rather than a reason to invent a new terminal
+protocol preemptively.
 
 ## Product Decision
 
@@ -133,7 +139,7 @@ port, forwards it to the remote Alice loopback port, optionally opens the
 browser, and stays in the foreground to own the tunnel. It never installs,
 updates, starts, stops, or takes over the remote Runtime.
 
-### Target server lifecycle
+### Server lifecycle
 
 ```bash
 openalice server run [app-dir]
@@ -172,7 +178,7 @@ does not advertise that control contract, status reports `owned_elsewhere` and
 stop refuses. The user may then close that surface normally or make a separate
 explicit takeover decision.
 
-### Target managed remote command
+### Managed remote command
 
 ```bash
 openalice remote <target> --app-dir <remote-checkout>
@@ -186,16 +192,22 @@ openalice remote <target> --app-dir <remote-checkout>
 4. if CLI install or update is required, show the exact plan and ask separately
    before changing the remote host;
 5. call the normal remote installer non-interactively only after that consent;
-6. run `openalice server start --app-dir ...` remotely and wait for readiness;
-7. create the same loopback tunnel used by `openalice ssh`;
-8. open or print the local URL and stay in the foreground to own only the
+6. re-probe and re-plan after installation so a newly visible owner can block
+   or require a second explicit takeover decision;
+7. run `openalice server start --app-dir ...` remotely and wait for readiness;
+8. create the same loopback tunnel used by `openalice ssh`;
+9. open or print the local URL and stay in the foreground to own only the
    tunnel.
+
+When reusing a healthy Server, `remote` takes the loopback web port from the
+versioned status response. An explicitly supplied `--remote-port` must match
+that owner; a mismatch is reported before opening a misleading tunnel.
 
 Closing `openalice remote` closes the tunnel but leaves the detached remote
 Server running. Stop is explicit:
 
 ```bash
-ssh <target> openalice server stop
+ssh <target> '"$HOME/.openalice/bin/openalice" server stop'
 ```
 
 A later convenience subcommand may issue that same remote command, but it must
@@ -240,20 +252,21 @@ The detached parent returns success only after this barrier. On timeout it
 prints the isolated log path and current ownership evidence. It must not report
 success merely because a child PID was spawned.
 
-The Server writes structured logs beneath the selected `OPENALICE_HOME` and
-prints that path on start/status. Logs must not contain provider, broker, SSH,
-pairing, or sealing secrets.
+The Server appends Guardian and child output beneath the selected
+`OPENALICE_HOME` and prints that path on start. Logs must not contain provider,
+broker, SSH, pairing, or sealing secrets.
 
 ## Guardian Control Contract
 
 ### Endpoint
 
-The initial Unix endpoint is a user-only local socket beneath the canonical
-`OPENALICE_HOME` Runtime state. The exact filesystem name is implementation
-owned, but it must be deterministic for that home, created with user-only
-permissions, and removed only by the process that still owns it. Native Windows
-uses an equivalent per-home named pipe when this CLI surface is supported
-there.
+The Unix endpoint is normally
+`<OPENALICE_HOME>/state/guardian-control.sock`, mode `0600`. If that path would
+exceed the conservative Unix-domain-socket byte limit, both Guardian and the
+CLI derive a per-home hashed filename beneath a UID-owned `0700` directory in
+the OS temporary root. Native Windows derives an equivalent per-home named
+pipe. Every form is deterministic for the canonical home and is removed only
+when the closing Guardian still sees the socket identity it created.
 
 The endpoint is never bound to TCP and is never forwarded by `openalice ssh`.
 Remote orchestration reaches it only by executing the remote CLI through SSH.
@@ -545,30 +558,31 @@ Runtime model.
 
 ## Delivery Stages
 
-### Stage 0 — pure SSH tunnel (current)
+### Stage 0 — pure SSH tunnel (implemented)
 
 - remote Runtime is started manually;
 - `openalice ssh` owns only the tunnel;
 - normal browser UI and PTY WebSocket traverse one local loopback origin;
 - no remote mutation.
 
-### Stage 1 — native Server lifecycle
+### Stage 1 — native Server lifecycle (implemented)
 
-- add `server run/start/status/stop`;
-- add Guardian-owned local status/stop endpoint;
+- `server run/start/status/stop`;
+- Guardian-owned local status/stop endpoint;
 - detached start waits for real readiness;
 - status distinguishes absent, compatible, unhealthy, and other owner;
 - stop is structured and self-owned;
 - Electron behavior remains unchanged.
 
-### Stage 2 — managed source-backed remote
+### Stage 2 — managed source-backed remote (implemented baseline)
 
-- add `openalice remote` plan/apply orchestration;
+- `openalice remote` plan/apply orchestration;
 - probe and bootstrap the existing CLI with explicit consent;
 - start/reuse the remote Server;
 - reuse the existing SSH loopback tunnel;
 - leave the Server alive after disconnect;
-- validate ordinary Agent TUI interaction under network shaping.
+- remaining release observation: validate ordinary Agent TUI interaction under
+  representative network shaping before deciding whether Stage 3 is useful.
 
 ### Stage 3 — terminal transport optimization
 
@@ -652,7 +666,8 @@ When this surface changes:
 4. start the real localhost route and verify the Workspace terminal and
    loginless loopback Origin contract;
 5. exercise pure `ssh` and managed `remote` against a disposable SSH/Docker
-   host, including default-no and reconnect behavior;
+   host with `pnpm test:remote:docker`, including default-no, installed payload
+   equality, detach persistence, reconnect, and structured stop;
 6. follow [[docs/docker-deployment.md]] and run `pnpm docker:smoke` when
    `scripts/guardian/prod.mjs` or the server image path changes;
 7. follow [[docs/managed-workspace-runtime.md]] and run the matching Electron

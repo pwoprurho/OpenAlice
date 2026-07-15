@@ -106,11 +106,11 @@ Workspaces, runtime locks, credentials, and optional Broker Packs. See
 Use `--rebuild` after pulling source changes when existing build artifacts may
 be stale. Never use a real user-state root for launcher or recovery tests.
 
-## Server Lifecycle Direction
+## Server Lifecycle
 
 The browser convenience command and a persistent Server are separate lifetime
 contracts. `openalice start` remains foreground and browser-oriented. The
-target Server surface is:
+installed Server surface is:
 
 ```bash
 openalice server run [app-dir]     # foreground, no browser
@@ -132,9 +132,9 @@ It refuses to guess at an unreachable PID or silently stop an Electron-owned
 Runtime. Exact status classes, control fields, recovery rules, and the managed
 SSH composition live in [[docs/remote-access.md]].
 
-Until this target surface is implemented and passes the acceptance matrix in
-that guide, the supported source-backed server operation remains the
-foreground `openalice start --no-open` path.
+The detached path is still source-backed: the checkout supplies the built
+Runtime while the installed CLI supplies lifecycle and transport control. A
+future standalone bundle changes preparation, not these ownership semantics.
 
 ## Dependency Bootstrap Direction
 
@@ -179,6 +179,7 @@ When this surface changes:
 2. Run `pnpm build:server` and start with an isolated `--home` and test port.
 3. Open the real localhost route and verify the auth contract and Workspace UI.
 4. Run Guardian recovery checks when launcher ownership changes.
-5. Run Docker smoke when `scripts/guardian/prod.mjs` changes.
-6. Run Electron PTY/package smoke when dependency topology or shared Runtime
+5. Run `pnpm test:remote:docker` when managed SSH or Server lifecycle changes.
+6. Run Docker smoke when `scripts/guardian/prod.mjs` changes.
+7. Run Electron PTY/package smoke when dependency topology or shared Runtime
    behavior changes, even though the CLI itself does not package Electron.
