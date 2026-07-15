@@ -38,6 +38,8 @@ export function UrlAdopter() {
             /chat/:channelId (the retired traditional-chat channels) still
             redirects to Inbox so stale bookmarks land on a live surface. */}
         <Route path="/chat" element={<AdoptStatic spec={{ kind: 'chat-landing', params: {} }} />} />
+        <Route path="/chat/manager" element={<AdoptStatic spec={{ kind: 'workspace-manager', params: {} }} />} />
+        <Route path="/chat/manager/s/:sessionId" element={<AdoptWorkspaceManager />} />
         <Route path="/chat/workspaces/:wsId" element={<AdoptChatWorkspace />} />
         <Route path="/chat/workspaces/:wsId/s/:sessionId" element={<AdoptChatWorkspace />} />
         <Route path="/chat/:channelId" element={<Navigate to="/inbox" replace />} />
@@ -227,6 +229,12 @@ function AdoptChatWorkspace() {
   return <AdoptStatic spec={{ kind: 'workspace', params }} />
 }
 
+function AdoptWorkspaceManager() {
+  const { sessionId } = useParams<{ sessionId: string }>()
+  if (!sessionId) return <Navigate to="/chat/manager" replace />
+  return <AdoptStatic spec={{ kind: 'workspace-manager', params: { sessionId } }} />
+}
+
 function AdoptTemplateDetail() {
   const { name } = useParams<{ name: string }>()
   if (!name) return <Navigate to="/workspaces/templates" replace />
@@ -267,6 +275,7 @@ function specToSection(spec: ViewSpec): ActivitySection {
     case 'tracked':            return 'tracked'
     case 'tracked-issue-detail': return 'tracked'
     case 'chat-landing':       return 'chat'
+    case 'workspace-manager':  return 'chat'
     case 'workspace':          return spec.params.source === 'chat' ? 'chat' : 'workspaces'
     case 'workspace-list':
     case 'template-catalog':

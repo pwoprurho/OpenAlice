@@ -267,7 +267,9 @@ export const piAdapter: CliAdapter = {
     }
     return [
       ...piCommandHead(ctx.env),
-      ...piHeadlessApproveArgs(ctx.env),
+      ...(ctx.approveProject ? ['--approve'] : piHeadlessApproveArgs(ctx.env)),
+      ...(ctx.appendSystemPrompt ? ['--append-system-prompt', ctx.appendSystemPrompt] : []),
+      ...(ctx.skills ?? []).flatMap((path) => ['--skill', path]),
       '--session-id',
       ctx.resume.sessionId,
       '--mode',

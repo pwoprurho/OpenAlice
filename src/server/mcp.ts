@@ -109,6 +109,36 @@ export class McpPlugin implements Plugin {
         // Parity with the CLI gateway so external MCP consumers get the same
         // workspace_path resolution — shared helper, so the two can't drift.
         resolveWorkspace: makeWorkspaceResolver(getWorkspaceService),
+        ...(svc ? {
+          workspaceInventory: async () => Promise.all(svc.registry.list().map(async (meta) => {
+            await svc.sessionRegistry.ensureLoaded(meta.id)
+            const sessions = svc.sessionRegistry.listFor(meta.id)
+            const activity = svc.workspaceRuntimeActivity(meta.id)
+            return {
+              id: meta.id,
+              tag: meta.tag,
+              ...(meta.template ? { template: meta.template } : {}),
+              agents: meta.agents,
+              createdAt: meta.createdAt,
+              sessions: {
+                total: sessions.length,
+                running: activity.sessions.length,
+                recent: sessions
+                  .slice()
+                  .sort((a, b) => b.lastActiveAt.localeCompare(a.lastActiveAt))
+                  .slice(0, 4)
+                  .map((session) => ({
+                    resumeId: session.resumeId,
+                    agent: session.agent,
+                    title: session.title?.trim() || session.name,
+                    state: session.state,
+                    lastActiveAt: session.lastActiveAt,
+                  })),
+              },
+              headlessRunning: activity.headless.length,
+            }
+          })),
+        } : {}),
         resolveInboxOrigin: makeInboxEntryOriginResolver(getWorkspaceService),
         ...(svc ? { sessionDirectory: (id: string, limit?: number) => svc.sessionDirectory(id, limit) } : {}),
         ...(svc ? {

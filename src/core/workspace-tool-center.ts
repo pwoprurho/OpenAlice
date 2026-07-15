@@ -168,6 +168,26 @@ export interface WorkspaceToolContext {
    *  it needs the live WorkspaceService (created after this center); the two
    *  build sites (cli.ts, mcp.ts) inject a lazy closure, tests may omit it. */
   resolveWorkspace?: (id: string) => { id: string; dir: string; tag: string } | null
+  /** Active-desk inventory for manager and peer-discovery flows. */
+  workspaceInventory?: () => Promise<readonly {
+    id: string
+    tag: string
+    template?: string
+    agents: readonly string[]
+    createdAt: string
+    sessions: {
+      total: number
+      running: number
+      recent: readonly {
+        resumeId: string
+        agent: string
+        title: string
+        state: 'running' | 'paused'
+        lastActiveAt: string
+      }[]
+    }
+    headlessRunning: number
+  }[]>
   /**
    * Return safe provenance an agent may use to follow up on an Inbox entry.
    * Older append-only entries can be enriched from live run/session registries

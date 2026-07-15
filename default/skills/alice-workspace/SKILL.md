@@ -22,6 +22,7 @@ Choose the verb from the intent, not from whichever object you happen to have:
 | Discuss this Workspace's own Issue; notify its fixed owner | `issue comment` |
 | Ask by a known product Session/Workspace only when no business object exists | `conversation ask` |
 | Bring this desk's managed instructions and skills up to date | `template upgrade` |
+| Inventory every active desk before coordinating the floor | `peer list` |
 
 `issue comment` is the durable conversation entry for this Workspace's own
 Issue. If the Issue has an exact `@resumeId` assignee, a comment from somebody
@@ -67,6 +68,8 @@ are reachable. Resolve the peer's absolute dir by its `workspaceId`, then use yo
 own file tools:
 
 ```bash
+# active office-floor inventory (ids, templates, agents, live workload counts)
+alice-workspace peer list
 # --id is the `workspaceId` from an inbox_read entry (a uuid), e.g.:
 alice-workspace peer path --id 550e8400-e29b-41d4-a716-446655440000
 alice-workspace peer sessions --id 550e8400-e29b-41d4-a716-446655440000

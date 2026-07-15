@@ -3,6 +3,40 @@ import { demoChatWorkspace, demoWorkspaces, demoTemplates } from '../fixtures/wo
 import { demoWorkspaceFiles } from '../fixtures/inbox'
 import type { DepartedWorkspace, WorkspaceMetadataPatch } from '../../components/workspace/api'
 
+const demoManagerSession = {
+  id: 'demo-manager-session',
+  resumeId: 'demo-resume-manager',
+  wsId: 'workspace-manager',
+  agent: 'pi',
+  name: 'p1',
+  createdAt: new Date().toISOString(),
+  lastActiveAt: new Date().toISOString(),
+  state: 'running' as const,
+  surface: 'webpi' as const,
+  pid: 0,
+  startedAt: Date.now(),
+  title: 'Audit the active Workspace floor',
+}
+
+let demoManagerMessages: unknown[] = []
+
+function demoManagerSnapshot() {
+  return {
+    recordId: demoManagerSession.id,
+    wsId: demoManagerSession.wsId,
+    resumeId: demoManagerSession.resumeId,
+    pid: 0,
+    startedAt: demoManagerSession.startedAt,
+    phase: 'idle' as const,
+    state: null,
+    messages: demoManagerMessages,
+    streamingMessage: null,
+    error: null,
+    stderrTail: '',
+    revision: demoManagerMessages.length,
+  }
+}
+
 const demoDepartedWorkspaces: DepartedWorkspace[] = [{
   id: 'chat-quiet-slate-archive',
   tag: 'macro-research-archive',
@@ -120,6 +154,28 @@ const demoTemplateUpgradePlan = (workspaceId: string) => ({
 
 export const workspacesHandlers = [
   http.get('/api/workspaces', () => HttpResponse.json({ workspaces: demoWorkspaces })),
+  http.get('/api/workspaces/manager', () => HttpResponse.json({
+    manager: {
+      id: 'workspace-manager', tag: 'Workspace Manager',
+      activeWorkspaceCount: demoWorkspaces.length,
+      sessions: demoManagerMessages.length > 0 ? [demoManagerSession] : [],
+    },
+  })),
+  http.post('/api/workspaces/manager/quick-start', async ({ request }) => {
+    const body = await request.json().catch(() => ({})) as { prompt?: string }
+    demoManagerMessages = [
+      { role: 'user', content: body.prompt ?? 'Audit the active Workspace floor.' },
+      { role: 'assistant', content: 'Demo manager: active desks are inventoried and ready for coordination.' },
+    ]
+    return HttpResponse.json({
+      manager: {
+        id: 'workspace-manager', tag: 'Workspace Manager',
+        activeWorkspaceCount: demoWorkspaces.length, sessions: [demoManagerSession],
+      },
+      session: demoManagerSession,
+      snapshot: demoManagerSnapshot(),
+    }, { status: 201 })
+  }),
   http.get('/api/workspaces/departed', () => HttpResponse.json({ workspaces: demoDepartedWorkspaces })),
   http.post('/api/workspaces/departed/:id/restore', ({ params }) => {
     const index = demoDepartedWorkspaces.findIndex((workspace) => workspace.id === String(params.id))
@@ -545,6 +601,21 @@ export const workspacesHandlers = [
   http.get('/api/workspaces/:id/sessions/:sid/diagnostics', () =>
     HttpResponse.json({ status: 'demo' }),
   ),
+  http.post('/api/workspaces/:id/sessions/:sid/webpi/open', () =>
+    HttpResponse.json({ snapshot: demoManagerSnapshot() })),
+  http.get('/api/workspaces/:id/sessions/:sid/webpi', () =>
+    HttpResponse.json({ snapshot: demoManagerSnapshot() })),
+  http.post('/api/workspaces/:id/sessions/:sid/webpi/prompt', async ({ request }) => {
+    const body = await request.json().catch(() => ({})) as { message?: string }
+    demoManagerMessages = [
+      ...demoManagerMessages,
+      { role: 'user', content: body.message ?? '' },
+      { role: 'assistant', content: 'Demo manager: I would inspect the live CLI indexes before changing any desk.' },
+    ]
+    return HttpResponse.json({ snapshot: demoManagerSnapshot() })
+  }),
+  http.post('/api/workspaces/:id/sessions/:sid/webpi/abort', () =>
+    HttpResponse.json({ snapshot: demoManagerSnapshot() })),
 
   http.get('/api/workspaces/:id/agent-config', () => HttpResponse.json({})),
   http.get('/api/workspaces/:id/agent-readiness', () =>

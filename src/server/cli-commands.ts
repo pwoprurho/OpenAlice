@@ -163,6 +163,7 @@ export const CLI_EXPORTS: Record<string, CliExport> = {
       // `workspaceId` an inbox_read entry carries), so the agent can read/edit
       // that peer's files with native tools — cross-workspace collaboration.
       peer: {
+        list: 'workspace_list',
         path: 'workspace_path',
         sessions: 'workspace_sessions',
       },

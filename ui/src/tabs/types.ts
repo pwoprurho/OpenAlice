@@ -48,6 +48,7 @@ export type ViewSpec =
   | { kind: 'inbox';               params: Record<string, never> }
   | { kind: 'tracked';             params: Record<string, never> }
   | { kind: 'chat-landing';        params: { targetWsId?: string } }
+  | { kind: 'workspace-manager';   params: { sessionId?: string } }
   | { kind: 'file-viewer';         params: { wsId: string; path: string } }
 
 export type ViewKind = ViewSpec['kind']

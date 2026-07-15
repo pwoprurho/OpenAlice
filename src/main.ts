@@ -58,6 +58,7 @@ import { inboxPushFactory } from './tool/inbox-push.js'
 import { inboxReadFactory } from './tool/inbox-read.js'
 import { workspacePathFactory } from './tool/workspace-path.js'
 import { workspaceSessionsFactory } from './tool/workspace-sessions.js'
+import { workspaceListFactory } from './tool/workspace-list.js'
 import { workspaceTemplateUpgradeFactory } from './tool/workspace-template-upgrade.js'
 import { createEntityStore } from './core/entity-store.js'
 import { entityUpsertFactory } from './tool/entity-upsert.js'
@@ -117,6 +118,7 @@ async function main() {
   workspaceToolCenter.register(inboxReadFactory)
   workspaceToolCenter.register(workspacePathFactory)
   workspaceToolCenter.register(workspaceSessionsFactory)
+  workspaceToolCenter.register(workspaceListFactory)
   workspaceToolCenter.register(workspaceTemplateUpgradeFactory)
   workspaceToolCenter.register(entityUpsertFactory)
   workspaceToolCenter.register(entitySearchFactory)

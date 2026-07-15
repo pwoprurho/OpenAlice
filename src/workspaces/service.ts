@@ -10,6 +10,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 import { cliBinPath } from '@/core/paths.js';
@@ -199,6 +200,9 @@ import {
 } from './workspace-runtime-activity.js';
 import { WebPiSessionHost, type WebPiSnapshot } from './webpi-session-host.js';
 import { WorkspaceRegistry, type WorkspaceMeta } from './workspace-registry.js';
+import {
+  createManagerWorkspaceMeta,
+} from './manager-workspace.js';
 
 /**
  * The fully-resolved spawn plan for a (workspace, adapter, resume-intent)
@@ -234,6 +238,10 @@ export interface WorkspaceService {
   readonly creator: WorkspaceCreator;
   readonly pool: SessionPool;
   readonly webPi: WebPiSessionHost;
+  /** Launcher-owned control plane. Not part of the business Workspace registry. */
+  readonly managerWorkspace: WorkspaceMeta;
+  /** Resolve a runtime target, including the special manager control plane. */
+  resolveRuntimeWorkspace(workspaceId: string): WorkspaceMeta | undefined;
   readonly transcriptWatcher: TranscriptWatcher;
   /** Process-backed activity used by Upgrade, Offboarding, and Absorb guards. */
   workspaceRuntimeActivity(workspaceId: string): WorkspaceRuntimeActivity;
@@ -243,7 +251,15 @@ export interface WorkspaceService {
   resolveDefaultAgentId(meta: WorkspaceMeta): Promise<string | undefined>;
   resolveAdapter(meta: WorkspaceMeta, agentId?: string): CliAdapter;
   /** Open the same persisted Pi Session through Pi RPC instead of its PTY. */
-  startWebPiSession(meta: WorkspaceMeta, record: SessionRecord): Promise<WebPiSnapshot>;
+  startWebPiSession(
+    meta: WorkspaceMeta,
+    record: SessionRecord,
+    opts?: {
+      appendSystemPrompt?: string;
+      skills?: readonly string[];
+      approveProject?: boolean;
+    },
+  ): Promise<WebPiSnapshot>;
   publicMeta(w: WorkspaceMeta): Promise<unknown>;
   /**
    * Probe the host PATH for each registered adapter's CLI binary. Keyed by
@@ -403,10 +419,14 @@ export function resumeFromRecord(
 export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions): Promise<WorkspaceService> {
   const config = loadConfig({ webPort: opts.webPort });
   const inboxStore = opts.inboxStore;
+  const managerWorkspace = createManagerWorkspaceMeta(config.launcherRoot);
+  await mkdir(managerWorkspace.dir, { recursive: true });
   const registry = await WorkspaceRegistry.load(
     `${config.launcherRoot}/workspaces.json`,
     launcherLogger.child({ scope: 'registry' }),
   );
+  const resolveRuntimeWorkspace = (workspaceId: string): WorkspaceMeta | undefined =>
+    workspaceId === managerWorkspace.id ? managerWorkspace : registry.get(workspaceId);
   const catalog = await WorkspaceCatalog.load(
     join(config.launcherRoot, 'state', 'workspace-catalog.json'),
     registry.list(),
@@ -1797,7 +1817,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
 
   const pool = new SessionPool(
     (wsId, ctx) => {
-      const ws = registry.get(wsId);
+      const ws = resolveRuntimeWorkspace(wsId);
       if (!ws) throw new Error(`workspace not found: ${wsId}`);
       const adapter = resolveAdapter(ws, ctx.agentId);
       // Assigned-id resume (e.g. pi): on a FRESH spawn of an id-assigning
@@ -1922,6 +1942,11 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
   const startWebPiSession = async (
     meta: WorkspaceMeta,
     record: SessionRecord,
+    opts: {
+      appendSystemPrompt?: string;
+      skills?: readonly string[];
+      approveProject?: boolean;
+    } = {},
   ): Promise<WebPiSnapshot> => {
     const operationLease = workspaceOperationGuard.acquire(meta.id, 'webpi-start');
     if (!operationLease) throw new Error(`workspace is busy with ${workspaceOperationGuard.current(meta.id)}`);
@@ -1938,7 +1963,14 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       OPENALICE_RESUME_ID: record.resumeId,
       OPENALICE_SIGNATURE: `@${record.resumeId}`,
     });
-    const command = adapter.composeWebCommand(config.command, { cwd, env, resume });
+    const command = adapter.composeWebCommand(config.command, {
+      cwd,
+      env,
+      resume,
+      ...(opts.appendSystemPrompt ? { appendSystemPrompt: opts.appendSystemPrompt } : {}),
+      ...(opts.skills ? { skills: opts.skills } : {}),
+      ...(opts.approveProject ? { approveProject: true } : {}),
+    });
     launcherLogger.event('path.trace', {
       where: 'webpi.spawn',
       wsId: meta.id,
@@ -2126,6 +2158,8 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     creator,
     pool,
     webPi,
+    managerWorkspace,
+    resolveRuntimeWorkspace,
     transcriptWatcher,
     workspaceRuntimeActivity: workspaceRuntimeActivityMethod,
     resolveOrCreateChatWorkspace: resolveOrCreateChatWorkspaceMethod,

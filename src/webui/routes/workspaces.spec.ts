@@ -835,3 +835,107 @@ describe('WebPi surface routes', () => {
     expect(result.body).toEqual({ unchanged: true, revision: 1 });
   });
 });
+
+describe('Workspace manager surface routes', () => {
+  it('starts a launcher-owned Pi conversation directly in WebPi with the manager contract', async () => {
+    const meta = {
+      id: 'workspace-manager',
+      tag: 'Workspace Manager',
+      dir: '/floor/workspaces',
+      agents: ['pi'],
+      createdAt: new Date(0).toISOString(),
+    };
+    let createdRecord: any = null;
+    const adapter = {
+      id: 'pi',
+      namePrefix: 'p',
+      capabilities: { resumeById: true },
+      bootstrap: vi.fn(async () => undefined),
+    };
+    const snapshot = {
+      recordId: 'pi-manager-test',
+      wsId: meta.id,
+      resumeId: 'resume-manager-test',
+      pid: 91,
+      startedAt: 1,
+      phase: 'working',
+      state: {},
+      messages: [],
+      streamingMessage: null,
+      error: null,
+      stderrTail: '',
+      revision: 1,
+    };
+    const startWebPiSession = vi.fn(async () => snapshot);
+    const prompt = vi.fn(async () => snapshot);
+    const disposeToken = vi.fn(() => true);
+    const svc = {
+      managerWorkspace: meta,
+      registry: {
+        list: () => [{ id: 'ws-1' }, { id: 'ws-2' }],
+        get: () => undefined,
+      },
+      adapters: { get: (id: string) => id === 'pi' ? adapter : undefined },
+      resolveAdapter: () => adapter,
+      getAgentRuntimeReadiness: () => ({
+        agents: { pi: { ready: true, source: 'managed-runtime' } },
+      }),
+      resumeRegistry: {
+        get: vi.fn(() => null),
+        ensure: vi.fn(async () => ({ resumeId: 'resume-manager-test' })),
+      },
+      sessionRegistry: {
+        ensureLoaded: vi.fn(async () => undefined),
+        findById: vi.fn(() => undefined),
+        nextName: vi.fn(() => 'p1'),
+        create: vi.fn(async (record: any) => { createdRecord = record; }),
+        get: vi.fn(() => createdRecord),
+        listFor: vi.fn(() => createdRecord ? [createdRecord] : []),
+        update: vi.fn(async (_wsId: string, _recordId: string, patch: any) => {
+          Object.assign(createdRecord, patch);
+          return createdRecord;
+        }),
+        remove: vi.fn(async () => undefined),
+      },
+      pool: {
+        get: vi.fn(() => undefined),
+        spawn: vi.fn((_wsId: string, ctx: any) => ({
+          recordId: ctx.recordId,
+          wsId: meta.id,
+          name: ctx.recordName,
+          pid: 90,
+          startedAt: 1,
+        })),
+        disposeToken,
+      },
+      startWebPiSession,
+      webPi: { get: vi.fn(() => snapshot), prompt },
+      config: { launcherRepoRoot: '/repo' },
+    } as unknown as WorkspaceService;
+    const app = createWorkspaceRoutes(svc);
+
+    expect(await get(app, '/manager')).toMatchObject({
+      status: 200,
+      body: { manager: { id: 'workspace-manager', activeWorkspaceCount: 2, sessions: [] } },
+    });
+
+    const result = await post(app, '/manager/quick-start', { prompt: 'Audit the floor.' });
+    expect(result.status).toBe(201);
+    expect(result.body).toMatchObject({
+      manager: { id: 'workspace-manager', activeWorkspaceCount: 2 },
+      session: { wsId: 'workspace-manager', agent: 'pi', surface: 'webpi' },
+      snapshot: { phase: 'working' },
+    });
+    expect(disposeToken).toHaveBeenCalledWith(createdRecord.id, 'switch fresh manager Session to WebPi');
+    expect(startWebPiSession).toHaveBeenCalledWith(
+      meta,
+      createdRecord,
+      expect.objectContaining({
+        approveProject: true,
+        appendSystemPrompt: expect.stringContaining('Workspace Manager'),
+        skills: ['/repo/default/skills/workspace-manager'],
+      }),
+    );
+    expect(prompt).toHaveBeenCalledWith(createdRecord.id, 'Audit the floor.');
+  });
+});

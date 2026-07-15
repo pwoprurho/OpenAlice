@@ -464,6 +464,25 @@ describe('piAdapter AI-config', () => {
     ]);
   });
 
+  it('composeWebCommand can explicitly load the launcher manager contract', () => {
+    const spawn = {
+      cwd: dir,
+      env: mcpEnv,
+      resume: { sessionId: 'sess-manager' },
+      approveProject: true,
+      appendSystemPrompt: 'Manage the office floor.',
+      skills: ['/repo/default/skills/workspace-manager'],
+    } as const;
+    expect(piAdapter.composeWebCommand?.([], spawn)).toEqual([
+      'pi',
+      '--approve',
+      '--append-system-prompt', 'Manage the office floor.',
+      '--skill', '/repo/default/skills/workspace-manager',
+      '--session-id', 'sess-manager',
+      '--mode', 'rpc',
+    ]);
+  });
+
   it('composeWebCommand uses the packaged managed Pi trust flag only on the RPC surface', () => {
     const env = { ...mcpEnv, OPENALICE_MANAGED_PI_PATH: '/app/vendor/pi/pi' };
     const spawn = { cwd: dir, env, resume: { sessionId: 'sess-web' } } as const;

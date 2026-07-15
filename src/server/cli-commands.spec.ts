@@ -20,6 +20,7 @@ import { inboxPushFactory } from '../tool/inbox-push.js'
 import { inboxReadFactory } from '../tool/inbox-read.js'
 import { workspacePathFactory } from '../tool/workspace-path.js'
 import { workspaceSessionsFactory } from '../tool/workspace-sessions.js'
+import { workspaceListFactory } from '../tool/workspace-list.js'
 import { workspaceTemplateUpgradeFactory } from '../tool/workspace-template-upgrade.js'
 import { entityUpsertFactory } from '../tool/entity-upsert.js'
 import { entitySearchFactory } from '../tool/entity-search.js'
@@ -91,6 +92,7 @@ describe('CLI_EXPORTS — workspace export (scoped collaboration tools)', () => 
   wtc.register(inboxReadFactory)
   wtc.register(workspacePathFactory)
   wtc.register(workspaceSessionsFactory)
+  wtc.register(workspaceListFactory)
   wtc.register(workspaceTemplateUpgradeFactory)
   wtc.register(entityUpsertFactory)
   wtc.register(entitySearchFactory)

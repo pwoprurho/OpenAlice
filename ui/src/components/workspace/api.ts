@@ -724,6 +724,44 @@ export interface QuickChatResult {
   readonly session: SpawnedSession;
 }
 
+export const MANAGER_WORKSPACE_ID = 'workspace-manager'
+
+export interface ManagerWorkspaceSnapshot {
+  readonly id: typeof MANAGER_WORKSPACE_ID
+  readonly tag: string
+  readonly activeWorkspaceCount: number
+  readonly sessions: readonly SessionRecord[]
+}
+
+export interface ManagerQuickStartResult {
+  readonly manager: ManagerWorkspaceSnapshot
+  readonly session: SessionRecord
+  readonly snapshot: WebPiSnapshot
+}
+
+export async function getWorkspaceManager(): Promise<ManagerWorkspaceSnapshot> {
+  const res = await fetch('/api/workspaces/manager')
+  const body = (await res.json().catch(() => null)) as { manager?: ManagerWorkspaceSnapshot; message?: string } | null
+  if (!res.ok || !body?.manager) throw new Error(body?.message ?? `manager load failed: ${res.status}`)
+  return body.manager
+}
+
+export async function quickStartWorkspaceManager(
+  prompt: string,
+  credentialSlug?: string,
+): Promise<ManagerQuickStartResult> {
+  const res = await fetch('/api/workspaces/manager/quick-start', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt, ...(credentialSlug ? { credentialSlug } : {}) }),
+  })
+  const body = (await res.json().catch(() => null)) as (ManagerQuickStartResult & { message?: string; error?: string }) | null
+  if (!res.ok || !body?.manager || !body.session || !body.snapshot) {
+    throw new Error(body?.message ?? body?.error ?? `manager start failed: ${res.status}`)
+  }
+  return body
+}
+
 /** Error thrown by `quickChat`, carrying the backend error `code` when present
  *  (e.g. `no_ai_credential` → the composer bounces the user to Settings). */
 export class QuickChatError extends Error {

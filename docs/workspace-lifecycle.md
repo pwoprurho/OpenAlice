@@ -17,6 +17,11 @@ It is intentionally safe to use as the cwd for a future manager Agent: ordinary
 filesystem discovery there means “the desks currently in service,” not “every
 desk that has ever existed.”
 
+That manager now exists as the launcher-owned control plane described in
+[[docs/workspace-manager.md]]. It is intentionally absent from the active
+Workspace registry, so the office floor never contains a synthetic seventeenth
+business desk merely because the user opened management chat.
+
 ```text
 <launcherRoot>/
 ├── workspaces.json                 active runtime registry only

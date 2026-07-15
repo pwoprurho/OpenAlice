@@ -32,6 +32,7 @@ import { InboxPage } from '../pages/InboxPage'
 import { InboxPageShell } from '../pages/InboxPageShell'
 import { TrackedPage } from '../pages/TrackedPage'
 import { ChatLandingPage } from '../pages/ChatLandingPage'
+import { WorkspaceManagerPage } from '../pages/WorkspaceManagerPage'
 import { ChatPageShell } from '../pages/ChatPageShell'
 import { PageSidebarShell } from '../pages/PageSidebarShell'
 import { WorkspaceListPage } from '../pages/WorkspaceListPage'
@@ -394,6 +395,19 @@ const chatLandingModule: ViewModule<'chat-landing'> = {
   ),
 }
 
+const workspaceManagerModule: ViewModule<'workspace-manager'> = {
+  kind: 'workspace-manager',
+  title: () => 'Workspace Manager',
+  toUrl: (spec) => spec.params.sessionId
+    ? `/chat/manager/s/${encodeURIComponent(spec.params.sessionId)}`
+    : '/chat/manager',
+  Component: ({ spec }) => (
+    <ChatPageShell>
+      <WorkspaceManagerPage spec={spec} />
+    </ChatPageShell>
+  ),
+}
+
 const workspaceListModule: ViewModule<'workspace-list'> = {
   kind: 'workspace-list',
   title: () => 'Workspaces',
@@ -521,6 +535,7 @@ const VIEWS = {
   inbox: inboxModule,
   tracked: trackedModule,
   'chat-landing': chatLandingModule,
+  'workspace-manager': workspaceManagerModule,
   'workspace-list': workspaceListModule,
   workspace: workspaceModule,
   'template-catalog': templateCatalogModule,

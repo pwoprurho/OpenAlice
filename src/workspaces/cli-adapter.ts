@@ -45,6 +45,19 @@ export interface SpawnContext {
    * it entirely (no agent to receive a prompt).
    */
   readonly initialPrompt?: string;
+  /**
+   * Structured interactive surfaces may append launcher-owned role guidance
+   * without exposing it as the user's first message. Pi maps this to its
+   * documented `--append-system-prompt` option.
+   */
+  readonly appendSystemPrompt?: string;
+  /** Explicit skill paths for a launcher-owned role surface. */
+  readonly skills?: readonly string[];
+  /**
+   * Structured surfaces cannot answer an interactive project-trust prompt.
+   * Set only after an explicit user action enters a launcher-owned surface.
+   */
+  readonly approveProject?: boolean;
 }
 
 export interface BootstrapContext {

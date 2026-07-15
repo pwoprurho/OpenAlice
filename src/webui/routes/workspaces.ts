@@ -46,6 +46,10 @@ import {
 import { CHAT_WORKSPACE_TEMPLATE } from '../../workspaces/chat-workspace-resolver.js';
 import { TemplateUpgradeError } from '../../workspaces/template-upgrade.js';
 import { WorkspaceAbsorbError } from '../../workspaces/workspace-absorb.js';
+import {
+  MANAGER_SYSTEM_PROMPT,
+  managerSkillPath,
+} from '../../workspaces/manager-workspace.js';
 
 // The spawn body's `resume` value is an AGENT-side session id, whose shape is
 // adapter-native: uuid for claude/codex/pi, `ses_<base62>` for opencode. This
@@ -457,6 +461,86 @@ export function createWorkspaceRoutes(
       launcherLogger.warn('quick_chat.preference_write_failed', { id: meta.id, err });
     }
   };
+
+  const managerWebPiOptions = {
+    appendSystemPrompt: MANAGER_SYSTEM_PROMPT,
+    skills: [managerSkillPath(svc.config.launcherRepoRoot)],
+    // WebPi has no TUI in which it could render Pi's trust prompt. Entering the
+    // explicit manager surface is the user's approval for its launcher-owned
+    // skill and active-office-floor cwd.
+    approveProject: true,
+  } as const;
+
+  const publicManager = async () => {
+    const meta = svc.managerWorkspace;
+    await svc.sessionRegistry.ensureLoaded(meta.id);
+    return {
+      id: meta.id,
+      tag: meta.tag,
+      activeWorkspaceCount: svc.registry.list().length,
+      sessions: svc.sessionRegistry
+        .listFor(meta.id)
+        .map(publicSession)
+        .sort((a, b) => b.lastActiveAt.localeCompare(a.lastActiveAt)),
+    };
+  };
+
+  // ── launcher-owned Workspace manager ───────────────────────────────────
+  // The manager's cwd is the active office floor, but it is intentionally not
+  // inserted into the business Workspace registry. Its sessions live in the
+  // same durable Session/Resume registries and always open through WebPi.
+  app.get('/manager', async (c) => c.json({ manager: await publicManager() }));
+
+  app.post('/manager/quick-start', async (c) => {
+    let prompt: string;
+    let credentialSlug: string | undefined;
+    try {
+      const body = await safeJson(c);
+      const fields = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+      const seed = parseSeedPrompt(fields['prompt']);
+      if (seed === null) return c.json({ error: 'prompt_required' }, 400);
+      if ('error' in seed) return c.json(seed, 400);
+      prompt = seed.prompt;
+      if (typeof fields['credentialSlug'] === 'string' && fields['credentialSlug'].length > 0) {
+        credentialSlug = fields['credentialSlug'];
+      }
+    } catch (error) {
+      return c.json({ error: 'bad_request', message: (error as Error).message }, 400);
+    }
+
+    const meta = svc.managerWorkspace;
+    const spawned = await spawnInteractiveSession(meta, {
+      agentId: 'pi',
+      ...(credentialSlug ? { credentialSlug } : {}),
+      title: prompt,
+    });
+    if (!spawned.ok) return c.json(spawned.body, spawned.status as 400 | 409 | 500);
+
+    const record = svc.sessionRegistry.get(meta.id, spawned.session.sessionId);
+    if (!record) return c.json({ error: 'registry_failed', message: 'manager Session record is missing' }, 500);
+
+    try {
+      // A fresh native Pi id is allocated by the ordinary interactive spawn
+      // seam. Stop its unused TUI immediately, then reopen that exact native
+      // conversation in RPC mode and submit the visible user prompt.
+      svc.pool.disposeToken(record.id, 'switch fresh manager Session to WebPi');
+      await svc.startWebPiSession(meta, record, managerWebPiOptions);
+      const snapshot = await svc.webPi.prompt(record.id, prompt);
+      return c.json({
+        manager: await publicManager(),
+        session: publicSession(record),
+        snapshot,
+      }, 201);
+    } catch (error) {
+      await svc.sessionRegistry.update(meta.id, record.id, {
+        state: 'paused',
+        surface: 'webpi',
+        lastActiveAt: new Date().toISOString(),
+      }).catch(() => undefined);
+      launcherLogger.error('workspace_manager.quick_start_failed', { recordId: record.id, error });
+      return c.json({ error: 'manager_start_failed', message: (error as Error).message }, 500);
+    }
+  });
 
   // Detect which vault credential a workspace's loginless agent is currently
   // configured with (null when none / hand-edited). The "which cred is this
@@ -1377,7 +1461,10 @@ export function createWorkspaceRoutes(
     const id = c.req.param('id');
     const token = c.req.param('sid');
     if (!validId(id) || !validId(token)) return c.json({ error: 'not_found' }, 404);
-    const meta = svc.registry.get(id);
+    // Older embedders/tests may provide only the business registry. Keep the
+    // ordinary Workspace path compatible while the launcher-owned manager is
+    // resolved through the newer service seam.
+    const meta = svc.resolveRuntimeWorkspace?.(id) ?? svc.registry.get(id);
     const record = svc.sessionRegistry.get(id, token);
     if (!meta || !record) return c.json({ error: 'not_found' }, 404);
     if (record.agent !== 'pi') {
@@ -1394,7 +1481,11 @@ export function createWorkspaceRoutes(
         await adapter.bootstrap({ wsId: id, cwd: meta.dir, launcherRepoRoot: svc.config.launcherRepoRoot });
       }
       if (svc.pool.get(token)) svc.pool.disposeToken(token, 'switch to WebPi');
-      const snapshot = await svc.startWebPiSession(meta, record);
+      const snapshot = await svc.startWebPiSession(
+        meta,
+        record,
+        id === svc.managerWorkspace?.id ? managerWebPiOptions : undefined,
+      );
       return c.json({ ok: true, snapshot, session: publicSession(record) });
     } catch (err) {
       await svc.sessionRegistry.update(id, token, {

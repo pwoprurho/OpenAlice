@@ -191,6 +191,8 @@ Read the relevant guide before editing its subsystem:
   layers, skill ownership, live CLI authority, and guidance versioning.
 - [[docs/workspace-lifecycle.md]] — [Workspace and Session lifecycle](docs/workspace-lifecycle.md): offboarding,
   departed desks, handoff, restore/purge, and resumeId retirement.
+- [[docs/workspace-manager.md]] — [Workspace Manager](docs/workspace-manager.md): launcher-owned
+  control-plane cwd, WebPi quick start, peer inventory, and no-root-artifact boundary.
 - [[docs/workspace-template-upgrade.md]] — [Workspace Template Upgrade](docs/workspace-template-upgrade.md):
   managed-asset baselines, three-way review, safe apply, recovery, and the future Merge/Absorb boundary.
 - [[docs/workspace-absorb.md]] — [Workspace Absorb](docs/workspace-absorb.md): directional
