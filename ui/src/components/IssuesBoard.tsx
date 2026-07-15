@@ -19,6 +19,7 @@ import type {
 import type { ScheduleWhen } from '../api/schedule'
 import { useIssues } from '../hooks/useIssues'
 import { useWorkspaces } from '../contexts/workspaces-context'
+import { formatRelativeTime } from '../lib/intl'
 import { useWorkspace } from '../tabs/store'
 import { CenteredLoading } from './StateViews'
 import { STATUS_META } from './issue-status-meta'
@@ -153,6 +154,16 @@ const AUTOMATION_HEALTH_META: Record<IssueAutomationHealthState, { label: string
   blocked: { label: 'Blocked', className: 'bg-red-500/15 text-red-400' },
 }
 
+const BOARD_HEALTH_CLASS: Record<IssueAutomationHealthState, string> = {
+  inactive: 'text-muted/70',
+  not_started: 'text-muted/70',
+  due: 'text-amber-400',
+  running: 'text-blue-400',
+  healthy: 'text-emerald-500/85',
+  failed: 'rounded-md bg-red-500/15 px-2 py-1 text-red-400',
+  blocked: 'rounded-md bg-red-500/15 px-2 py-1 text-red-400',
+}
+
 export function AutomationHealthPill({ health }: { health: IssueAutomationHealth }) {
   const meta = AUTOMATION_HEALTH_META[health.state]
   return (
@@ -224,6 +235,8 @@ interface AgentRuntime {
   id: string
   displayName: string
   source: 'override' | 'issue-default' | 'workspace-default' | 'workspace'
+  /** Explicit frontmatter only matters in the board when it differs from the effective default. */
+  distinctOverride?: boolean
 }
 
 /** Normalised collision key — title, trimmed + lowercased. Mirrors the server's
@@ -243,19 +256,29 @@ function resolveAgentRuntime(
   issueDefaultAgent: string | null,
   defaultAgent: string | null,
 ): AgentRuntime | undefined {
-  if (issue.agent) {
-    return { id: issue.agent, displayName: agentName(issue.agent, agents), source: 'override' }
+  if (!workspace) {
+    return issue.agent
+      ? { id: issue.agent, displayName: agentName(issue.agent, agents), source: 'override', distinctOverride: true }
+      : undefined
   }
-  if (!workspace) return undefined
   const runtimeIds = workspace.agents.filter((id) => {
     const agent = agents.find((a) => a.id === id)
     return agent ? agent.kind !== 'utility' : id !== 'shell'
   })
   const issueDefaultId = issueDefaultAgent && runtimeIds.includes(issueDefaultAgent) ? issueDefaultAgent : null
+  const workspaceDefaultId = defaultAgent && runtimeIds.includes(defaultAgent) ? defaultAgent : null
+  const effectiveDefaultId = issueDefaultId ?? workspaceDefaultId ?? runtimeIds[0] ?? null
+  if (issue.agent) {
+    return {
+      id: issue.agent,
+      displayName: agentName(issue.agent, agents),
+      source: 'override',
+      distinctOverride: issue.agent !== effectiveDefaultId,
+    }
+  }
   if (issueDefaultId) {
     return { id: issueDefaultId, displayName: agentName(issueDefaultId, agents), source: 'issue-default' }
   }
-  const workspaceDefaultId = defaultAgent && runtimeIds.includes(defaultAgent) ? defaultAgent : null
   if (workspaceDefaultId) {
     return { id: workspaceDefaultId, displayName: agentName(workspaceDefaultId, agents), source: 'workspace-default' }
   }
@@ -265,75 +288,147 @@ function resolveAgentRuntime(
     : undefined
 }
 
-function AgentRuntimePill({ runtime }: { runtime: AgentRuntime }) {
-  // Accent/ring means "this issue explicitly overrides the runtime"; credential
-  // readiness is a separate workspace concern and must not be inferred here.
-  const title =
-    runtime.source === 'override'
-      ? `Agent runtime override: ${runtime.displayName}`
-      : runtime.source === 'issue-default'
-        ? `Agent runtime: ${runtime.displayName} (issue default)`
-      : runtime.source === 'workspace-default'
-        ? `Agent runtime: ${runtime.displayName} (workspace default)`
-        : `Agent runtime: ${runtime.displayName} (workspace fallback)`
+const ATTENTION_ORDER: Record<IssueAutomationHealthState, number> = {
+  blocked: 0,
+  failed: 1,
+  running: 2,
+  due: 3,
+  not_started: 4,
+  healthy: 5,
+  inactive: 6,
+}
+
+const PRIORITY_ORDER: Record<IssuePriority, number> = {
+  urgent: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+  none: 4,
+}
+
+function boardRowOrder(a: BoardRow, b: BoardRow): number {
+  const aAttention = a.issue.automationHealth ? ATTENTION_ORDER[a.issue.automationHealth.state] : 4
+  const bAttention = b.issue.automationHealth ? ATTENTION_ORDER[b.issue.automationHealth.state] : 4
+  if (aAttention !== bAttention) return aAttention - bAttention
+
+  const priority = PRIORITY_ORDER[a.issue.priority] - PRIORITY_ORDER[b.issue.priority]
+  if (priority !== 0) return priority
+
+  const aDue = a.issue.nextDueAtMs ?? Number.POSITIVE_INFINITY
+  const bDue = b.issue.nextDueAtMs ?? Number.POSITIVE_INFINITY
+  if (aDue !== bDue) return aDue - bDue
+  return a.issue.title.localeCompare(b.issue.title)
+}
+
+function BoardHealth({ issue }: { issue: IssueListItem }) {
+  const health = issue.automationHealth
+  if (!health) return null
+  const meta = AUTOMATION_HEALTH_META[health.state]
+  const active = health.state === 'running' || health.state === 'due'
+  const lastRun = issue.lastFiredAtMs ? formatRelativeTime(issue.lastFiredAtMs) : ''
+
   return (
     <span
-      title={title}
-      aria-label={title}
-      className={`hidden shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[11px] sm:inline-flex ${
-        runtime.source === 'override'
-          ? 'bg-bg-tertiary text-text ring-1 ring-accent/30'
-          : 'bg-bg-tertiary text-muted'
-      }`}
+      title={health.message}
+      className={`inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium ${BOARD_HEALTH_CLASS[health.state]}`}
     >
-      <Bot size={10} aria-hidden className="opacity-80" />
-      {runtime.id}
+      <span className={`h-1.5 w-1.5 rounded-full bg-current ${active ? 'animate-pulse' : ''}`} aria-hidden />
+      {meta.label}
+      {lastRun && <span className="font-normal text-muted/55">· {lastRun}</span>}
     </span>
+  )
+}
+
+function BoardCadence({ issue }: { issue: IssueListItem }) {
+  if (!issue.when) return null
+  const nextRun = issue.nextDueAtMs ? formatRelativeTime(issue.nextDueAtMs) : ''
+  return (
+    <span
+      title={cadenceTitle(issue.when)}
+      className="inline-flex min-w-0 items-center gap-1.5 text-[11px] text-muted/75"
+    >
+      <Clock size={11} className="shrink-0 text-muted/55" aria-hidden />
+      <span className="truncate">{cadenceLabel(issue.when)}</span>
+      {nextRun && <span className="shrink-0 text-muted/50">· {nextRun}</span>}
+    </span>
+  )
+}
+
+function BoardAutomationSummary({ issue, className = '' }: { issue: IssueListItem; className?: string }) {
+  if (!issue.when && !issue.automationHealth) return null
+  return (
+    <div className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 ${className}`}>
+      <BoardHealth issue={issue} />
+      <BoardCadence issue={issue} />
+    </div>
   )
 }
 
 function IssueRow({ wsId, wsTag, issue, agentRuntime, dupOthers, onOpen }: BoardRow & { onOpen: () => void }) {
   const terminal = issue.status === 'done' || issue.status === 'canceled'
+  const titleMatchesId = issue.title.trim().toLowerCase() === issue.id.trim().toLowerCase()
+  const explicitAssignee = issue.assignee !== '@workspace'
+  const explicitAgent = agentRuntime?.source === 'override' && agentRuntime.distinctOverride !== false
   return (
     <li>
       <button
         type="button"
         onClick={onOpen}
         title={`Open ${issue.id}`}
-        className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-bg-tertiary/40 ${
+        className={`oa-pressable flex w-full items-start gap-3 px-3.5 py-3 text-left transition-colors hover:bg-bg-tertiary/35 sm:px-4 ${
           terminal ? 'opacity-60' : ''
         }`}
       >
-        <PriorityIndicator priority={issue.priority} />
-        <span
-          title={issue.id}
-          className="hidden max-w-[8rem] shrink-0 truncate font-mono text-[11px] text-muted/70 sm:inline"
-        >
-          {issue.id}
+        <span className="mt-0.5 flex h-5 w-4 shrink-0 items-center justify-center">
+          <PriorityIndicator priority={issue.priority} />
         </span>
-        <span title={issue.title} className="min-w-0 flex-1 truncate text-[13px] text-text">
-          {issue.title}
-        </span>
-        {issue.nameCollision && (
-          <span
-            title={`Duplicate name — also used in ${dupOthers ?? 1} other workspace${
-              (dupOthers ?? 1) === 1 ? '' : 's'
-            }. A [[name]] is a global handle; resolve manually.`}
-            aria-label="Duplicate issue name across workspaces"
-            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-          >
-            <Copy size={10} aria-hidden /> dup
-          </span>
-        )}
-        {issue.when && <CadencePill when={issue.when} />}
-        {issue.automationHealth && <AutomationHealthPill health={issue.automationHealth} />}
-        {(issue.when || issue.agent) && agentRuntime && <AgentRuntimePill runtime={agentRuntime} />}
-        <span className="hidden shrink-0 text-xs text-muted sm:inline" title={`Assignee: ${issue.assignee}`}>
-          {issue.assignee}
-        </span>
-        <span className="shrink-0 rounded-full bg-bg-tertiary px-2 py-0.5 text-[11px] text-muted" title={`Workspace: ${wsTag} (${wsId.slice(0, 8)})`}>
-          {wsTag}
-        </span>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span title={issue.title} className="min-w-0 truncate text-[13px] font-medium text-text sm:text-[13.5px]">
+              {issue.title}
+            </span>
+            {issue.nameCollision && (
+              <span
+                title={`Duplicate name — also used in ${dupOthers ?? 1} other workspace${
+                  (dupOthers ?? 1) === 1 ? '' : 's'
+                }. A [[name]] is a global handle; resolve manually.`}
+                aria-label="Duplicate issue name across workspaces"
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-400"
+              >
+                <Copy size={9} aria-hidden /> dup
+              </span>
+            )}
+          </div>
+
+          <BoardAutomationSummary issue={issue} className="mt-2 lg:hidden" />
+
+          <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[10.5px] text-muted/60">
+            <span className="truncate" title={`Workspace: ${wsTag} (${wsId.slice(0, 8)})`}>
+              {wsTag}
+            </span>
+            {!titleMatchesId && (
+              <span className="hidden max-w-[14rem] truncate font-mono text-muted/45 sm:inline" title={`Issue ID: ${issue.id}`}>
+                #{issue.id}
+              </span>
+            )}
+            {explicitAssignee && (
+              <span className="max-w-[14rem] truncate text-muted/70" title={`Assignee: ${issue.assignee}`}>
+                {issue.assignee}
+              </span>
+            )}
+            {explicitAgent && agentRuntime && (
+              <span className="inline-flex items-center gap-1 text-muted/70" title={`Agent runtime override: ${agentRuntime.displayName}`}>
+                <Bot size={10} aria-hidden /> {agentRuntime.id} override
+              </span>
+            )}
+          </div>
+        </div>
+
+        <BoardAutomationSummary
+          issue={issue}
+          className="hidden max-w-[48%] shrink-0 justify-end lg:flex"
+        />
       </button>
     </li>
   )
@@ -486,7 +581,7 @@ export function IssuesBoard() {
 
   const groups = STATUS_ORDER.map((status) => ({
     status,
-    rows: rows.filter((r) => r.issue.status === status),
+    rows: rows.filter((r) => r.issue.status === status).sort(boardRowOrder),
   })).filter((g) => g.rows.length > 0)
 
   const staleBanner = error ? (
