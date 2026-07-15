@@ -171,6 +171,8 @@ Read the relevant guide before editing its subsystem:
   delivery modes, promotions, external contributions, and risk gates.
 - [[docs/managed-workspace-runtime.md]] — [Managed Workspace runtime](docs/managed-workspace-runtime.md): Electron
   packaging, managed Pi, PortableGit/Bash, runtime profiles, and Workspace PATH.
+- [[docs/broker-packs.md]] — [Broker Packs](docs/broker-packs.md): optional broker SDK
+  packaging, UI installation, activation, runtime loading, and release assets.
 - [[docs/cli-installer.md]] — [CLI installer](docs/cli-installer.md): consent, installed layout,
   atomic updates, PATH integration, installer tests, and release checks.
 - [[docs/local-runtime.md]] — [Local Runtime and CLI bootstrap](docs/local-runtime.md): source-backed

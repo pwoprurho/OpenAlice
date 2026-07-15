@@ -8,7 +8,8 @@ checks belong to [[docs/cli-installer.md]].
 
 Related guides: [[docs/cli-installer.md]],
 [[docs/managed-workspace-runtime.md]],
-[[docs/docker-deployment.md]], and [[docs/remote-access.md]].
+[[docs/docker-deployment.md]], [[docs/broker-packs.md]], and
+[[docs/remote-access.md]].
 
 ## Product Boundary
 
@@ -65,6 +66,11 @@ without `@traderalice/desktop`, runs `pnpm build:server`, starts
 `scripts/guardian/prod.mjs` on `127.0.0.1`, and opens the normal UI. If `pnpm`
 is absent but Corepack is available, preparation uses Corepack with the pnpm
 version pinned by the repository.
+
+Live broker engines are still activated through the Trading UI and
+`<OPENALICE_HOME>/runtime/broker-packs/`. The source checkout contains their
+adapter workspaces for development, but `build:server` excludes those wrappers
+from UTA Core and no live SDK is evaluated at startup.
 
 When an interactive install is run from inside an OpenAlice checkout, the
 installer presents a separate, default-no `Start OpenAlice now?` prompt after

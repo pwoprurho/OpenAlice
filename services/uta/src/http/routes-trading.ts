@@ -195,7 +195,7 @@ export function createTradingRoutes(ctx: UTAEngineContext) {
       const { utaConfigSchema } = await import('@/core/config.js')
       const body = await c.req.json()
       const utaConfig = utaConfigSchema.parse({ ...body, id: body.id ?? '__test__' })
-      broker = createBroker(utaConfig)
+      broker = await createBroker(utaConfig)
       await broker.init()
       const [account, positions] = await Promise.all([broker.getAccount(), broker.getPositions()])
       return c.json({ success: true, account, positions })

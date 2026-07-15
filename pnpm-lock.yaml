@@ -31,9 +31,6 @@ importers:
 
   .:
     dependencies:
-      '@alpacahq/alpaca-trade-api':
-        specifier: ^3.1.3
-        version: 3.1.3
       '@anthropic-ai/sdk':
         specifier: ^0.96.0
         version: 0.96.0(zod@4.3.6)
@@ -61,9 +58,6 @@ importers:
       ai:
         specifier: ^6.0.86
         version: 6.0.86(zod@4.3.6)
-      ccxt:
-        specifier: ^4.5.38
-        version: 4.5.38
       chardet:
         specifier: 2.2.0
         version: 2.2.0
@@ -85,9 +79,6 @@ importers:
       iconv-lite:
         specifier: 0.7.2
         version: 0.7.2
-      longbridge:
-        specifier: ^4.0.5
-        version: 4.0.5
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
@@ -97,6 +88,9 @@ importers:
       pino:
         specifier: ^10.3.1
         version: 10.3.1
+      tar:
+        specifier: ^7.5.10
+        version: 7.5.16
       viem:
         specifier: ^2.48.7
         version: 2.48.7(typescript@5.9.3)(zod@4.3.6)
@@ -254,6 +248,143 @@ importers:
         specifier: ^5.7.3
         version: 5.9.3
 
+  packages/uta-broker-alpaca:
+    dependencies:
+      '@alpacahq/alpaca-trade-api':
+        specifier: ^3.1.3
+        version: 3.1.3
+      '@traderalice/ibkr':
+        specifier: workspace:*
+        version: link:../ibkr
+      '@traderalice/uta-protocol':
+        specifier: workspace:*
+        version: link:../uta-protocol
+      decimal.js:
+        specifier: ^10.6.0
+        version: 10.6.0
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^22.13.4
+        version: 22.19.15
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/uta-broker-ccxt:
+    dependencies:
+      '@traderalice/ibkr':
+        specifier: workspace:*
+        version: link:../ibkr
+      '@traderalice/uta-protocol':
+        specifier: workspace:*
+        version: link:../uta-protocol
+      ccxt:
+        specifier: ^4.5.38
+        version: 4.5.38
+      decimal.js:
+        specifier: ^10.6.0
+        version: 10.6.0
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^22.13.4
+        version: 22.19.15
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/uta-broker-ibkr:
+    dependencies:
+      '@traderalice/ibkr':
+        specifier: workspace:*
+        version: link:../ibkr
+      '@traderalice/uta-protocol':
+        specifier: workspace:*
+        version: link:../uta-protocol
+      decimal.js:
+        specifier: ^10.6.0
+        version: 10.6.0
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^22.13.4
+        version: 22.19.15
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/uta-broker-leverup:
+    dependencies:
+      '@traderalice/ibkr':
+        specifier: workspace:*
+        version: link:../ibkr
+      '@traderalice/uta-protocol':
+        specifier: workspace:*
+        version: link:../uta-protocol
+      decimal.js:
+        specifier: ^10.6.0
+        version: 10.6.0
+      viem:
+        specifier: ^2.48.7
+        version: 2.48.7(typescript@5.9.3)(zod@4.3.6)
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^22.13.4
+        version: 22.19.15
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/uta-broker-longbridge:
+    dependencies:
+      '@traderalice/ibkr':
+        specifier: workspace:*
+        version: link:../ibkr
+      '@traderalice/uta-protocol':
+        specifier: workspace:*
+        version: link:../uta-protocol
+      decimal.js:
+        specifier: ^10.6.0
+        version: 10.6.0
+      longbridge:
+        specifier: ^4.0.5
+        version: 4.0.5
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^22.13.4
+        version: 22.19.15
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/uta-protocol:
     dependencies:
       '@traderalice/ibkr':
@@ -318,9 +449,6 @@ importers:
 
   services/uta:
     dependencies:
-      '@alpacahq/alpaca-trade-api':
-        specifier: ^3.1.3
-        version: 3.1.3
       '@hono/node-server':
         specifier: ^2.0.0
         version: 2.0.0(hono@4.12.25)
@@ -333,25 +461,28 @@ importers:
       '@traderalice/uta-protocol':
         specifier: workspace:*
         version: link:../../packages/uta-protocol
-      ccxt:
-        specifier: ^4.5.38
-        version: 4.5.38
       decimal.js:
         specifier: ^10.6.0
         version: 10.6.0
       hono:
         specifier: ^4.12.21
         version: 4.12.25
-      longbridge:
-        specifier: ^4.0.5
-        version: 4.0.5
       zod:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
+      '@alpacahq/alpaca-trade-api':
+        specifier: ^3.1.3
+        version: 3.1.3
       '@types/node':
         specifier: ^22.13.4
         version: 22.19.15
+      ccxt:
+        specifier: ^4.5.38
+        version: 4.5.38
+      longbridge:
+        specifier: ^4.0.5
+        version: 4.0.5
       tsup:
         specifier: ^8.4.0
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)
@@ -2713,10 +2844,6 @@ packages:
 
   has-tostringtag@1.0.2:
     resolution: {integrity: sha512-NqADB8VjPFLM2V0VvHUewwwsw0ZWBaIdgo+ieHtK3hasLz4qeCRjYcqfB6AQrBggRKppKF8L52/VqdVsO47Dlw==}
-    engines: {node: '>= 0.4'}
-
-  hasown@2.0.2:
-    resolution: {integrity: sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==}
     engines: {node: '>= 0.4'}
 
   hasown@2.0.4:
@@ -6888,7 +7015,7 @@ snapshots:
       get-proto: 1.0.1
       gopd: 1.2.0
       has-symbols: 1.1.0
-      hasown: 2.0.2
+      hasown: 2.0.4
       math-intrinsics: 1.1.0
 
   get-proto@1.0.1:
@@ -6971,10 +7098,6 @@ snapshots:
   has-tostringtag@1.0.2:
     dependencies:
       has-symbols: 1.1.0
-
-  hasown@2.0.2:
-    dependencies:
-      function-bind: 1.1.2
 
   hasown@2.0.4:
     dependencies:

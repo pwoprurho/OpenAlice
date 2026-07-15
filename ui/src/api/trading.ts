@@ -1,5 +1,5 @@
 import { fetchJson } from './client'
-import type { UTASummary, AccountInfo, SubAccountRef, Position, WalletCommitLog, ReconnectResult, UTAConfig, WalletStatus, WalletPushResult, WalletRejectResult, TestConnectionResult, BrokerPreset, UTASnapshotSummary, EquityCurvePoint, PlaceOrderRequest, ClosePositionRequest, CancelOrderRequest, OrderErrorResponse, OrderHistoryEntry, TradeHistoryEntry } from './types'
+import type { UTASummary, AccountInfo, SubAccountRef, Position, WalletCommitLog, ReconnectResult, UTAConfig, WalletStatus, WalletPushResult, WalletRejectResult, TestConnectionResult, BrokerPreset, BrokerEngine, BrokerPackStatus, UTASnapshotSummary, EquityCurvePoint, PlaceOrderRequest, ClosePositionRequest, CancelOrderRequest, OrderErrorResponse, OrderHistoryEntry, TradeHistoryEntry } from './types'
 
 /** Thrown by the one-shot order endpoints when the server returns non-2xx. Carries the phase. */
 export class OrderEntryError extends Error {
@@ -177,6 +177,17 @@ export const tradingApi = {
 
   async getBrokerPresets(): Promise<{ presets: BrokerPreset[] }> {
     return fetchJson('/api/trading/config/broker-presets')
+  },
+
+  async getBrokerPacks(): Promise<{ packs: BrokerPackStatus[] }> {
+    return fetchJson('/api/trading/config/broker-packs')
+  },
+
+  async installBrokerPack(engine: Exclude<BrokerEngine, 'mock'>): Promise<BrokerPackStatus> {
+    const res = await fetch(`/api/trading/config/broker-packs/${encodeURIComponent(engine)}/install`, { method: 'POST' })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(body.error || `Failed to install ${engine} support (${res.status})`)
+    return { ...body, requiredBy: body.requiredBy ?? [] }
   },
 
   // ==================== Trading Config CRUD ====================

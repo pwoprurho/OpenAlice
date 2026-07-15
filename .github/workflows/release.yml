@@ -84,11 +84,11 @@ jobs:
           if-no-files-found: error
 
   # Per-platform desktop installers are built and acceptance-tested before any
-  # tag or GitHub Release exists. Each runner builds only its own platform/arch, so each
-  # artifact carries just its matching native binary (longbridge, node-pty) —
-  # pnpm installs only the os/cpu-matching prebuilt. macOS builds are signed and
-  # notarized through Developer ID secrets; Windows remains unsigned until a
-  # Windows code-signing certificate exists.
+  # tag or GitHub Release exists. Each runner builds only its own platform/arch.
+  # Optional broker SDKs are emitted as separate version/platform-specific
+  # Broker Packs and are rejected if they leak back into the desktop app. macOS
+  # builds are signed and notarized through Developer ID secrets; Windows remains
+  # unsigned until a Windows code-signing certificate exists.
   build-desktop:
     needs: release
     if: needs.release.outputs.created == 'true' && !github.event.inputs.mirror_tag
@@ -117,6 +117,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build optional Broker Packs
+        run: pnpm broker-packs:build
 
       # Fail loud if dugite's postinstall was skipped (e.g. dropped from
       # pnpm.onlyBuiltDependencies) — otherwise node_modules/dugite/git/ is
@@ -205,10 +208,55 @@ jobs:
           compression-level: 0
           retention-days: 1
 
+      - name: Preserve optional Broker Packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: broker-packs-${{ runner.os }}-${{ matrix.arch }}
+          path: |
+            dist/broker-packs/*.json
+            dist/broker-packs/*.tgz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  build-linux-broker-packs:
+    name: Build Linux Broker Packs
+    needs: release
+    if: needs.release.outputs.created == 'true' && !github.event.inputs.mirror_tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build optional Broker Packs
+        run: pnpm broker-packs:build
+
+      - name: Preserve Linux Broker Packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: broker-packs-Linux-x64
+          path: |
+            dist/broker-packs/*.json
+            dist/broker-packs/*.tgz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   publish-release:
     name: Publish accepted release
-    needs: [release, build-desktop]
-    if: needs.release.outputs.created == 'true' && needs.build-desktop.result == 'success'
+    needs: [release, build-desktop, build-linux-broker-packs]
+    if: needs.release.outputs.created == 'true' && needs.build-desktop.result == 'success' && needs.build-linux-broker-packs.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -224,6 +272,12 @@ jobs:
         with:
           pattern: release-assets-*
           path: dist/release-assets
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: broker-packs-*
+          path: dist/release-broker-packs
           merge-multiple: true
 
       - name: Create tag and GitHub Release from accepted candidates
@@ -242,6 +296,8 @@ jobs:
             dist/release-assets/*.yml
             dist/release-assets/*.blockmap
             dist/release-assets/*.exe
+            dist/release-broker-packs/*.json
+            dist/release-broker-packs/*.tgz
 
   mirror-release-assets:
     needs: [release, publish-release]
@@ -367,6 +423,7 @@ jobs:
           BASE_URL="${DOWNLOAD_BASE_URL%/}"
           VERSION="${TAG#v}"
           CHANNEL="latest"
+          shopt -s nullglob
 
           if [[ "$VERSION" == *-* ]]; then
             CHANNEL="${VERSION#*-}"
@@ -396,6 +453,12 @@ jobs:
           fi
           curl -fsSI "${BASE_URL}/windows-x64.exe"
           curl -fsSI "${BASE_URL}/manifest.json"
+
+          for catalog in dist/r2-upload/OpenAlice-Broker-Packs-${VERSION}-*.json; do
+            curl -fsSI "${BASE_URL}/$(basename "$catalog")"
+            CATALOG="$catalog" node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync(process.env.CATALOG,'utf8'));for(const p of c.packs)console.log(p.file)" |
+              while IFS= read -r pack; do curl -fsSI "${BASE_URL}/${pack}"; done
+          done
 
           WINDOWS_FEED_EXE=$(
             WINDOWS_METADATA="$WINDOWS_METADATA" node -e "const fs=require('fs');const content=fs.readFileSync('dist/r2-upload/'+process.env.WINDOWS_METADATA,'utf8');const match=content.match(/(?:^|\\n)path:\\s*['\"]?([^'\"\\n]+)['\"]?/);process.stdout.write(match?.[1]?.trim()||'')"

@@ -13,7 +13,7 @@ import { fmt } from '../lib/format'
 import { api } from '../api'
 import type { TradingServiceStatus } from '../api/trading'
 import { useWorkspace } from '../tabs/store'
-import type { UTAConfig, BrokerPreset, BrokerHealthInfo } from '../api/types'
+import type { UTAConfig, BrokerPreset, BrokerHealthInfo, BrokerPackStatus } from '../api/types'
 
 // ==================== External order monitoring cadence ====================
 //
@@ -129,9 +129,13 @@ function ExternalOrderMonitoringRow() {
   )
 }
 
-function KeylessDataSourcesRow() {
+function KeylessDataSourcesRow({ ccxtPack, onPackInstalled }: {
+  ccxtPack?: BrokerPackStatus
+  onPackInstalled: (status: BrokerPackStatus) => void
+}) {
   const [runtimeConfig, setRuntimeConfig] = useState<TradingRuntimeConfig | null>(null)
   const [msg, setMsg] = useState('')
+  const [installing, setInstalling] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -143,6 +147,10 @@ function KeylessDataSourcesRow() {
 
   const toggle = async (source: KeylessDataSource, enabled: boolean) => {
     if (!runtimeConfig) return
+    if (enabled && !ccxtPack?.installed) {
+      setMsg('Install crypto data support first')
+      return
+    }
     const prev = runtimeConfig
     const nextSources = enabled
       ? [...new Set([...prev.keylessDataSources, source])]
@@ -161,6 +169,20 @@ function KeylessDataSourcesRow() {
     }
   }
 
+  const install = async () => {
+    setInstalling(true)
+    setMsg('Installing crypto data support…')
+    try {
+      const installed = await api.trading.installBrokerPack('ccxt')
+      onPackInstalled(installed)
+      setMsg('Installed — choose the feeds you want')
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : 'Install failed')
+    } finally {
+      setInstalling(false)
+    }
+  }
+
   if (!runtimeConfig) return null
 
   return (
@@ -172,7 +194,14 @@ function KeylessDataSourcesRow() {
             Optional keyless K-line feeds. Disabled by default; enabled sources appear as read-only broker-style bar IDs.
           </div>
         </div>
-        {msg && <span className="text-[11px] text-text-muted shrink-0">{msg}</span>}
+        <div className="flex shrink-0 items-center gap-2">
+          {msg && <span className="text-[11px] text-text-muted">{msg}</span>}
+          {ccxtPack && !ccxtPack.installed && (
+            <button className="btn-secondary" disabled={installing} onClick={() => { void install() }}>
+              {installing ? 'Installing…' : ccxtPack.source === 'broken' ? 'Repair data support' : 'Install data support'}
+            </button>
+          )}
+        </div>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-3">
         {KEYLESS_DATA_SOURCE_OPTIONS.map((source) => {
@@ -180,7 +209,13 @@ function KeylessDataSourcesRow() {
           return (
             <div key={source.id} className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg-secondary/40 px-3 py-2">
               <span className="text-[12px] text-text">{source.label}</span>
-              <Toggle size="sm" checked={checked} onChange={(v) => { void toggle(source.id, v) }} />
+              <Toggle
+                size="sm"
+                checked={checked}
+                disabled={!checked && ccxtPack?.installed !== true}
+                ariaLabel={`${source.label} public data source`}
+                onChange={(v) => { void toggle(source.id, v) }}
+              />
             </div>
           )
         })}
@@ -204,6 +239,63 @@ interface EquitySummary {
   accounts: Array<{ id: string; label: string; equity: string; cash: string }>
 }
 
+function MissingBrokerPacksNotice({ packs, onInstalled }: {
+  packs: BrokerPackStatus[]
+  onInstalled: (status: BrokerPackStatus) => void
+}) {
+  const missing = packs.filter((pack) => !pack.installed && pack.requiredBy.length > 0)
+  const [installing, setInstalling] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  if (missing.length === 0) return null
+
+  const install = async (pack: BrokerPackStatus) => {
+    if (pack.engine === 'mock') return
+    setInstalling(pack.engine)
+    setError('')
+    try {
+      onInstalled(await api.trading.installBrokerPack(pack.engine))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to install ${pack.engine} support`)
+    } finally {
+      setInstalling(null)
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-yellow-400/30 bg-yellow-400/5 px-4 py-3">
+      <div className="flex items-start gap-2.5">
+        <AlertTriangle size={15} className="mt-0.5 shrink-0 text-yellow-400" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-medium text-text">Optional broker support is missing</div>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
+            OpenAlice itself can keep running. Install only the integrations used by these accounts or K-line sources.
+          </p>
+          <div className="mt-3 space-y-2">
+            {missing.map((pack) => (
+              <div key={pack.engine} className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-[12px] font-medium uppercase text-text">{pack.engine}</div>
+                  <div className="truncate text-[11px] text-text-muted">Required by {pack.requiredBy.join(', ')}</div>
+                  {pack.reason && <div className="mt-0.5 text-[11px] text-yellow-400">{pack.reason}</div>}
+                </div>
+                <button
+                  className="btn-secondary shrink-0"
+                  disabled={installing !== null}
+                  onClick={() => { void install(pack) }}
+                >
+                  {installing === pack.engine ? 'Installing…' : pack.source === 'broken' ? 'Repair' : 'Install'}
+                </button>
+              </div>
+            ))}
+          </div>
+          {error && <p className="mt-2 text-[11px] text-red">{error}</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ==================== Page ====================
 
 export function TradingPage() {
@@ -217,9 +309,15 @@ export function TradingPage() {
   const [equity, setEquity] = useState<EquitySummary | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [serviceStatus, setServiceStatus] = useState<TradingServiceStatus | null>(null)
+  const [brokerPacks, setBrokerPacks] = useState<BrokerPackStatus[]>([])
+
+  const updateBrokerPack = (status: BrokerPackStatus) => {
+    setBrokerPacks((rows) => [...rows.filter((row) => row.engine !== status.engine), status])
+  }
 
   useEffect(() => {
     api.trading.getBrokerPresets().then(r => setPresets(r.presets)).catch(() => {})
+    api.trading.getBrokerPacks().then(r => setBrokerPacks(r.packs)).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -310,6 +408,7 @@ export function TradingPage() {
       <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5">
         <div className="max-w-[820px] mx-auto space-y-4">
           {serviceStatus?.available === false && <TradingServiceOfflineBanner status={serviceStatus} />}
+          <MissingBrokerPacksNotice packs={brokerPacks} onInstalled={updateBrokerPack} />
           {tc.utas.length === 0 ? (
             <EmptyState onAdd={() => setShowAdd(true)} />
           ) : (
@@ -336,7 +435,10 @@ export function TradingPage() {
             </div>
           )}
 
-          <KeylessDataSourcesRow />
+          <KeylessDataSourcesRow
+            ccxtPack={brokerPacks.find((row) => row.engine === 'ccxt')}
+            onPackInstalled={updateBrokerPack}
+          />
           {tc.utas.length > 0 && <ExternalOrderMonitoringRow />}
         </div>
       </div>
@@ -363,6 +465,7 @@ export function TradingPage() {
             setEditingId(id)
           }}
           onClose={() => setShowAdd(false)}
+          onPackInstalled={updateBrokerPack}
         />
       )}
 

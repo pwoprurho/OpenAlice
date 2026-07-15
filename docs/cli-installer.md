@@ -7,7 +7,8 @@ root `install` script, the distributed CLI file set, or installer smoke changes.
 
 Related guides: [[docs/local-runtime.md]],
 [[docs/managed-workspace-runtime.md]], and
-[[docs/development-workflow.md]]. External installer research is deliberately
+[[docs/development-workflow.md]]. Optional broker integration delivery belongs
+to [[docs/broker-packs.md]]. External installer research is deliberately
 non-authoritative and lives in
 [[docs/reference/install-script/README.md]].
 

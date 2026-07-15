@@ -5,7 +5,8 @@ features should extend TraderHub, the bar service, or a typed domain contract;
 they should not expand the embedded OpenBB compatibility model by default.
 
 Related guides: [[docs/project-structure.md]] and
-[[docs/uta-live-testing.md]].
+[[docs/uta-live-testing.md]]. Broker implementation delivery is owned by
+[[docs/broker-packs.md]].
 
 ## Supported Product Surfaces
 
@@ -86,6 +87,14 @@ BarService federates:
 - vendor K-lines from the embedded provider adapters;
 - broker/exchange K-lines exposed through UTA;
 - source metadata such as capability and freshness.
+
+UTA source discovery and Broker Pack installation are independent. `asVendor`
+controls whether a configured UTA joins default K-line/contract discovery;
+keyless public-data UTAs are explicit source choices. A Broker Pack merely
+supplies the selected broker engine implementation. Missing support makes that
+UTA source unavailable with an actionable error; it must not remove the UTA
+provider kind, rewrite `asVendor`, or silently route the same `barId` through a
+different vendor.
 
 New K-line sources should implement the bar/provider contract and appear in bar
 source discovery. They should not require a new OpenBB-style asset-class client

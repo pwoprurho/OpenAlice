@@ -307,7 +307,16 @@ export class UnifiedTradingAccount {
   }
 
   private _notePermanent(err: unknown): void {
-    if (err instanceof BrokerError && err.permanent) this._disabled = true
+    // Broker packs may carry their own physical copy of uta-protocol. Preserve
+    // the structured BrokerError contract across that module boundary instead
+    // of relying exclusively on class identity.
+    if (
+      err instanceof BrokerError
+      ? err.permanent
+      : !!err && typeof err === 'object'
+        && (err as { name?: unknown }).name === 'BrokerError'
+        && (err as { permanent?: unknown }).permanent === true
+    ) this._disabled = true
   }
   private _noteFailure(err: unknown): void {
     this._lastError = err instanceof Error ? err.message : String(err)

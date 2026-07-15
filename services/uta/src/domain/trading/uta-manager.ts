@@ -8,7 +8,6 @@
 import Decimal from 'decimal.js'
 import type { Contract, ContractDescription, ContractDetails } from '@traderalice/ibkr'
 import type { AccountCapabilities, BrokerHealth, BrokerHealthInfo } from './brokers/types.js'
-import { CcxtBroker } from './brokers/ccxt/CcxtBroker.js'
 import { createCcxtProviderTools } from './brokers/ccxt/ccxt-tools.js'
 import { createBroker } from './brokers/factory.js'
 import { getBrokerPreset } from '@traderalice/uta-protocol'
@@ -61,7 +60,7 @@ export class UTAManager {
 
   /** Create a UTA from config, register it, and start async broker connection. */
   async initUTA(cfg: UTAConfig): Promise<UnifiedTradingAccount> {
-    const broker = createBroker(cfg, { fxService: this.fxService })
+    const broker = await createBroker(cfg, { fxService: this.fxService })
     const savedState = await loadGitState(cfg.id)
     const uta = new UnifiedTradingAccount(broker, {
       guards: cfg.guards,
@@ -133,7 +132,7 @@ export class UTAManager {
 
   /** Register CCXT provider tools if any CCXT accounts are present. */
   registerCcxtToolsIfNeeded(): void {
-    const hasCcxt = this.resolve().some((uta) => uta.broker instanceof CcxtBroker)
+    const hasCcxt = this.resolve().some((uta) => uta.broker.brokerEngine === 'ccxt')
     if (hasCcxt) {
       this.toolCenter?.register(createCcxtProviderTools(this), 'trading-ccxt')
       console.log('ccxt: provider tools registered')

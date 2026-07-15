@@ -126,6 +126,7 @@ export class AlpacaBroker implements IBroker {
 
   // ---- Instance ----
 
+  readonly brokerEngine = 'alpaca'
   readonly id: string
   readonly label: string
 
@@ -499,7 +500,8 @@ export class AlpacaBroker implements IBroker {
   /** All open orders on the account — external-order observation surface. */
   async getOpenOrders(): Promise<OpenOrder[]> {
     try {
-      const raw = await this.client.getOrders({ status: 'open' }) as AlpacaOrderRaw[]
+      const query = { status: 'open' } as Parameters<typeof this.client.getOrders>[0]
+      const raw = await this.client.getOrders(query) as AlpacaOrderRaw[]
       return raw.map((o) => this.mapOpenOrder(o))
     } catch (err) {
       throw BrokerError.from(err)

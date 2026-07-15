@@ -58,6 +58,13 @@ describe('dataPath', () => {
   })
 })
 
+describe('runtimePath', () => {
+  it('keeps replaceable runtime payloads outside portable data/', async () => {
+    const { runtimePath } = await loadPaths({ OPENALICE_HOME: '/tmp/oa-test' })
+    expect(runtimePath('broker-packs', 'ccxt')).toBe(resolve('/tmp/oa-test', 'runtime', 'broker-packs', 'ccxt'))
+  })
+})
+
 describe('defaultPath', () => {
   it('joins parts under <APP_RESOURCES_HOME>/default/', async () => {
     const { defaultPath } = await loadPaths({ OPENALICE_APP_HOME: '/Apps/OpenAlice.app/Contents/Resources' })

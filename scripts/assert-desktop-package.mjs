@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { DEFAULT_DESKTOP_PACKAGE_ROOT, resolveDesktopPackageRootArg } from './desktop-package-artifact.mjs'
@@ -39,6 +39,16 @@ export const BASE_REQUIRED_FILES = [
   'vendor/pi/node_modules/@earendil-works/pi-coding-agent/dist/cli.js',
 ]
 
+export const FORBIDDEN_BROKER_SDKS = [
+  { packagePath: 'ccxt', pnpmPrefix: 'ccxt@' },
+  { packagePath: 'longbridge', pnpmPrefix: 'longbridge@' },
+  { packagePath: 'longbridge-darwin-arm64', pnpmPrefix: 'longbridge-' },
+  { packagePath: 'longbridge-darwin-x64', pnpmPrefix: 'longbridge-' },
+  { packagePath: 'longbridge-linux-x64-gnu', pnpmPrefix: 'longbridge-' },
+  { packagePath: 'longbridge-win32-x64-msvc', pnpmPrefix: 'longbridge-' },
+  { packagePath: '@alpacahq/alpaca-trade-api', pnpmPrefix: '@alpacahq+alpaca-trade-api@' },
+]
+
 export function assertDesktopPackage(options = {}) {
   const root = options.packageRoot ?? DEFAULT_DESKTOP_PACKAGE_ROOT
   const repo = options.repoRoot ?? repoRoot
@@ -61,6 +71,17 @@ export function assertDesktopPackage(options = {}) {
   if (missing.length > 0) {
     errors.push(`[desktop-package] ${relative(repo, appRoot)} is missing required packaged files:`)
     for (const file of missing) errors.push(`  - ${file}`)
+  }
+
+  const nodeModules = join(appRoot, 'node_modules')
+  const virtualStore = join(nodeModules, '.pnpm')
+  const virtualEntries = existsSync(virtualStore) ? readdirSync(virtualStore) : []
+  const bundledBrokerSdks = FORBIDDEN_BROKER_SDKS.filter(({ packagePath, pnpmPrefix }) =>
+    existsSync(join(nodeModules, packagePath)) || virtualEntries.some((entry) => entry.startsWith(pnpmPrefix)),
+  )
+  if (bundledBrokerSdks.length > 0) {
+    errors.push('[desktop-package] optional broker SDKs must ship only in downloadable Broker Packs:')
+    for (const sdk of bundledBrokerSdks) errors.push(`  - ${sdk.packagePath}`)
   }
 
   const manifestPath = join(appRoot, 'vendor', 'manifest.json')

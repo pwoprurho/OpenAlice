@@ -205,6 +205,7 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
 
   // ---- Instance ----
 
+  readonly brokerEngine = 'ccxt'
   readonly id: string
   readonly label: string
   readonly meta: CcxtBrokerMeta

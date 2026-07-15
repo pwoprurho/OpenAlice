@@ -76,6 +76,7 @@ export class IbkrBroker implements IBroker {
 
   // ---- Instance ----
 
+  readonly brokerEngine = 'ibkr'
   readonly id: string
   readonly label: string
 

@@ -124,4 +124,24 @@ describe('assertDesktopPackage', () => {
       rmSync(root, { recursive: true, force: true })
     }
   })
+
+  it('rejects optional broker SDKs bundled into the desktop app', () => {
+    const root = mkdtempSync(join(tmpdir(), 'openalice-package-broker-sdk-'))
+    try {
+      const appRoot = join(root, 'mac-arm64/OpenAlice.app/Contents/Resources/app')
+      writeBasePackage(appRoot, { ...piManifest(), ...searchToolsManifest('darwin-arm64') })
+      writeSearchToolFiles(appRoot, 'darwin-arm64')
+      writePackageFile(appRoot, 'node_modules/.pnpm/ccxt@4.5.38/package.json')
+      writePackageFile(appRoot, 'node_modules/longbridge/package.json')
+
+      const result = assertDesktopPackage({ packageRoot: root, repoRoot: root, arch: 'arm64' })
+
+      expect(result.ok).toBe(false)
+      expect(result.errors.join('\n')).toContain('optional broker SDKs')
+      expect(result.errors.join('\n')).toContain('ccxt')
+      expect(result.errors.join('\n')).toContain('longbridge')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })

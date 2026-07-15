@@ -32,27 +32,26 @@ describe('keyless data UTA injection', () => {
   })
 
   for (const ex of ['binance', 'okx', 'bybit']) {
-    it(`${ex}-readonly: constructs a keyless broker (no throw, keyless flag flows)`, () => {
-      let broker: unknown
-      expect(() => { broker = createBroker(cfgFor(ex)) }).not.toThrow()
+    it(`${ex}-readonly: constructs a keyless broker (no throw, keyless flag flows)`, async () => {
+      const broker = await createBroker(cfgFor(ex))
       expect((broker as { id: string }).id).toBe(`${ex}-readonly`)
       // keyless must reach the broker (factory → fromConfig → constructor) so
       // init() skips the credential check.
-      expect((broker as Record<string, unknown>).keyless).toBe(true)
+      expect((broker as unknown as Record<string, unknown>).keyless).toBe(true)
       // and it declares the historical-bars capability for the federation.
       expect((broker as { getCapabilities(): { historicalBars?: { supported: boolean } } }).getCapabilities().historicalBars?.supported).toBe(true)
     })
   }
 
-  it('reports every contract as crypto (a crypto venue\'s "stock" is synthetic)', () => {
-    const broker = createBroker(cfgFor('okx')) as unknown as { assetClassFor(c: unknown): string }
+  it('reports every contract as crypto (a crypto venue\'s "stock" is synthetic)', async () => {
+    const broker = await createBroker(cfgFor('okx')) as unknown as { assetClassFor(c: unknown): string }
     // Even a "FUT" or a tokenized-equity-looking contract → crypto, by venue.
     expect(broker.assetClassFor({ symbol: 'BTC', secType: 'FUT' })).toBe('crypto')
     expect(broker.assetClassFor({ symbol: 'AAPL', secType: 'STK' })).toBe('crypto')
   })
 
   it('keyless account-reads return empty without auth (no fetchBalance / no init)', async () => {
-    const broker = createBroker(cfgFor('binance')) as unknown as {
+    const broker = await createBroker(cfgFor('binance')) as unknown as {
       getAccount(): Promise<{ totalCashValue: string; netLiquidation: string }>
       getPositions(): Promise<unknown[]>
       getOrders(ids: string[]): Promise<unknown[]>

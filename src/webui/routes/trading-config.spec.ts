@@ -10,12 +10,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // Mock readUTAsConfig / writeUTAsConfig with in-memory store BEFORE importing the route.
 let utaStore: unknown[] = []
+let keylessDataSources: string[] = []
 vi.mock('../../core/config.js', async () => {
   const actual = await vi.importActual<typeof import('../../core/config.js')>('../../core/config.js')
   return {
     ...actual,
     readUTAsConfig: vi.fn(async () => utaStore),
     writeUTAsConfig: vi.fn(async (next: unknown[]) => { utaStore = [...next] }),
+    loadConfig: vi.fn(async () => ({ trading: { keylessDataSources } })),
   }
 })
 
@@ -49,7 +51,27 @@ async function req(routes: ReturnType<typeof createTradingConfigRoutes>, method:
   return { status: res.status, body: json }
 }
 
-beforeEach(() => { utaStore = [] })
+beforeEach(() => {
+  utaStore = []
+  keylessDataSources = []
+})
+
+describe('GET /broker-packs — optional engine requirements', () => {
+  it('keeps account and keyless K-line vendor requirements on the CCXT pack', async () => {
+    utaStore = [{
+      id: 'okx-main', label: 'Main OKX', presetId: 'okx', enabled: true,
+      presetConfig: {}, guards: [], asVendor: true,
+    }]
+    keylessDataSources = ['binance']
+
+    const { status, body } = await req(makeRoutes(), 'GET', '/broker-packs')
+
+    expect(status).toBe(200)
+    const ccxt = (body as { packs: Array<{ engine: string; requiredBy: string[] }> }).packs
+      .find((pack) => pack.engine === 'ccxt')
+    expect(ccxt?.requiredBy).toEqual(['Main OKX', 'binance K-line vendor'])
+  })
+})
 
 // ==================== POST /uta ====================
 

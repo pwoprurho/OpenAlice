@@ -21,6 +21,12 @@ tini (PID 1)
 /data  persistent operator state and Workspaces
 ```
 
+The image contains UTA Core but no live broker SDK. Alice installs selected
+Broker Packs under `/data/runtime/broker-packs/`, so they survive container
+replacement with the rest of `OPENALICE_HOME`. A missing or incompatible Pack
+disables only its accounts/data sources; it does not prevent UTA Core or Chat
+from starting. See [[docs/broker-packs.md]].
+
 Only Alice's web port `47331` is published. The CLI/MCP gateway, UTA, and
 Connector Service stay on
 container loopback. Workspace agents reach Alice through the injected

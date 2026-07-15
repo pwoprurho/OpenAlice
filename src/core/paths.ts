@@ -44,6 +44,14 @@ export function dataPath(...parts: string[]): string {
   return resolve(USER_DATA_HOME, 'data', ...parts)
 }
 
+/**
+ * Machine-local, replaceable runtime payloads installed after OpenAlice.
+ * Broker packs belong here rather than in portable `data/` backups.
+ */
+export function runtimePath(...parts: string[]): string {
+  return resolve(USER_DATA_HOME, 'runtime', ...parts)
+}
+
 /** Path under `default/` — shipped templates (persona, heartbeat, skills). */
 export function defaultPath(...parts: string[]): string {
   return resolve(APP_RESOURCES_HOME, 'default', ...parts)

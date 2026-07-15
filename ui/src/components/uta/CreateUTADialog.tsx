@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { api } from '../../api'
-import type { AccountInfo, BrokerPreset, Position, TestConnectionResult, UTAConfig } from '../../api/types'
+import type { AccountInfo, BrokerPackStatus, BrokerPreset, Position, TestConnectionResult, UTAConfig } from '../../api/types'
 import type { SDKOption } from '../SDKSelector'
 import { SDKSelector } from '../SDKSelector'
 import { Toggle } from '../Toggle'
@@ -10,7 +10,7 @@ import { useSchemaForm } from '../../hooks/useSchemaForm'
 import { Dialog } from './Dialog'
 import { SchemaFormFields } from './SchemaFormFields'
 
-type WizardStep = 'pick' | 'config' | 'test'
+type WizardStep = 'pick' | 'install' | 'config' | 'test'
 
 interface BrokerConflict {
   existing: { id: string; label: string; presetId: string }
@@ -27,6 +27,7 @@ export function CreateUTADialog({
   onSave,
   onOpenExisting,
   onClose,
+  onPackInstalled,
   initialReadOnly = false,
   initialAsVendor = true,
   escapeAction,
@@ -35,6 +36,7 @@ export function CreateUTADialog({
   onSave: (uta: Omit<UTAConfig, 'id'>) => Promise<UTAConfig>
   onOpenExisting: (id: string) => void
   onClose: () => void
+  onPackInstalled?: (status: BrokerPackStatus) => void
   initialReadOnly?: boolean
   initialAsVendor?: boolean
   escapeAction?: EscapeAction
@@ -50,6 +52,8 @@ export function CreateUTADialog({
   const [error, setError] = useState('')
   const [conflict, setConflict] = useState<BrokerConflict | null>(null)
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null)
+  const [packStatuses, setPackStatuses] = useState<BrokerPackStatus[] | null>(null)
+  const [installingPack, setInstallingPack] = useState(false)
 
   const preset = presets.find(p => p.id === presetId)
   const hasSensitive = preset?.schema && Object.values((preset.schema as { properties?: Record<string, { writeOnly?: boolean }> }).properties ?? {}).some(p => p.writeOnly)
@@ -57,6 +61,24 @@ export function CreateUTADialog({
 
   const defaultName = preset?.defaultName ?? ''
   const finalName = name.trim() || defaultName
+  const packStatus = preset ? packStatuses?.find((row) => row.engine === preset.engine) : undefined
+
+  useEffect(() => {
+    let cancelled = false
+    api.trading.getBrokerPacks()
+      .then((result) => { if (!cancelled) setPackStatuses(result.packs) })
+      .catch((err) => {
+        if (!cancelled) {
+          setPackStatuses([])
+          setError(err instanceof Error ? err.message : String(err))
+        }
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (step === 'install' && packStatus?.installed) setStep('config')
+  }, [packStatus?.installed, step])
 
   const toOption = (p: BrokerPreset): SDKOption => ({
     id: p.id,
@@ -91,11 +113,32 @@ export function CreateUTADialog({
   }
 
   const handlePick = (id: string) => {
+    const selected = presets.find((row) => row.id === id)
     setPresetId(id)
     setReadOnly(initialReadOnly)
     setAsVendor(initialAsVendor)
     setError('')
-    setStep('config')
+    const status = selected ? packStatuses?.find((row) => row.engine === selected.engine) : undefined
+    setStep(status?.installed ? 'config' : 'install')
+  }
+
+  const handleInstallPack = async () => {
+    if (!preset || preset.engine === 'mock') return
+    setInstallingPack(true)
+    setError('')
+    try {
+      const installed = await api.trading.installBrokerPack(preset.engine)
+      setPackStatuses((rows) => [
+        ...(rows ?? []).filter((row) => row.engine !== installed.engine),
+        installed,
+      ])
+      onPackInstalled?.(installed)
+      setStep('config')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to install ${preset.label} support`)
+    } finally {
+      setInstallingPack(false)
+    }
   }
 
   const handleTest = async () => {
@@ -144,6 +187,7 @@ export function CreateUTADialog({
 
   const headerLabel =
     step === 'pick'   ? 'Connect Broker · Pick Platform' :
+    step === 'install' ? `Connect Broker · Install ${preset?.label ?? ''}` :
     step === 'config' ? `Connect Broker · Configure ${preset?.label ?? ''}` :
                         `Connect Broker · Test ${preset?.label ?? ''}`
 
@@ -234,6 +278,14 @@ export function CreateUTADialog({
           </div>
         )}
 
+        {step === 'install' && preset && (
+          <BrokerPackInstallPanel
+            preset={preset}
+            status={packStatus}
+            error={error}
+          />
+        )}
+
         {step === 'test' && testResult && !conflict && (
           <TestResultPanel result={testResult} utaId={finalName} />
         )}
@@ -246,12 +298,22 @@ export function CreateUTADialog({
       <div className="shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-t border-border">
         <div className="flex min-w-0 items-center gap-2">
           {step === 'pick' && <button onClick={onClose} className="btn-secondary">Cancel</button>}
+          {step === 'install' && <button onClick={() => setStep('pick')} className="btn-secondary">← Back</button>}
           {step === 'config' && <button onClick={() => setStep('pick')} className="btn-secondary">← Back</button>}
           {step === 'test' && <button onClick={() => setStep('config')} className="btn-secondary">← Back</button>}
           {escapeButton}
         </div>
         <div className="flex shrink-0 items-center justify-end">
           {step === 'pick' && <span className="text-[11px] text-text-muted">Pick a platform to continue</span>}
+          {step === 'install' && (
+            packStatuses === null ? (
+              <span className="text-[11px] text-text-muted">Checking installed support…</span>
+            ) : (
+              <button onClick={() => { void handleInstallPack() }} disabled={installingPack} className="btn-primary">
+                {installingPack ? 'Installing…' : packStatus?.source === 'broken' ? 'Repair support' : `Install ${preset?.label ?? 'broker'} support`}
+              </button>
+            )
+          )}
           {step === 'config' && (
             <button onClick={handleTest} disabled={testing} className="btn-primary">
               {testing ? 'Testing...' : 'Test Connection →'}
@@ -285,7 +347,7 @@ function PickerSectionHeader({ title }: { title: string }) {
 }
 
 function StepDots({ current }: { current: WizardStep }) {
-  const order: WizardStep[] = ['pick', 'config', 'test']
+  const order: WizardStep[] = ['pick', 'install', 'config', 'test']
   return (
     <div className="flex items-center gap-1.5">
       {order.map((s) => (
@@ -296,6 +358,35 @@ function StepDots({ current }: { current: WizardStep }) {
           }`}
         />
       ))}
+    </div>
+  )
+}
+
+function BrokerPackInstallPanel({ preset, status, error }: {
+  preset: BrokerPreset
+  status?: BrokerPackStatus
+  error: string
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-border bg-bg-secondary/40 px-4 py-4">
+        <div className="flex items-start gap-3">
+          <span className={`mt-0.5 flex h-8 w-8 items-center justify-center rounded-md text-[11px] font-semibold ${preset.badgeColor} ${preset.badgeColor.replace('text-', 'bg-')}/10`}>
+            {preset.badge}
+          </span>
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-text">Install {preset.label} support</div>
+            <p className="mt-1 text-[12px] leading-relaxed text-text-muted">
+              OpenAlice installs broker integrations separately so the desktop app stays small and unused SDKs never load at startup.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div className="rounded-md border border-border px-3 py-2.5 text-[11px] leading-relaxed text-text-muted">
+        The downloaded pack is matched to this OpenAlice version and operating system, checksum-verified, then activated atomically. Your account credentials are requested only after installation.
+      </div>
+      {status?.reason && <p className="text-[12px] text-yellow-400">{status.reason}</p>}
+      {error && <p className="text-[12px] text-red">{error}</p>}
     </div>
   )
 }

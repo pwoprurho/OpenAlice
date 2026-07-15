@@ -43,6 +43,37 @@ function utaId(params: { id?: string | readonly string[] }): string {
   return Array.isArray(v) ? v[0] ?? '' : String(v ?? '')
 }
 
+const demoBrokerPresets = [
+  {
+    id: 'alpaca', label: 'Alpaca', description: 'US equities with paper-trading support.',
+    category: 'recommended', defaultName: 'Alpaca', badge: 'AP', badgeColor: 'text-emerald-400',
+    engine: 'alpaca', guardCategory: 'securities', subtitleFields: [],
+    schema: {
+      type: 'object',
+      properties: {
+        keyId: { type: 'string', title: 'API key', writeOnly: true },
+        secretKey: { type: 'string', title: 'API secret', writeOnly: true },
+        paper: { type: 'boolean', title: 'Paper account', default: true },
+      },
+      required: ['keyId', 'secretKey'],
+    },
+  },
+  {
+    id: 'okx', label: 'OKX', description: 'OKX Unified Trading Account.',
+    category: 'crypto', defaultName: 'OKX', badge: 'OK', badgeColor: 'text-sky-400',
+    engine: 'ccxt', guardCategory: 'crypto', subtitleFields: [],
+    schema: {
+      type: 'object',
+      properties: {
+        apiKey: { type: 'string', title: 'API key', writeOnly: true },
+        secret: { type: 'string', title: 'Secret', writeOnly: true },
+        password: { type: 'string', title: 'Passphrase', writeOnly: true },
+      },
+      required: ['apiKey', 'secret', 'password'],
+    },
+  },
+]
+
 export const tradingHandlers = [
   http.get('/api/trading/status', () =>
     HttpResponse.json({
@@ -145,7 +176,20 @@ export const tradingHandlers = [
     ),
   ),
 
-  http.get('/api/trading/config/broker-presets', () => HttpResponse.json({ presets: [] })),
+  http.get('/api/trading/config/broker-presets', () => HttpResponse.json({ presets: demoBrokerPresets })),
+  http.get('/api/trading/config/broker-packs', () => HttpResponse.json({
+    packs: [
+      { engine: 'mock', installed: true, source: 'builtin', version: 'demo', requiredBy: [] },
+      { engine: 'ccxt', installed: true, source: 'workspace', version: 'demo', requiredBy: [] },
+      { engine: 'alpaca', installed: false, source: 'missing', requiredBy: [] },
+      { engine: 'ibkr', installed: false, source: 'missing', requiredBy: [] },
+      { engine: 'leverup', installed: false, source: 'missing', requiredBy: [] },
+      { engine: 'longbridge', installed: false, source: 'missing', requiredBy: [] },
+    ],
+  })),
+  http.post('/api/trading/config/broker-packs/:engine/install', ({ params }) => HttpResponse.json({
+    engine: String(params.engine), installed: true, source: 'downloaded', version: 'demo', requiredBy: [],
+  })),
   http.get('/api/trading/config', () => HttpResponse.json({ utas: demoUTAConfigs })),
   http.post('/api/trading/config/uta', () => HttpResponse.json(demoUTAConfig, { status: 201 })),
   http.put('/api/trading/config/uta/:id', () => HttpResponse.json(demoUTAConfig)),

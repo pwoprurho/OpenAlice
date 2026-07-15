@@ -509,6 +509,17 @@ export interface BrokerPreset {
   schema: JsonSchema
 }
 
+export type BrokerEngine = BrokerPreset['engine']
+
+export interface BrokerPackStatus {
+  engine: BrokerEngine
+  installed: boolean
+  source: 'builtin' | 'workspace' | 'downloaded' | 'missing' | 'broken'
+  version?: string
+  reason?: string
+  requiredBy: string[]
+}
+
 export interface GuardEntry {
   type: string
   options: Record<string, unknown>

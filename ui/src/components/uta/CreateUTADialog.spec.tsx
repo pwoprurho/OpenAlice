@@ -1,7 +1,23 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { BrokerPreset } from '../../api/types'
+
+const { getBrokerPacks, installBrokerPack } = vi.hoisted(() => ({
+  getBrokerPacks: vi.fn(),
+  installBrokerPack: vi.fn(),
+}))
+
+vi.mock('../../api', () => ({
+  api: {
+    trading: {
+      getBrokerPacks,
+      installBrokerPack,
+      testConnection: vi.fn(),
+    },
+  },
+}))
+
 import { CreateUTADialog } from './CreateUTADialog'
 
 const brokerPreset: BrokerPreset = {
@@ -45,6 +61,15 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+beforeEach(() => {
+  getBrokerPacks.mockResolvedValue({
+    packs: [{ engine: 'ccxt', installed: true, source: 'workspace', requiredBy: [] }],
+  })
+  installBrokerPack.mockResolvedValue({
+    engine: 'ccxt', installed: true, source: 'downloaded', version: '1.0.0', requiredBy: [],
+  })
+})
+
 describe('CreateUTADialog', () => {
   it('uses broker-facing setup labels instead of internal UTA labels', () => {
     setup()
@@ -53,14 +78,35 @@ describe('CreateUTADialog', () => {
     expect(screen.getByLabelText('Close broker setup')).toBeTruthy()
   })
 
-  it('can default a readonly onboarding account to read-only', () => {
+  it('can default a readonly onboarding account to read-only', async () => {
     setup({ initialReadOnly: true })
+
+    await waitFor(() => expect(getBrokerPacks).toHaveBeenCalled())
 
     fireEvent.click(screen.getByText('OKX'))
 
     const switches = screen.getAllByRole('switch')
     expect(switches[0]?.getAttribute('aria-checked')).toBe('true')
     expect(switches[1]?.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('installs a missing broker pack before asking for credentials', async () => {
+    getBrokerPacks.mockResolvedValueOnce({
+      packs: [{ engine: 'ccxt', installed: false, source: 'missing', requiredBy: [] }],
+    })
+    const onPackInstalled = vi.fn()
+    setup({ onPackInstalled })
+
+    await waitFor(() => expect(getBrokerPacks).toHaveBeenCalled())
+    fireEvent.click(screen.getByText('OKX'))
+
+    expect(screen.getByRole('button', { name: 'Install OKX support' })).toBeTruthy()
+    expect(screen.queryByText('API key')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Install OKX support' }))
+
+    await waitFor(() => expect(installBrokerPack).toHaveBeenCalledWith('ccxt'))
+    await waitFor(() => expect(screen.getByText('API key')).toBeTruthy())
+    expect(onPackInstalled).toHaveBeenCalledWith(expect.objectContaining({ engine: 'ccxt', installed: true }))
   })
 
   it('surfaces an onboarding escape action from every wizard step', () => {

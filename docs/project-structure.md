@@ -5,7 +5,7 @@ and persistent-state layout. Update it when a top-level subsystem moves or a
 new long-lived process, package, or state root is introduced.
 
 Related guides: [[docs/managed-workspace-runtime.md]],
-[[docs/cli-installer.md]], [[docs/local-runtime.md]],
+[[docs/cli-installer.md]], [[docs/local-runtime.md]], [[docs/broker-packs.md]],
 [[docs/docker-deployment.md]],
 [[docs/workspace-lifecycle.md]],
 [[docs/workspace-template-upgrade.md]],
@@ -74,13 +74,14 @@ src/                           Alice process
 services/uta/                  UTA process
 ├── src/main.ts                service composition root
 ├── src/http/                  trading/simulator HTTP boundary
-└── src/domain/trading/        all broker and trading-domain implementation
+└── src/domain/trading/        UTA Core plus source adapters for Broker Packs
 
 packages/
 ├── cli/                       installable local Runtime/connection CLI
 ├── guardian-runtime/          process ownership and recovery primitives
 ├── uta-protocol/              schemas and wire types shared by Alice + UTA
 ├── ibkr/                      IBKR TWS protocol package, owned by UTA
+├── uta-broker-*/              optional live-engine release wrappers
 └── opentypebb/                embedded market-data compatibility package
 
 ui/                            React/Vite renderer
@@ -172,6 +173,9 @@ crosses `@traderalice/uta-protocol` over local HTTP:
 
 - `services/uta/src/domain/trading/` contains broker implementations,
   account state, approval/git semantics, FX, and snapshots.
+- `packages/uta-broker-*/` package live broker implementations and third-party
+  SDKs separately from UTA Core; production resolves them from
+  `<OPENALICE_HOME>/runtime/broker-packs/`.
 - `src/services/uta-client/` presents that remote boundary to Alice as SDK
   adapters.
 - `src/tool/trading.ts` is a thin agent-facing bridge, not a broker domain.
@@ -181,6 +185,9 @@ crosses `@traderalice/uta-protocol` over local HTTP:
 
 Do not use Alice process availability as evidence that UTA or a broker is
 healthy. Do not let an optional UTA failure block read-only Workspace use.
+An absent Broker Pack disables only accounts and K-line sources that require
+that engine; it must not prevent UTA Core or another engine from starting. See
+[[docs/broker-packs.md]] for the install and activation contract.
 
 ## Tools, Automation, and Delivery
 
@@ -227,6 +234,8 @@ launcher and services agree.
 ├── state/
 │   ├── guardian.lock          launcher ownership
 │   └── runtime.lock           shared writer ownership
+├── runtime/
+│   └── broker-packs/          replaceable, platform-specific broker SDK packs
 ├── provider-keys.json         user-global AI provider credentials
 └── sealing.key                machine-bound encryption key; not in data/
 ```

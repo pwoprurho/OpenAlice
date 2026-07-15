@@ -15,6 +15,10 @@ import './contract-ext.js'
 
 export type BrokerErrorCode = 'CONFIG' | 'AUTH' | 'NETWORK' | 'EXCHANGE' | 'MARKET_CLOSED' | 'CONNECTING' | 'UNKNOWN'
 
+const BROKER_ERROR_CODES: ReadonlySet<string> = new Set<BrokerErrorCode>([
+  'CONFIG', 'AUTH', 'NETWORK', 'EXCHANGE', 'MARKET_CLOSED', 'CONNECTING', 'UNKNOWN',
+])
+
 /**
  * Structured broker error.
  * - `permanent` errors (CONFIG, AUTH) disable the account — will not be retried.
@@ -41,7 +45,16 @@ export class BrokerError extends Error {
   static from(err: unknown, fallbackCode: BrokerErrorCode = 'UNKNOWN'): BrokerError {
     if (err instanceof BrokerError) return err
     const msg = err instanceof Error ? err.message : String(err)
-    const code = BrokerError.classifyMessage(msg) ?? fallbackCode
+    // Optional broker packs carry their own physical protocol dependency.
+    // Preserve an explicit code across that package boundary instead of
+    // relying on constructor identity or reclassifying the message text.
+    const structuredCode = err && typeof err === 'object'
+      && (err as { name?: unknown }).name === 'BrokerError'
+      && typeof (err as { code?: unknown }).code === 'string'
+      && BROKER_ERROR_CODES.has((err as { code: string }).code)
+      ? (err as { code: BrokerErrorCode }).code
+      : null
+    const code = structuredCode ?? BrokerError.classifyMessage(msg) ?? fallbackCode
     const be = new BrokerError(code, msg)
     if (err instanceof Error) be.cause = err
     return be
@@ -453,6 +466,9 @@ export interface IBroker<TMeta = unknown> {
 
   /** User-facing display name. */
   readonly label: string
+
+  /** Runtime adapter identity. Live engines are supplied by optional packs. */
+  readonly brokerEngine?: string
 
   /** Broker-specific metadata. Generic allows typed access in implementations. */
   readonly meta?: TMeta
