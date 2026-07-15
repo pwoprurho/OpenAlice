@@ -333,7 +333,7 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
   );
 
   const [spawnMenuOpen, setSpawnMenuOpen] = useState(false);
-  const plusBtnRef = useRef<HTMLButtonElement | null>(null);
+  const spawnControlsRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLUListElement | null>(null);
   const enabledAgents = w.agents
     .map((id) => props.agents.find((a) => a.id === id))
@@ -348,7 +348,7 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
     if (!spawnMenuOpen) return;
     const onDocClick = (e: MouseEvent): void => {
       const t = e.target as Node | null;
-      if (plusBtnRef.current?.contains(t)) return;
+      if (spawnControlsRef.current?.contains(t)) return;
       if (menuRef.current?.contains(t)) return;
       setSpawnMenuOpen(false);
     };
@@ -383,6 +383,7 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
     defaultAgentEnabled && props.defaultAgent
       ? t('workspace.spawnAgent', { agent: agentLabel(props.defaultAgent, props.agents) })
       : t('workspace.spawn');
+  const chooserTitle = t('workspace.chooseAgent');
 
   const statusClass = hasRunning
     ? 'bg-green'
@@ -428,18 +429,31 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
           </button>
         )}
         {enabledAgents.length > 0 && (
-          <div className="relative shrink-0">
+          <div ref={spawnControlsRef} className="relative flex shrink-0 items-center">
             <button
-              ref={plusBtnRef}
               type="button"
               className={rowAction()}
               title={plusTitle}
-              aria-haspopup="menu"
-              aria-expanded={spawnMenuOpen}
+              aria-label={plusTitle}
+              aria-haspopup={defaultAgentEnabled ? undefined : 'menu'}
+              aria-expanded={defaultAgentEnabled ? undefined : spawnMenuOpen}
               onClick={onPlusClick}
             >
               <Plus size={13} strokeWidth={2.25} />
             </button>
+            {defaultAgentEnabled && (
+              <button
+                type="button"
+                className={`${rowAction()} -ml-0.5 w-4`}
+                title={chooserTitle}
+                aria-label={chooserTitle}
+                aria-haspopup="menu"
+                aria-expanded={spawnMenuOpen}
+                onClick={() => setSpawnMenuOpen((open) => !open)}
+              >
+                <ChevronDown size={11} strokeWidth={2.25} />
+              </button>
+            )}
             {spawnMenuOpen && (
               <ul
                 ref={menuRef}
@@ -451,6 +465,7 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
                     <button
                       type="button"
                       role="menuitem"
+                      aria-label={`${agent.displayName} (${agentPrefix(agent.id)})`}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left text-text transition-colors hover:bg-bg-tertiary"
                       onClick={() => onMenuPick(agent.id)}
                     >
@@ -468,6 +483,7 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
                     <button
                       type="button"
                       role="menuitem"
+                      aria-label={`${agent.displayName} (${agentPrefix(agent.id)})`}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
                       onClick={() => onMenuPick(agent.id)}
                     >

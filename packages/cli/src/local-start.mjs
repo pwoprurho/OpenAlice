@@ -23,6 +23,7 @@ const RUNTIME_ARTIFACTS = [
   'packages/guardian-runtime/dist/index.js',
   'node_modules',
 ]
+const MAX_PREPARE_ERROR_OUTPUT_BYTES = 64 * 1024
 
 export function parseLocalStartArgs(argv) {
   const options = {
@@ -204,6 +205,8 @@ export async function prepareSourceCheckout(appDir, options, dependencies = {}) 
   const platform = dependencies.platform ?? process.platform
   const pnpmBin = configuredPnpm ?? (platform === 'win32' ? 'pnpm.cmd' : 'pnpm')
   const runCommand = dependencies.runCommand ?? runChecked
+  const compactOutput = env['OPENALICE_PREPARE_OUTPUT'] === 'compact'
+  const commandOptions = { cwd: appDir, env, platform, output: compactOutput ? 'capture' : 'inherit' }
 
   const inspectBuildTools = dependencies.inspectBuildTools ?? inspectRuntimeBuildTools
   const buildTools = await inspectBuildTools({ platform, env })
@@ -211,7 +214,7 @@ export async function prepareSourceCheckout(appDir, options, dependencies = {}) 
     throw new Error(runtimeBuildToolsError(buildTools))
   }
 
-  stdout.write('Preparing the local OpenAlice Runtime (Electron is excluded)...\n')
+  stdout.write(`${compactOutput ? 'Preparing the OpenAlice Server' : 'Preparing the local OpenAlice Runtime (Electron is excluded)'}...\n`)
   const installArgs = [
     'install',
     '--frozen-lockfile',
@@ -219,15 +222,18 @@ export async function prepareSourceCheckout(appDir, options, dependencies = {}) 
   ]
   const buildArgs = ['build:server']
   try {
-    await runCommand(pnpmBin, installArgs, { cwd: appDir, env, platform })
-    await runCommand(pnpmBin, buildArgs, { cwd: appDir, env, platform })
+    if (compactOutput) stdout.write('  Installing source dependencies...\n')
+    await runCommand(pnpmBin, installArgs, commandOptions)
+    if (compactOutput) stdout.write('  Building source Runtime...\n')
+    await runCommand(pnpmBin, buildArgs, commandOptions)
   } catch (error) {
     if (configuredPnpm || error?.code !== 'ENOENT') throw error
     const corepackBin = platform === 'win32' ? 'corepack.cmd' : 'corepack'
     stdout.write('pnpm is not on PATH; using Corepack with the repository-pinned pnpm version.\n')
     try {
-      await runCommand(corepackBin, ['pnpm', ...installArgs], { cwd: appDir, env, platform })
-      await runCommand(corepackBin, ['pnpm', ...buildArgs], { cwd: appDir, env, platform })
+      await runCommand(corepackBin, ['pnpm', ...installArgs], commandOptions)
+      if (compactOutput) stdout.write('  Building source Runtime...\n')
+      await runCommand(corepackBin, ['pnpm', ...buildArgs], commandOptions)
     } catch (corepackError) {
       if (corepackError?.code === 'ENOENT') {
         throw new Error('Could not find pnpm or Corepack. Install pnpm 11, then retry.')
@@ -295,13 +301,22 @@ function holdRuntime(runtime) {
 
 function runChecked(command, args, options) {
   return new Promise((resolvePromise, rejectPromise) => {
+    const captureOutput = options.output === 'capture'
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env ?? process.env,
       shell: options.platform === 'win32',
-      stdio: 'inherit',
+      stdio: captureOutput ? ['inherit', 'pipe', 'pipe'] : 'inherit',
       windowsHide: true,
     })
+    let outputTail = ''
+    const rememberOutput = (chunk) => {
+      outputTail = `${outputTail}${chunk}`.slice(-MAX_PREPARE_ERROR_OUTPUT_BYTES)
+    }
+    child.stdout?.setEncoding('utf8')
+    child.stderr?.setEncoding('utf8')
+    child.stdout?.on('data', rememberOutput)
+    child.stderr?.on('data', rememberOutput)
     child.once('error', (error) => {
       if (error?.code === 'ENOENT') {
         const missing = new Error(`Could not find ${command}`)
@@ -313,7 +328,10 @@ function runChecked(command, args, options) {
     })
     child.once('exit', (code, signal) => {
       if (code === 0) resolvePromise()
-      else rejectPromise(new Error(`${command} ${args.join(' ')} failed (code=${String(code)}, signal=${String(signal)})`))
+      else {
+        const details = outputTail.trim()
+        rejectPromise(new Error(`${command} ${args.join(' ')} failed (code=${String(code)}, signal=${String(signal)})${details ? `\n\n${details}` : ''}`))
+      }
     })
   })
 }

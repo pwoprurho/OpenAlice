@@ -89,6 +89,47 @@ describe('OpenAlice SSH connector', () => {
     ]), expect.any(Object))
   })
 
+  it('reuses a remembered port and reports the ready URL to its owner', async () => {
+    const child = new FakeChild()
+    const onReady = vi.fn(async () => undefined)
+    const result = connectSsh({
+      ...parseSshConnectArgs(['host', '--no-open']),
+      preferredLocalPort: 40124,
+      onReady,
+    }, {
+      portAvailable: async () => true,
+      spawnProcess: () => child,
+      waitForRuntime: async () => ({ authed: true }),
+      stdout: { write: vi.fn() },
+    })
+    await vi.waitFor(() => expect(onReady).toHaveBeenCalledWith({
+      localPort: 40124,
+      localUrl: 'http://127.0.0.1:40124',
+    }))
+    child.emit('exit', 0, null)
+    await expect(result).resolves.toBe(0)
+  })
+
+  it('falls back cleanly when a remembered port is occupied', async () => {
+    const child = new FakeChild()
+    const stdout = { write: vi.fn() }
+    const spawnProcess = vi.fn(() => child)
+    const result = connectSsh({
+      ...parseSshConnectArgs(['host', '--no-open']),
+      preferredLocalPort: 40124,
+    }, {
+      portAvailable: async () => false,
+      allocatePort: async () => 40125,
+      spawnProcess,
+      waitForRuntime: async () => ({ authed: true }),
+      stdout,
+    })
+    await vi.waitFor(() => expect(spawnProcess).toHaveBeenCalled())
+    child.emit('exit', 0, null)
+    await expect(result).resolves.toBe(0)
+    expect(stdout.write).toHaveBeenCalledWith('Remembered local port 40124 is busy; using 40125 instead.\n')
+  })
+
   it('uses argv-based browser launchers on each desktop platform', async () => {
     for (const [platform, command] of [['darwin', 'open'], ['linux', 'xdg-open'], ['win32', 'cmd.exe']]) {
       const child = { unref: vi.fn() }

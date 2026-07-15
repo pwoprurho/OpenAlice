@@ -1,3 +1,7 @@
+import { EventEmitter } from 'node:events'
+import { rm } from 'node:fs/promises'
+import { PassThrough } from 'node:stream'
+
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -10,6 +14,8 @@ import {
   connectRemote,
   createRemotePlan,
   parseRemoteArgs,
+  readRememberedRemotePort,
+  runSshCommand,
 } from './remote.mjs'
 
 describe('OpenAlice managed remote connector', () => {
@@ -141,6 +147,8 @@ describe('OpenAlice managed remote connector', () => {
     expect(command).toContain("'/opt/Alice'\\''s bin/openalice'")
     expect(command).toContain("'/srv/Alice'\\''s source'")
     expect(command).toContain("'/srv/Alice'\\''s home'")
+    expect(command).toContain('OPENALICE_PREPARE_OUTPUT=compact')
+    expect(command).toContain('TURBO_TELEMETRY_DISABLED=1')
     expect(buildRemoteSshArgs(options, command)).toEqual(expect.arrayContaining([
       '-i', '/tmp/id key', 'host', command,
     ]))
@@ -212,6 +220,85 @@ describe('OpenAlice managed remote connector', () => {
     }), expect.any(Object))
   })
 
+  it('continues when an interrupted installer or Server start actually completed remotely', async () => {
+    const options = parseRemoteArgs(['host', '--app-dir', '/srv/OpenAlice', '--yes', '--no-open'])
+    const probeRemote = vi.fn()
+      .mockResolvedValueOnce(missingRemote())
+      .mockResolvedValueOnce(compatibleRemote({ class: 'absent', state: 'absent', owner: null, endpoints: {} }))
+      .mockResolvedValueOnce(compatibleRemote())
+    const runRemote = vi.fn()
+      .mockRejectedValueOnce(new Error('connection closed'))
+      .mockRejectedValueOnce(new Error('connection reset'))
+    const stdout = { write: vi.fn() }
+
+    await expect(connectRemote(options, {
+      probeRemote,
+      runRemote,
+      connectTunnel: async () => 0,
+      stdout,
+    })).resolves.toBe(0)
+
+    expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining('remote install completed before the disconnect'))
+    expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining('remote Server became ready before the disconnect'))
+  })
+
+  it('remembers the successful local port per remote target and reuses it next time', async () => {
+    const stateFile = `/tmp/openalice-remote-state-${process.pid}-${Date.now()}.json`
+    const env = { OPENALICE_REMOTE_STATE_FILE: stateFile }
+    const options = parseRemoteArgs(['host', '--no-open'])
+    const connectTunnel = vi.fn(async (tunnelOptions) => {
+      await tunnelOptions.onReady({ localPort: 40126, localUrl: 'http://127.0.0.1:40126' })
+      return 0
+    })
+    await connectRemote(options, {
+      env,
+      probeRemote: async () => compatibleRemote(),
+      connectTunnel,
+      stdout: { write: vi.fn() },
+    })
+    expect(await readRememberedRemotePort(options, { env })).toBe(40126)
+
+    await connectRemote(options, {
+      env,
+      probeRemote: async () => compatibleRemote(),
+      connectTunnel,
+      stdout: { write: vi.fn() },
+    })
+    expect(connectTunnel.mock.calls[1][0]).toEqual(expect.objectContaining({
+      preferredLocalPort: 40126,
+    }))
+    await rm(stateFile, { force: true })
+  })
+
+  it('retries only transient SSH transport failures', async () => {
+    const spawnProcess = vi.fn()
+      .mockImplementationOnce(() => commandChild({ code: 255, stderr: "Railway can't verify your SSH key right now\n" }))
+      .mockImplementationOnce(() => commandChild({ code: 255, stderr: 'Connection reset by peer\n' }))
+      .mockImplementationOnce(() => commandChild({ code: 0, stdout: 'ready\n' }))
+    const sleep = vi.fn(async () => undefined)
+
+    await expect(runSshCommand(parseRemoteArgs(['host']), 'printf ready', {
+      spawnProcess,
+      sleep,
+      stdout: { write: vi.fn() },
+      stderr: { write: vi.fn() },
+    })).resolves.toBe('ready\n')
+    expect(spawnProcess).toHaveBeenCalledTimes(3)
+    expect(sleep).toHaveBeenNthCalledWith(1, 750)
+    expect(sleep).toHaveBeenNthCalledWith(2, 1500)
+  })
+
+  it('does not retry an ordinary remote command failure', async () => {
+    const spawnProcess = vi.fn(() => commandChild({ code: 1, stderr: 'remote command rejected\n' }))
+    await expect(runSshCommand(parseRemoteArgs(['host']), 'exit 1', {
+      spawnProcess,
+      sleep: vi.fn(async () => undefined),
+      stdout: { write: vi.fn() },
+      stderr: { write: vi.fn() },
+    })).rejects.toThrow('Remote SSH command failed')
+    expect(spawnProcess).toHaveBeenCalledOnce()
+  })
+
   it('re-plans after install and never replaces a newly discovered owner implicitly', async () => {
     const options = parseRemoteArgs(['host', '--app-dir', '/srv/OpenAlice', '--yes'])
     const probeRemote = vi.fn()
@@ -246,6 +333,19 @@ describe('OpenAlice managed remote connector', () => {
     expect(buildRemoteBuildToolsProbeCommand()).toContain("printf 'cxx\\n'")
   })
 })
+
+function commandChild({ code, stdout = '', stderr = '' }) {
+  const child = new EventEmitter()
+  child.stdout = new PassThrough()
+  child.stderr = new PassThrough()
+  child.kill = vi.fn()
+  queueMicrotask(() => {
+    if (stdout) child.stdout.write(stdout)
+    if (stderr) child.stderr.write(stderr)
+    child.emit('exit', code, null)
+  })
+  return child
+}
 
 function missingRemote() {
   return {

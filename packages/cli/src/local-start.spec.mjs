@@ -165,6 +165,32 @@ describe('OpenAlice local Runtime launcher', () => {
     ])
   })
 
+  it('uses compact phase output and captures successful remote build noise', async () => {
+    let artifactsReady = false
+    const runCommand = vi.fn(async (_command, args) => {
+      if (args.at(-1) === 'build:server') artifactsReady = true
+    })
+    const stdout = { write: vi.fn() }
+
+    await expect(prepareSourceCheckout('/tmp/OpenAlice', {
+      prepare: true,
+      rebuild: false,
+    }, {
+      artifactsReady: async () => artifactsReady,
+      inspectBuildTools: async () => ({ platform: 'linux', supported: true, missing: [] }),
+      platform: 'linux',
+      runCommand,
+      stdout,
+      env: { OPENALICE_PREPARE_OUTPUT: 'compact' },
+    })).resolves.toEqual({ prepared: true })
+
+    expect(runCommand).toHaveBeenCalledTimes(2)
+    expect(runCommand.mock.calls[0][2]).toEqual(expect.objectContaining({ output: 'capture' }))
+    expect(stdout.write).toHaveBeenCalledWith('Preparing the OpenAlice Server...\n')
+    expect(stdout.write).toHaveBeenCalledWith('  Installing source dependencies...\n')
+    expect(stdout.write).toHaveBeenCalledWith('  Building source Runtime...\n')
+  })
+
   it('fails before pnpm with an actionable native build-tool error', async () => {
     const runCommand = vi.fn()
     await expect(prepareSourceCheckout('/tmp/OpenAlice', {

@@ -666,6 +666,7 @@ export const en = {
     displayNamePrompt: 'Workspace display name',
     spawnAgent: 'Spawn a new {{agent}} session',
     spawn: 'Spawn a new session…',
+    chooseAgent: 'Choose runtime for new session',
     configure: 'Configure this workspace',
     deleteWorkspace: 'Offboard workspace',
     headless: 'headless',

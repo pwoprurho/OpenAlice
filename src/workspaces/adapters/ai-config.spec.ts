@@ -6,16 +6,16 @@
  */
 
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { claudeAdapter } from './claude.js';
 import { codexAdapter } from './codex.js';
 import { opencodeAdapter } from './opencode.js';
-import { piAdapter, syncPiWindowsShellPath } from './pi.js';
+import { piAdapter, syncPiProjectTrust, syncPiWindowsShellPath } from './pi.js';
 
 let dir: string;
 
@@ -408,6 +408,45 @@ describe('composeHeadlessCommand (one-shot headless argv, prompt placed per-CLI)
 
 describe('piAdapter AI-config', () => {
   const mcpEnv = { OPENALICE_MCP_URL: 'http://127.0.0.1:47332/mcp', AQ_WS_ID: 'ws-abc' };
+
+  it('records a new OpenAlice workspace in Pi global trust without forcing agent-dir redirection', async () => {
+    const home = join(dir, 'home');
+    await syncPiProjectTrust(dir, { HOME: home });
+    const canonicalDir = await realpath(dir);
+
+    expect(JSON.parse(await readFile(join(home, '.pi/agent/trust.json'), 'utf8'))).toEqual({
+      [canonicalDir]: true,
+    });
+    expect(piAdapter.composeEnv!({ cwd: dir, env: { HOME: home } })).toEqual({});
+  });
+
+  it('writes trust beside a workspace provider and preserves an explicit parent refusal', async () => {
+    await mkdir(join(dir, '.pi-agent'), { recursive: true });
+    await syncPiProjectTrust(dir, { HOME: join(dir, 'unused-home') });
+    const canonicalDir = await realpath(dir);
+    expect(JSON.parse(await read('.pi-agent/trust.json'))).toEqual({ [canonicalDir]: true });
+
+    const parent = dirname(canonicalDir);
+    const refused = join(dir, 'refused');
+    await mkdir(refused, { recursive: true });
+    const home = join(dir, 'refused-home');
+    await mkdir(join(home, '.pi/agent'), { recursive: true });
+    await writeFile(join(home, '.pi/agent/trust.json'), JSON.stringify({ [parent]: false }));
+    await syncPiProjectTrust(refused, { HOME: home });
+    expect(JSON.parse(await readFile(join(home, '.pi/agent/trust.json'), 'utf8'))).toEqual({
+      [parent]: false,
+    });
+  });
+
+  it('preserves a malformed Pi-owned trust store instead of blocking launch or overwriting it', async () => {
+    const home = join(dir, 'malformed-home');
+    const trustPath = join(home, '.pi/agent/trust.json');
+    await mkdir(dirname(trustPath), { recursive: true });
+    await writeFile(trustPath, '{ user is repairing this');
+
+    await expect(syncPiProjectTrust(dir, { HOME: home })).resolves.toBeUndefined();
+    expect(await readFile(trustPath, 'utf8')).toBe('{ user is repairing this');
+  });
 
   it('composeCommand leaves project trust to Pi and the user', () => {
     expect(piAdapter.composeCommand(['ignored'], { cwd: dir, env: mcpEnv })).toEqual(['pi']);

@@ -663,6 +663,7 @@ export const zhHant: Resources = {
     displayNamePrompt: '工作區顯示名稱',
     spawnAgent: '新增 {{agent}} 工作階段',
     spawn: '新增工作階段…',
+    chooseAgent: '選擇新工作階段執行環境',
     configure: '設定此工作區',
     deleteWorkspace: '辦理工作區離職',
     headless: '自動任務',

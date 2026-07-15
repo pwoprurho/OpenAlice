@@ -197,8 +197,10 @@ openalice remote <target> --app-dir <remote-checkout>
    or require a second explicit takeover decision;
 7. run `openalice server start --app-dir ...` remotely and wait for readiness;
 8. create the same loopback tunnel used by `openalice ssh`;
-9. open or print the local URL and stay in the foreground to own only the
-   tunnel.
+9. reuse the last successful local port for this target and remote home when it
+   is available, so an existing browser tab can reconnect to the same origin;
+10. open or print the local URL and stay in the foreground to own only the
+    tunnel.
 
 When reusing a healthy Server, `remote` takes the loopback web port from the
 versioned status response. An explicitly supplied `--remote-port` must match
@@ -224,6 +226,11 @@ contract.
 `--yes` may approve the displayed install/update/start plan for automation, but
 it never implies `--takeover`. Non-interactive execution without a sufficient
 explicit approval fails without remote mutation.
+
+The remembered local port is user-local connection state, not remote Runtime
+state. An explicit `--local-port` wins. If an automatically remembered port is
+already occupied, `remote` reports the conflict, allocates a free loopback port,
+and remembers the replacement only after the tunnel passes OpenAlice readiness.
 
 ## Server Lifecycle
 
@@ -373,6 +380,9 @@ protocol is required.
 - preserve interactive SSH authentication when a terminal is available;
 - use keepalives without overriding stronger user config;
 - exit clearly when the local port cannot bind or the remote forward fails;
+- for managed `openalice remote`, prefer the last successful per-target local
+  port so the old browser origin can recover after a tunnel reconnect, and
+  visibly fall back when that port is occupied;
 - never disable host-key checking;
 - never expose the Guardian control endpoint.
 
@@ -534,6 +544,15 @@ Apply rules:
 8. owner conflict: fail unless the user separately passed `--takeover`;
 9. non-interactive mode: require flags that cover every proposed mutation.
 
+Remote SSH commands retry a small allowlist of transport failures (connection
+reset/timeout/close, key-verifier service interruption, and SSH identification
+exchange failures). Arbitrary remote command failures are never retried. After
+an approved installer or Server-start action loses its SSH transport, managed
+remote re-probes the versioned state: it continues only when the intended CLI
+or Server is already present and compatible, otherwise it returns the original
+failure. Source preparation uses compact phase output and suppresses successful
+package/build chatter; a failed phase still includes a bounded diagnostic tail.
+
 The local orchestrator must compare protocol ranges, not only human version
 strings. It may tolerate a newer compatible Runtime, but it must fail clearly
 when a method or schema is unsupported. Development overrides for a local CLI
@@ -611,7 +630,9 @@ The subsequent macOS-to-Railway loop verified:
 - a Shell Workspace Session accepted `printf 'REMOTE_PTY_OK\\n'`; the result and
   next prompt were visible in the first observation within 500 ms;
 - closing the tunnel left the Server and Shell Session alive;
-- reconnecting on a new local port replayed the existing terminal scrollback;
+- reconnecting replayed the existing terminal scrollback; current managed
+  remote also reuses the last successful local port when it remains available,
+  allowing the original browser tab and origin to recover;
 - structured `openalice server stop` returned the isolated home to `absent`.
 
 Claude Code, Codex, opencode, and Pi executables were present on that host, but
@@ -629,6 +650,16 @@ Python 3.13.5 was then available; source preparation, detached readiness, the
 real `/chat` route, tunnel disconnect, and reconnection on a new local port all
 passed. The Server was stopped through its control endpoint before the Sandbox
 was destroyed.
+
+A 2026-07-15 Railway regression run then exercised the hardened reconnect path
+against another fresh Sandbox. Successful source preparation printed only the
+install/build phases; two naturally occurring Railway SSH interruptions
+(`Connection closed` followed by the temporary key-verifier outage) were
+retried and recovered without repeating a completed mutation. Three tunnel
+connections all selected the same remembered local port. A browser tab left
+open across the final disconnect first showed its normal fetch failure, then
+recovered in place after the tunnel returned on the same origin. The Server was
+stopped through its control endpoint and the Sandbox was destroyed.
 
 ### Stage 3 — terminal transport optimization
 
@@ -683,7 +714,8 @@ was destroyed.
 | source artifacts missing, build tools missing | plan names the tools and normal installer command; default no leaves packages untouched |
 | source artifacts complete, compiler missing | reuse artifacts without an unnecessary package-manager mutation |
 | tunnel disconnect | local command exits; remote Server and work continue |
-| reconnect | same Runtime and live terminal are reachable |
+| reconnect | same local port is preferred; same Runtime, browser origin, and live terminal are reachable; a busy port falls back visibly |
+| transient SSH loss after apply | retry known transport faults; re-probe completed install/start state before deciding failure |
 | host-key failure | fails without disabling verification |
 | SSH agent/passphrase path | preserves normal OpenSSH interaction |
 | browser security | same-origin HTTP/WS works; public Origin remains rejected |

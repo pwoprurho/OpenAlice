@@ -655,6 +655,7 @@ export const ja: Resources = {
     displayNamePrompt: 'ワークスペースの表示名',
     spawnAgent: '新しい {{agent}} セッションを開始',
     spawn: '新しいセッションを開始…',
+    chooseAgent: '新しいセッションのランタイムを選択',
     configure: 'このワークスペースを設定',
     deleteWorkspace: 'ワークスペースを退役',
     headless: '自動実行',

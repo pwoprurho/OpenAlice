@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { createServer } from 'node:net'
 import {
   LOOPBACK,
   allocateLoopbackPort,
@@ -81,11 +82,21 @@ export function buildSshArgs(options, localPort) {
 
 export async function connectSsh(options, dependencies = {}) {
   const allocatePort = dependencies.allocatePort ?? allocateLoopbackPort
+  const portAvailable = dependencies.portAvailable ?? isLoopbackPortAvailable
   const spawnProcess = dependencies.spawnProcess ?? spawn
   const waitForRuntime = dependencies.waitForRuntime ?? waitForOpenAlice
   const launchBrowser = dependencies.launchBrowser ?? openBrowser
   const stdout = dependencies.stdout ?? process.stdout
-  const localPort = options.localPort || await allocatePort()
+  let localPort = options.localPort
+  if (!localPort && options.preferredLocalPort) {
+    if (await portAvailable(options.preferredLocalPort)) {
+      localPort = options.preferredLocalPort
+    } else {
+      localPort = await allocatePort()
+      stdout.write(`Remembered local port ${options.preferredLocalPort} is busy; using ${localPort} instead.\n`)
+    }
+  }
+  if (!localPort) localPort = await allocatePort()
   const localUrl = `http://${LOOPBACK}:${localPort}`
   const ssh = spawnProcess('ssh', buildSshArgs(options, localPort), {
     stdio: ['inherit', 'ignore', 'inherit'],
@@ -109,11 +120,30 @@ export async function connectSsh(options, dependencies = {}) {
     stdout.write(`OpenAlice remote runtime: ${options.destination}\n`)
     stdout.write(`Local OpenAlice UI: ${localUrl}\n`)
     stdout.write('The SSH tunnel stays active until this command exits. Press Ctrl+C to close it.\n')
+    if (options.onReady) await options.onReady({ localPort, localUrl })
     if (options.openBrowser) await launchBrowser(localUrl)
     return await holdTunnel(ssh)
   } catch (error) {
     ssh.kill('SIGTERM')
     throw error
+  }
+}
+
+export async function isLoopbackPortAvailable(port, dependencies = {}) {
+  const createServerImpl = dependencies.createServerImpl ?? createServer
+  const server = createServerImpl()
+  try {
+    await new Promise((resolvePromise, rejectPromise) => {
+      server.once('error', rejectPromise)
+      server.listen({ host: LOOPBACK, port, exclusive: true }, resolvePromise)
+    })
+    return true
+  } catch {
+    return false
+  } finally {
+    if (server.listening) {
+      await new Promise((resolvePromise) => server.close(() => resolvePromise()))
+    }
   }
 }
 

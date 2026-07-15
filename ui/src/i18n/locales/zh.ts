@@ -655,6 +655,7 @@ export const zh: Resources = {
     displayNamePrompt: '工作区显示名称',
     spawnAgent: '新建 {{agent}} 会话',
     spawn: '新建会话…',
+    chooseAgent: '选择新会话运行时',
     configure: '配置此工作区',
     deleteWorkspace: '办理工作区离职',
     headless: '自动任务',

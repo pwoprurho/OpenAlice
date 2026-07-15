@@ -107,7 +107,7 @@ try {
   run('ssh', [remoteTarget, 'test ! -x "$HOME/.openalice/bin/openalice"'], { env: smokeEnv })
 
   console.log('[remote-ssh-smoke] applying install/start and opening first tunnel')
-  await attachAndProbe(remoteTarget, smokeEnv, [
+  const firstTunnelUrl = await attachAndProbe(remoteTarget, smokeEnv, [
     '--app-dir', '/fixture/OpenAlice',
     '--yes', '--no-open', '--wait', '30',
   ])
@@ -121,7 +121,10 @@ try {
     cliEntry, 'remote', remoteTarget, '--plan', '--no-open',
   ], { cwd: repoRoot, env: smokeEnv })
   requireText(reusePlan, 'reuse compatible remote CLI Server')
-  await attachAndProbe(remoteTarget, smokeEnv, ['--no-open', '--wait', '30'])
+  const reconnectedTunnelUrl = await attachAndProbe(remoteTarget, smokeEnv, ['--no-open', '--wait', '30'])
+  if (reconnectedTunnelUrl !== firstTunnelUrl) {
+    throw new Error(`Reconnect changed the remembered browser origin (${firstTunnelUrl} -> ${reconnectedTunnelUrl})`)
+  }
 
   console.log('[remote-ssh-smoke] stopping the remote Server through its control endpoint')
   run('ssh', [remoteTarget, '"$HOME/.openalice/bin/openalice" server stop --wait 15'], { env: smokeEnv })
@@ -198,6 +201,7 @@ async function attachAndProbe(target, env, remoteArgs) {
   child.kill('SIGTERM')
   const exit = await waitForExit(child, 10_000)
   if (exit.code !== 0) throw new Error(`remote CLI did not close cleanly after tunnel disconnect (${JSON.stringify(exit)})`)
+  return url
 }
 
 function waitForExit(child, timeoutMs) {

@@ -1,4 +1,8 @@
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 
 import { formatMissingRuntimeBuildTools } from './runtime-deps.mjs'
@@ -6,6 +10,16 @@ import { connectSsh } from './ssh-connect.mjs'
 
 const DEFAULT_INSTALL_URL = 'https://raw.githubusercontent.com/TraderAlice/OpenAlice/dev/install'
 const MAX_SSH_OUTPUT_BYTES = 1024 * 1024
+const REMOTE_STATE_VERSION = 1
+const MAX_REMEMBERED_TARGETS = 32
+const TRANSIENT_SSH_PATTERNS = [
+  /can't verify your ssh key right now/i,
+  /temporary service issue/i,
+  /connection (?:reset|timed out|closed)/i,
+  /kex_exchange_identification/i,
+  /ssh_exchange_identification/i,
+  /operation timed out/i,
+]
 
 export function parseRemoteArgs(argv) {
   const options = {
@@ -87,9 +101,15 @@ export function parseRemoteArgs(argv) {
 export async function connectRemote(options, dependencies = {}) {
   const stdout = dependencies.stdout ?? process.stdout
   const env = dependencies.env ?? process.env
+  const rememberedLocalPort = options.localPort === 0
+    ? await readRememberedRemotePort(options, { ...dependencies, env })
+    : null
+  const connectionOptions = rememberedLocalPort === null
+    ? options
+    : { ...options, preferredLocalPort: rememberedLocalPort }
   const probe = dependencies.probeRemote ?? probeRemoteHost
-  let remote = await probe(options, dependencies)
-  let plan = createRemotePlan(options, remote, {
+  let remote = await probe(connectionOptions, dependencies)
+  let plan = createRemotePlan(connectionOptions, remote, {
     installUrl: dependencies.installUrl ?? env['OPENALICE_REMOTE_INSTALL_URL'] ?? DEFAULT_INSTALL_URL,
     installVersion: dependencies.installVersion ?? env['OPENALICE_REMOTE_VERSION'] ?? 'dev',
     installBaseUrl: dependencies.installBaseUrl ?? env['OPENALICE_REMOTE_INSTALL_BASE_URL'] ?? '',
@@ -116,13 +136,29 @@ export async function connectRemote(options, dependencies = {}) {
       ? 'Preparing the OpenAlice CLI and source Runtime build tools'
       : 'Installing the OpenAlice CLI'
     stdout.write(`${installerPurpose} on ${options.destination} with the normal installer...\n`)
-    await runRemote(options, buildRemoteInstallCommand(
-      plan.installUrl,
-      plan.installVersion,
-      plan.installBaseUrl,
-      plan.installRuntimeDeps,
-    ), dependencies)
-    remote = await probe(options, dependencies)
+    let installerError = null
+    try {
+      const output = await runRemote(connectionOptions, buildRemoteInstallCommand(
+        plan.installUrl,
+        plan.installVersion,
+        plan.installBaseUrl,
+        plan.installRuntimeDeps,
+      ), dependencies)
+      writeRemoteActionOutput(stdout, output)
+    } catch (error) {
+      installerError = error
+      stdout.write('The SSH action ended unexpectedly; checking whether the remote install completed...\n')
+    }
+    try {
+      remote = await probe(connectionOptions, dependencies)
+    } catch (probeError) {
+      throw installerError ?? probeError
+    }
+    if (installerError && remote.cliCompatible && (!plan.installRuntimeDeps || (remote.runtimeBuildToolsMissing ?? []).length === 0)) {
+      stdout.write('The remote install completed before the disconnect; continuing from detected state.\n')
+    } else if (installerError) {
+      throw installerError
+    }
     if (!remote.cliPath || !remote.cliCompatible) {
       throw new Error('The remote OpenAlice CLI install completed, but a compatible CLI was not detected')
     }
@@ -149,8 +185,24 @@ export async function connectRemote(options, dependencies = {}) {
 
   if (plan.startServer) {
     stdout.write(`${options.takeover ? 'Replacing' : 'Starting'} the OpenAlice Server on ${options.destination}...\n`)
-    await runRemote(options, buildRemoteServerStartCommand(options, remote.cliPath), dependencies)
-    remote = await probe(options, dependencies)
+    let startError = null
+    try {
+      const output = await runRemote(connectionOptions, buildRemoteServerStartCommand(connectionOptions, remote.cliPath), dependencies)
+      writeRemoteActionOutput(stdout, output)
+    } catch (error) {
+      startError = error
+      stdout.write('The SSH action ended unexpectedly; checking whether the remote Server became ready...\n')
+    }
+    try {
+      remote = await probe(connectionOptions, dependencies)
+    } catch (probeError) {
+      throw startError ?? probeError
+    }
+    if (startError && remote.status?.class === 'running' && remote.status?.owner?.surface === 'cli-server') {
+      stdout.write('The remote Server became ready before the disconnect; continuing from detected state.\n')
+    } else if (startError) {
+      throw startError
+    }
   }
   if (remote.status?.class !== 'running' || remote.status?.owner?.surface !== 'cli-server') {
     throw new Error(`Remote OpenAlice Server is not ready after apply (${remote.status?.class ?? 'no status'})`)
@@ -168,11 +220,20 @@ export async function connectRemote(options, dependencies = {}) {
   return openTunnel({
     destination: options.destination,
     localPort: options.localPort,
+    preferredLocalPort: rememberedLocalPort,
     remotePort: runtimePort,
     sshPort: options.sshPort,
     identityFile: options.identityFile,
     openBrowser: options.openBrowser,
     waitMs: options.waitMs,
+    onReady: async ({ localPort }) => {
+      try {
+        await rememberRemotePort(options, localPort, { ...dependencies, env })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        stdout.write(`OpenAlice could not remember this tunnel port (${message}).\n`)
+      }
+    },
   }, dependencies)
 }
 
@@ -266,7 +327,7 @@ export function createRemotePlan(options, remote, install = {}) {
     appDir: options.appDir || 'not selected',
     remoteHome: options.remoteHome || '~/.openalice (remote default)',
     remotePort,
-    localPort: options.localPort || 'auto',
+    localPort: options.localPort || (options.preferredLocalPort ? `${options.preferredLocalPort} (remembered)` : 'auto'),
     installCli,
     installRuntimeDeps,
     runInstaller,
@@ -370,7 +431,7 @@ export function buildRemoteServerStartCommand(options, cliPath) {
   ]
   if (options.remoteHome) args.push('--home', shellQuote(options.remoteHome))
   if (options.takeover) args.push('--takeover')
-  return args.join(' ')
+  return `OPENALICE_PREPARE_OUTPUT=compact TURBO_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1 ${args.join(' ')}`
 }
 
 export function buildRemoteInstallCommand(installUrl, installVersion, installBaseUrl = '', withRuntimeDeps = false) {
@@ -393,14 +454,35 @@ export function buildRemoteSshArgs(options, remoteCommand) {
   return args
 }
 
-export function runSshCommand(options, remoteCommand, dependencies = {}) {
+export async function runSshCommand(options, remoteCommand, dependencies = {}) {
+  const sleep = dependencies.sleep ?? ((ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms)))
+  const stdout = dependencies.stdout ?? process.stdout
+  let lastError
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await runSshCommandOnce(options, remoteCommand, dependencies)
+    } catch (error) {
+      lastError = error
+      if (attempt >= 3 || !isTransientSshError(error)) throw error
+      const delayMs = attempt * 750
+      stdout.write(`SSH transport was interrupted; retrying in ${delayMs}ms (${attempt}/2)...\n`)
+      await sleep(delayMs)
+    }
+  }
+  throw lastError
+}
+
+function runSshCommandOnce(options, remoteCommand, dependencies = {}) {
   const spawnProcess = dependencies.spawnProcess ?? spawn
+  const stderrOutput = dependencies.stderr ?? process.stderr
   const child = spawnProcess('ssh', buildRemoteSshArgs(options, remoteCommand), {
-    stdio: ['inherit', 'pipe', 'inherit'],
+    stdio: ['inherit', 'pipe', 'pipe'],
     windowsHide: true,
   })
   child.stdout.setEncoding('utf8')
+  child.stderr.setEncoding('utf8')
   let stdout = ''
+  let stderr = ''
   return new Promise((resolvePromise, rejectPromise) => {
     let settled = false
     const finish = (error, value) => {
@@ -417,12 +499,64 @@ export function runSshCommand(options, remoteCommand, dependencies = {}) {
         finish(new Error('Remote SSH command produced too much output'))
       }
     })
+    child.stderr.on('data', (chunk) => {
+      if (settled) return
+      stderr += chunk
+      stderrOutput.write(chunk)
+      if (Buffer.byteLength(stderr, 'utf8') > MAX_SSH_OUTPUT_BYTES) {
+        child.kill('SIGTERM')
+        finish(createSshCommandError('Remote SSH command produced too much error output', stdout, stderr))
+      }
+    })
     child.once('error', (error) => finish(error))
     child.once('exit', (code, signal) => {
       if (code === 0) finish(null, stdout)
-      else finish(new Error(`Remote SSH command failed (code=${String(code)}, signal=${String(signal)})`))
+      else finish(createSshCommandError(
+        `Remote SSH command failed (code=${String(code)}, signal=${String(signal)})`,
+        stdout,
+        stderr,
+      ))
     })
   })
+}
+
+export async function readRememberedRemotePort(options, dependencies = {}) {
+  const statePath = remoteStatePath(dependencies.env ?? process.env, dependencies.homeDir)
+  try {
+    const state = JSON.parse(await (dependencies.readFileImpl ?? readFile)(statePath, 'utf8'))
+    if (state?.version !== REMOTE_STATE_VERSION || !state.targets || typeof state.targets !== 'object') return null
+    const port = state.targets[remoteTargetKey(options)]?.localPort
+    return Number.isInteger(port) && port >= 1 && port <= 65_535 ? port : null
+  } catch {
+    return null
+  }
+}
+
+export async function rememberRemotePort(options, localPort, dependencies = {}) {
+  if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65_535) return
+  const statePath = remoteStatePath(dependencies.env ?? process.env, dependencies.homeDir)
+  const readFileImpl = dependencies.readFileImpl ?? readFile
+  let state = { version: REMOTE_STATE_VERSION, targets: {} }
+  try {
+    const existing = JSON.parse(await readFileImpl(statePath, 'utf8'))
+    if (existing?.version === REMOTE_STATE_VERSION && existing.targets && typeof existing.targets === 'object') {
+      state = existing
+    }
+  } catch {
+    // Missing or malformed local state should never block a remote connection.
+  }
+  state.targets[remoteTargetKey(options)] = { localPort, updatedAt: new Date().toISOString() }
+  const entries = Object.entries(state.targets)
+    .sort(([, left], [, right]) => String(right?.updatedAt ?? '').localeCompare(String(left?.updatedAt ?? '')))
+    .slice(0, MAX_REMEMBERED_TARGETS)
+  state.targets = Object.fromEntries(entries)
+  const mkdirImpl = dependencies.mkdirImpl ?? mkdir
+  const writeFileImpl = dependencies.writeFileImpl ?? writeFile
+  const renameImpl = dependencies.renameImpl ?? rename
+  await mkdirImpl(dirname(statePath), { recursive: true })
+  const temporaryPath = `${statePath}.${process.pid}.${Date.now()}.tmp`
+  await writeFileImpl(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 })
+  await renameImpl(temporaryPath, statePath)
 }
 
 export async function confirmRemotePlan(message, dependencies = {}) {
@@ -509,6 +643,38 @@ function remainingMutationsAfterInstall(plan) {
     !/^(install|update) remote OpenAlice CLI$/.test(mutation)
     && mutation !== 'install source Runtime build tools'
   ))
+}
+
+function writeRemoteActionOutput(stdout, output) {
+  const text = String(output ?? '').trim()
+  if (text) stdout.write(`${text}\n`)
+}
+
+function createSshCommandError(message, stdout, stderr) {
+  const error = new Error(message)
+  error.stdout = stdout
+  error.stderr = stderr
+  return error
+}
+
+function isTransientSshError(error) {
+  const details = [error?.message, error?.stderr].filter(Boolean).join('\n')
+  return TRANSIENT_SSH_PATTERNS.some((pattern) => pattern.test(details))
+}
+
+function remoteStatePath(env, homeDir) {
+  return env['OPENALICE_REMOTE_STATE_FILE']
+    || join(homeDir ?? homedir(), '.openalice', 'state', 'remote-targets.json')
+}
+
+function remoteTargetKey(options) {
+  return createHash('sha256')
+    .update(JSON.stringify([
+      options.destination,
+      options.sshPort ?? 22,
+      options.remoteHome || '~/.openalice',
+    ]))
+    .digest('hex')
 }
 
 function validateSshDestination(destination) {

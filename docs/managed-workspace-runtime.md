@@ -190,8 +190,15 @@ uses the normal `pi` command path.
 
 Pi project trust follows the runtime boundary:
 
-- interactive sessions never receive `--approve`; Pi shows its trust prompt
-  and the user makes the project-resource decision;
+- before TUI or WebPi startup, the Pi adapter records a genuinely undecided
+  OpenAlice-managed Workspace in the trust store used by that Pi process. This
+  prevents a fresh Quick Chat from stalling behind a terminal-only trust
+  selector that WebPi cannot render;
+- an explicit saved allow or deny decision on the Workspace or its nearest
+  parent remains authoritative. OpenAlice never flips that decision;
+- interactive argv does not receive the version-sensitive `--approve` flag.
+  External Pi 0.78.x therefore remains launch-compatible while Pi 0.79+ reads
+  its normal `trust.json` state;
 - packaged headless sessions pass `--approve` because no user is present and
   OpenAlice controls the pinned managed Pi and Workspace contents;
 - source/dev headless sessions do not receive version-specific approval flags.
@@ -201,6 +208,11 @@ Pi project trust follows the runtime boundary:
 Do not add external-Pi version probing or upgrade UX to preserve flags used by
 the packaged runtime. Compatibility for the packaged app is maintained by
 pinning and upgrading the bundled Pi with the OpenAlice release.
+
+When a Workspace has a `.pi-agent/` provider override, its trust file lives in
+that redirected agent directory. Otherwise OpenAlice updates Pi's normal agent
+directory; it must not create `.pi-agent/` solely for trust because doing so
+would hide the user's global Pi settings and extensions.
 
 ### Codex interactive permissions
 
