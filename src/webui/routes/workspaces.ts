@@ -48,6 +48,7 @@ import { TemplateUpgradeError } from '../../workspaces/template-upgrade.js';
 import { WorkspaceAbsorbError } from '../../workspaces/workspace-absorb.js';
 import {
   MANAGER_SYSTEM_PROMPT,
+  managerTerminalPrompt,
   managerSkillPath,
 } from '../../workspaces/manager-workspace.js';
 
@@ -488,11 +489,13 @@ export function createWorkspaceRoutes(
   // ── launcher-owned Workspace manager ───────────────────────────────────
   // The manager's cwd is the active office floor, but it is intentionally not
   // inserted into the business Workspace registry. Its sessions live in the
-  // same durable Session/Resume registries and always open through WebPi.
+  // same durable Session/Resume registries. Pi opens through WebPi; the other
+  // supported agent runtimes keep their native TUI surface.
   app.get('/manager', async (c) => c.json({ manager: await publicManager() }));
 
   app.post('/manager/quick-start', async (c) => {
     let prompt: string;
+    let agentId: string | undefined;
     let credentialSlug: string | undefined;
     try {
       const body = await safeJson(c);
@@ -501,6 +504,9 @@ export function createWorkspaceRoutes(
       if (seed === null) return c.json({ error: 'prompt_required' }, 400);
       if ('error' in seed) return c.json(seed, 400);
       prompt = seed.prompt;
+      if (typeof fields['agent'] === 'string' && fields['agent'].length > 0) {
+        agentId = fields['agent'];
+      }
       if (typeof fields['credentialSlug'] === 'string' && fields['credentialSlug'].length > 0) {
         credentialSlug = fields['credentialSlug'];
       }
@@ -509,15 +515,34 @@ export function createWorkspaceRoutes(
     }
 
     const meta = svc.managerWorkspace;
+    const resolvedAgentId = agentId ?? await resolveDefaultAgentId(meta);
+    if (!resolvedAgentId) {
+      return c.json({ error: 'no_agent_runtime', message: 'Workspace Manager has no agent runtime enabled' }, 400);
+    }
+    if (!meta.agents.includes(resolvedAgentId)) {
+      return c.json({
+        error: 'unsupported_agent_runtime',
+        message: `${resolvedAgentId} is not an enabled Workspace Manager agent runtime`,
+      }, 400);
+    }
     const spawned = await spawnInteractiveSession(meta, {
-      agentId: 'pi',
+      agentId: resolvedAgentId,
       ...(credentialSlug ? { credentialSlug } : {}),
+      ...(resolvedAgentId === 'pi' ? {} : { initialPrompt: managerTerminalPrompt(prompt) }),
       title: prompt,
     });
     if (!spawned.ok) return c.json(spawned.body, spawned.status as 400 | 409 | 500);
 
     const record = svc.sessionRegistry.get(meta.id, spawned.session.sessionId);
     if (!record) return c.json({ error: 'registry_failed', message: 'manager Session record is missing' }, 500);
+
+    if (record.agent !== 'pi') {
+      return c.json({
+        manager: await publicManager(),
+        session: publicSession(record),
+        snapshot: null,
+      }, 201);
+    }
 
     try {
       // A fresh native Pi id is allocated by the ordinary interactive spawn
@@ -1329,7 +1354,7 @@ export function createWorkspaceRoutes(
       // Choosing the terminal surface is an explicit handoff. Never leave Pi's
       // RPC host and PTY alive against the same native session file.
       if (svc.webPi?.has(token)) await svc.webPi.stop(token, 'switch to terminal');
-      const meta = svc.registry.get(id);
+      const meta = svc.resolveRuntimeWorkspace?.(id) ?? svc.registry.get(id);
       if (!meta) return c.json({ error: 'workspace_not_found' }, 404);
       const adapter = svc.adapters.get(record.agent);
       if (!adapter) {
@@ -1573,7 +1598,10 @@ export function createWorkspaceRoutes(
     if (!validId(id) || !validId(token)) {
       return c.json({ error: 'not_found' }, 404);
     }
-    const meta = svc.registry.get(id);
+    // The launcher-owned Manager is a runtime Workspace but deliberately does
+    // not live in the business registry. Use the same resolver as spawn/resume
+    // so its terminal diagnostics do not report workspace_not_found.
+    const meta = svc.resolveRuntimeWorkspace(id);
     if (!meta) return c.json({ error: 'workspace_not_found' }, 404);
     await svc.sessionRegistry.ensureLoaded(id).catch(() => undefined);
     const record = svc.sessionRegistry.get(id, token);
@@ -1967,7 +1995,7 @@ export function createWorkspaceRoutes(
   app.get('/:id/agent-config', async (c) => {
     const id = c.req.param('id');
     if (!validId(id)) return c.json({ error: 'not_found' }, 404);
-    const meta = svc.registry.get(id);
+    const meta = svc.resolveRuntimeWorkspace?.(id) ?? svc.registry.get(id);
     if (!meta) return c.json({ error: 'not_found' }, 404);
     try {
       const [claude, codex, opencode, pi] = await Promise.all([
@@ -1992,7 +2020,7 @@ export function createWorkspaceRoutes(
     const id = c.req.param('id');
     const agent = c.req.param('agent');
     if (!validId(id)) return c.json({ error: 'not_found' }, 404);
-    const meta = svc.registry.get(id);
+    const meta = svc.resolveRuntimeWorkspace?.(id) ?? svc.registry.get(id);
     if (!meta) return c.json({ error: 'not_found' }, 404);
     try {
       const detected = await detectWorkspaceCred(meta, agent, await readCredentials());
@@ -2012,7 +2040,7 @@ export function createWorkspaceRoutes(
   app.get('/:id/agent-readiness', async (c) => {
     const id = c.req.param('id');
     if (!validId(id)) return c.json({ error: 'not_found' }, 404);
-    const meta = svc.registry.get(id);
+    const meta = svc.resolveRuntimeWorkspace?.(id) ?? svc.registry.get(id);
     if (!meta) return c.json({ error: 'not_found' }, 404);
     try {
       const credentials = await readCredentials();
@@ -2036,7 +2064,7 @@ export function createWorkspaceRoutes(
     const id = c.req.param('id');
     const agent = c.req.param('agent');
     if (!validId(id)) return c.json({ error: 'not_found' }, 404);
-    const meta = svc.registry.get(id);
+    const meta = svc.resolveRuntimeWorkspace?.(id) ?? svc.registry.get(id);
     if (!meta) return c.json({ error: 'not_found' }, 404);
     try {
       const row = await getAgentCredentialReadiness({
@@ -2059,7 +2087,7 @@ export function createWorkspaceRoutes(
     if (agent !== 'claude' && agent !== 'codex' && agent !== 'opencode' && agent !== 'pi') {
       return c.json({ error: 'unknown_agent' }, 400);
     }
-    const meta = svc.registry.get(id);
+    const meta = svc.resolveRuntimeWorkspace?.(id) ?? svc.registry.get(id);
     if (!meta) return c.json({ error: 'not_found' }, 404);
 
     const body = (await safeJson(c)) as WorkspaceAiCred | null;

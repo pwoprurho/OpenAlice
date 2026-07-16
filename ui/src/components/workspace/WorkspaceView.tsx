@@ -117,6 +117,7 @@ export function WorkspaceView(props: WorkspaceViewProps): ReactElement {
                   <TerminalView
                     wsId={props.wsId}
                     sessionId={s.id}
+                    renderer={s.agent === 'opencode' ? 'dom' : 'auto'}
                     {...(props.label !== undefined ? { label: `${props.label} · ${s.name}` } : {})}
                     {...(props.keyMap !== undefined ? { keyMap: props.keyMap } : {})}
                     onSessionLost={props.onSessionLost}

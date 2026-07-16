@@ -690,10 +690,10 @@ describe('POST /:id/headless/:taskId/session', () => {
 describe('POST /:id/sessions/:sid/resume — concurrent coalescing (ANG-120)', () => {
   const TOKEN = 'claude-calm-amber-river';
 
-  function buildResume() {
+  function buildResume(workspaceId = 'ws-1', resolverOnly = false) {
     const session = {
       recordId: TOKEN,
-      wsId: 'ws-1',
+      wsId: workspaceId,
       name: 'c1',
       pid: 4242,
       startedAt: 1,
@@ -707,7 +707,7 @@ describe('POST /:id/sessions/:sid/resume — concurrent coalescing (ANG-120)', (
     const record = {
       id: TOKEN,
       resumeId: 'resume-aid',
-      wsId: 'ws-1',
+      wsId: workspaceId,
       agent: 'claude',
       name: 'c1',
       state: 'paused',
@@ -718,7 +718,10 @@ describe('POST /:id/sessions/:sid/resume — concurrent coalescing (ANG-120)', (
       sessionRegistry: { get: () => record, update: vi.fn(async () => {}) },
       resumeRegistry: { get: () => ({ agentSessionId: 'aid' }) },
       pool: { get: () => live, spawn, disposeToken: vi.fn() },
-      registry: { get: () => ({ id: 'ws-1', dir: '/w', agents: ['claude'] }) },
+      registry: { get: () => resolverOnly ? undefined : ({ id: workspaceId, dir: '/w', agents: ['claude'] }) },
+      resolveRuntimeWorkspace: resolverOnly
+        ? () => ({ id: workspaceId, dir: '/w', agents: ['claude'] })
+        : undefined,
       adapters: { get: () => adapter },
       computeSpawnPlan: () => ({
         spawnCwd: '/w',
@@ -744,6 +747,14 @@ describe('POST /:id/sessions/:sid/resume — concurrent coalescing (ANG-120)', (
     expect(a.body.ok).toBe(true);
     expect(b.body.ok).toBe(true);
     expect([a.body, b.body].filter((x) => x.alreadyRunning)).toHaveLength(1);
+  });
+
+  it('resumes a native Manager runtime through the reserved runtime resolver', async () => {
+    const { app, spawn } = buildResume('workspace-manager', true);
+    const result = await post(app, `/workspace-manager/sessions/${TOKEN}/resume`);
+
+    expect(result.body.ok).toBe(true);
+    expect(spawn).toHaveBeenCalledOnce();
   });
 });
 
@@ -837,6 +848,82 @@ describe('WebPi surface routes', () => {
 });
 
 describe('Workspace manager surface routes', () => {
+  it('diagnoses a Manager Session through the reserved runtime workspace', async () => {
+    const meta = {
+      id: 'workspace-manager',
+      tag: 'Workspace Manager',
+      dir: '/floor/workspaces',
+      agents: ['opencode'],
+      createdAt: new Date(0).toISOString(),
+    };
+    const session = {
+      id: 'opencode-manager-test',
+      resumeId: 'resume-manager-test',
+      wsId: meta.id,
+      agent: 'opencode',
+      name: 'o1',
+      createdAt: '2026-07-16T00:00:00.000Z',
+      lastActiveAt: '2026-07-16T00:01:00.000Z',
+      state: 'running',
+      surface: 'terminal',
+      resumeHint: { kind: 'agent-session-id', value: 'native-opencode' },
+    };
+    const adapter = {
+      id: 'opencode',
+      capabilities: { resumeById: true, resumeLast: true },
+    };
+    const computeSpawnPlan = vi.fn(() => ({
+      spawnCwd: meta.dir,
+      envPWD: meta.dir,
+      transcriptDir: null,
+      projectKey: 'manager-key',
+      composedCommand: ['opencode', '--session', 'native-opencode'],
+      resumeMode: 'by-id',
+      nativeSessionId: 'native-opencode',
+    }));
+    const svc = {
+      registry: { get: vi.fn(() => undefined) },
+      resolveRuntimeWorkspace: vi.fn((id: string) => id === meta.id ? meta : undefined),
+      sessionRegistry: {
+        ensureLoaded: vi.fn(async () => undefined),
+        get: vi.fn((_wsId: string, id: string) => id === session.id ? session : undefined),
+      },
+      resumeRegistry: { get: vi.fn(() => ({ agentSessionId: 'native-opencode' })) },
+      adapters: { get: vi.fn(() => adapter) },
+      computeSpawnPlan,
+      pool: {
+        liveSessionsFor: vi.fn(() => [{
+          id: session.id,
+          pid: 92,
+          startedAt: 2,
+          agentSessionId: 'native-opencode',
+        }]),
+      },
+      config: { launcherRepoRoot: '/repo' },
+    } as unknown as WorkspaceService;
+
+    const result = await get(
+      createWorkspaceRoutes(svc),
+      `/workspace-manager/sessions/${session.id}/diagnostics`,
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      workspace: { id: 'workspace-manager', dir: '/floor/workspaces' },
+      record: { id: session.id, agent: 'opencode' },
+      wouldResume: {
+        mode: 'by-id',
+        nativeSessionId: 'native-opencode',
+        composedCommand: ['opencode', '--session', 'native-opencode'],
+      },
+    });
+    expect(computeSpawnPlan).toHaveBeenCalledWith(
+      meta,
+      adapter,
+      { sessionId: 'native-opencode' },
+    );
+  });
+
   it('starts a launcher-owned Pi conversation directly in WebPi with the manager contract', async () => {
     const meta = {
       id: 'workspace-manager',
@@ -937,5 +1024,89 @@ describe('Workspace manager surface routes', () => {
       }),
     );
     expect(prompt).toHaveBeenCalledWith(createdRecord.id, 'Audit the floor.');
+  });
+
+  it('starts any enabled agent runtime in its native TUI with the manager contract', async () => {
+    const meta = {
+      id: 'workspace-manager',
+      tag: 'Workspace Manager',
+      dir: '/floor/workspaces',
+      agents: ['claude', 'codex', 'opencode', 'pi'],
+      createdAt: new Date(0).toISOString(),
+    };
+    const records = new Map<string, any>();
+    const adapter = {
+      id: 'codex',
+      namePrefix: 'x',
+      capabilities: { resumeById: true },
+      bootstrap: vi.fn(async () => undefined),
+    };
+    let spawnedContext: any = null;
+    let liveSession: any = null;
+    const startWebPiSession = vi.fn();
+    const svc = {
+      managerWorkspace: meta,
+      registry: { list: () => [{ id: 'ws-1' }], get: () => undefined },
+      adapters: { get: (id: string) => id === 'codex' ? adapter : undefined },
+      resolveAdapter: () => adapter,
+      getAgentRuntimeReadiness: () => ({
+        agents: { codex: { ready: true, source: 'global-login' } },
+      }),
+      resumeRegistry: {
+        get: vi.fn(() => null),
+        ensure: vi.fn(async () => ({ resumeId: 'resume-manager-codex' })),
+      },
+      sessionRegistry: {
+        ensureLoaded: vi.fn(async () => undefined),
+        findById: vi.fn((id: string) => records.get(id)),
+        nextName: vi.fn(() => 'x1'),
+        create: vi.fn(async (record: any) => { records.set(record.id, record); }),
+        get: vi.fn((_wsId: string, id: string) => records.get(id)),
+        listFor: vi.fn(() => [...records.values()]),
+        remove: vi.fn(async () => undefined),
+      },
+      pool: {
+        get: vi.fn((id: string) => liveSession?.recordId === id ? liveSession : undefined),
+        spawn: vi.fn((_wsId: string, ctx: any) => {
+          spawnedContext = ctx;
+          liveSession = {
+            recordId: ctx.recordId,
+            wsId: meta.id,
+            name: ctx.recordName,
+            pid: 92,
+            startedAt: 2,
+          };
+          return liveSession;
+        }),
+      },
+      startWebPiSession,
+      webPi: { get: vi.fn(() => null) },
+      config: { launcherRepoRoot: '/repo' },
+    } as unknown as WorkspaceService;
+    const app = createWorkspaceRoutes(svc);
+
+    const result = await post(app, '/manager/quick-start', {
+      prompt: 'Map ownership.',
+      agent: 'codex',
+    });
+    expect(result.status).toBe(201);
+    expect(result.body).toMatchObject({
+      session: { wsId: 'workspace-manager', agent: 'codex', surface: 'terminal' },
+      snapshot: null,
+    });
+    expect(spawnedContext).toMatchObject({ agentId: 'codex' });
+    expect(result.body).toMatchObject({ session: { title: 'Map ownership.' } });
+    expect(spawnedContext.initialPrompt).toContain('OpenAlice Workspace Manager');
+    expect(spawnedContext.initialPrompt).toContain('User request:\nMap ownership.');
+    expect(startWebPiSession).not.toHaveBeenCalled();
+
+    const unsupported = await post(app, '/manager/quick-start', {
+      prompt: 'Open a shell.',
+      agent: 'shell',
+    });
+    expect(unsupported).toMatchObject({
+      status: 400,
+      body: { error: 'unsupported_agent_runtime' },
+    });
   });
 });

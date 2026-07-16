@@ -25,7 +25,12 @@ import { useWorkspaces } from '../../contexts/workspaces-context'
 import { Skeleton } from '../StateViews'
 import { useWorkspace } from '../../tabs/store'
 import { getFocusedTab } from '../../tabs/types'
-import { type Workspace } from './api'
+import {
+  MANAGER_WORKSPACE_ID,
+  type ManagerWorkspaceSnapshot,
+  type SessionRecord,
+  type Workspace,
+} from './api'
 import { CreateWorkspaceDialog } from './CreateWorkspaceDialog'
 import { WorkspaceOffboardingDialog } from './WorkspaceOffboardingDialog'
 import { SessionRow } from './Sidebar'
@@ -96,27 +101,26 @@ export function ChatWorkspaceSection(): ReactElement | null {
         </button>
       </div>
 
-      <div className="px-2 pb-1 pt-1">
-        <button
-          type="button"
-          onClick={() => openOrFocus({ kind: 'workspace-manager', params: {} })}
-          className={`oa-pressable group relative flex w-full items-center gap-2.5 overflow-hidden rounded-lg border px-3 py-2.5 text-left transition-colors ${
-            isManagerFocus
-              ? 'border-accent/35 bg-accent/10 text-text'
-              : 'border-border/70 bg-bg-secondary/45 text-text hover:border-accent/25 hover:bg-bg-tertiary'
-          }`}
-        >
-          <span className="pointer-events-none absolute inset-y-0 right-0 w-20 bg-gradient-to-l from-accent/[0.07] to-transparent" />
-          <span className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent transition-transform group-hover:scale-105">
-            <Network size={14} strokeWidth={2.1} />
-          </span>
-          <span className="relative min-w-0 flex-1">
-            <span className="block truncate text-[12px] font-semibold">{t('workspaceManager.title')}</span>
-            <span className="mt-0.5 block truncate text-[10px] text-text-muted">{t('workspaceManager.sidebarDescription')}</span>
-          </span>
-          <ChevronRight size={13} className="relative shrink-0 text-text-muted/45 transition-transform group-hover:translate-x-0.5 group-hover:text-accent" />
-        </button>
-      </div>
+      <ManagerWorkspaceRow
+        manager={ctx.workspaceManager}
+        loaded={ctx.workspaceManagerLoaded}
+        isFocused={isManagerFocus}
+        activeSessionId={isManagerFocus ? focused.params.sessionId ?? null : null}
+        onOpen={() => openOrFocus({ kind: 'workspace-manager', params: {} })}
+        onOpenSession={(sessionId) => openOrFocus({
+          kind: 'workspace-manager',
+          params: { sessionId },
+        })}
+        onPauseSession={(sessionId) => void ctx.pauseSession(MANAGER_WORKSPACE_ID, sessionId)}
+        onResumeSession={(sessionId, surface) => {
+          if (surface === 'webpi') {
+            void ctx.openWebPiSession(MANAGER_WORKSPACE_ID, sessionId)
+          } else {
+            void ctx.resumeSession(MANAGER_WORKSPACE_ID, sessionId)
+          }
+        }}
+        onDeleteSession={(sessionId) => ctx.requestDeleteSession(MANAGER_WORKSPACE_ID, sessionId)}
+      />
 
       <div className="px-3 pb-1 pt-1.5">
         <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted/60">
@@ -222,6 +226,98 @@ export function ChatWorkspaceSection(): ReactElement | null {
         />
       )}
     </>
+  )
+}
+
+interface ManagerWorkspaceRowProps {
+  manager: ManagerWorkspaceSnapshot | null
+  loaded: boolean
+  isFocused: boolean
+  activeSessionId: string | null
+  onOpen: () => void
+  onOpenSession: (sessionId: string) => void
+  onPauseSession: (sessionId: string) => void
+  onResumeSession: (sessionId: string, surface: SessionRecord['surface']) => void
+  onDeleteSession: (sessionId: string) => void
+}
+
+/** Launcher-owned Manager conversations belong beside ordinary Chat history,
+ * but remain outside the business Workspace tree and registry. */
+function ManagerWorkspaceRow(props: ManagerWorkspaceRowProps): ReactElement {
+  const { t } = useTranslation()
+  const [expanded, setExpanded] = useState(true)
+  const sessions = useMemo(
+    () => orderSessionsForSidebar(props.manager?.sessions ?? []),
+    [props.manager?.sessions],
+  )
+  const sessionListRef = useReorderMotion<HTMLDivElement>(
+    sessions.map((session) => session.id),
+  )
+  const hasRunning = sessions.some((session) => session.state === 'running')
+
+  return (
+    <div className="px-2 pb-1 pt-1">
+      <div
+        className={`group relative flex w-full items-center overflow-hidden rounded-lg border transition-colors ${
+          props.isFocused
+            ? 'border-accent/35 bg-accent/10 text-text'
+            : 'border-border/70 bg-bg-secondary/45 text-text hover:border-accent/25 hover:bg-bg-tertiary'
+        }`}
+      >
+        <span className="pointer-events-none absolute inset-y-0 right-0 w-20 bg-gradient-to-l from-accent/[0.07] to-transparent" />
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          disabled={sessions.length === 0}
+          className="oa-icon-action relative ml-1 flex h-8 w-6 shrink-0 items-center justify-center rounded text-text-muted/55 hover:text-text disabled:cursor-default disabled:opacity-30"
+          aria-label={expanded ? t('chat.collapseSessions') : t('chat.expandSessions')}
+          title={expanded ? t('chat.collapseSessions') : t('chat.expandSessions')}
+        >
+          {expanded
+            ? <ChevronDown size={13} strokeWidth={2.25} />
+            : <ChevronRight size={13} strokeWidth={2.25} />}
+        </button>
+        <button
+          type="button"
+          onClick={props.onOpen}
+          aria-label={t('workspaceManager.title')}
+          className="oa-pressable relative flex min-w-0 flex-1 items-center gap-2.5 py-2.5 pl-1 pr-3 text-left"
+        >
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent transition-transform group-hover:scale-105">
+            <Network size={14} strokeWidth={2.1} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[12px] font-semibold">{t('workspaceManager.title')}</span>
+            <span className="mt-0.5 block truncate text-[10px] text-text-muted">{t('workspaceManager.sidebarDescription')}</span>
+          </span>
+          {!props.loaded ? (
+            <span aria-hidden className="h-2.5 w-4 animate-pulse rounded bg-text-muted/15" />
+          ) : sessions.length > 0 ? (
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-[10px] tabular-nums text-text-muted/55">
+              <span className={`h-1.5 w-1.5 rounded-full ${hasRunning ? 'bg-green' : 'bg-text-muted/35'}`} />
+              {sessions.length}
+            </span>
+          ) : null}
+        </button>
+      </div>
+
+      {expanded && sessions.length > 0 && (
+        <div ref={sessionListRef} className="oa-disclosure-enter ml-[18px] border-l border-border/50">
+          {sessions.map((session) => (
+            <SessionRow
+              key={session.id}
+              reorderId={session.id}
+              session={session}
+              isActive={props.activeSessionId === session.id}
+              onSelect={() => props.onOpenSession(session.id)}
+              onPause={() => props.onPauseSession(session.id)}
+              onResume={() => props.onResumeSession(session.id, session.surface)}
+              onDelete={() => props.onDeleteSession(session.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

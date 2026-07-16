@@ -249,9 +249,13 @@ Before a release becomes visible, the installer:
    install files with SHA-256 and uses the first 16 hex characters as its
    content identity.
 
-That metadata is also returned by `openalice version --json`. Managed
-`openalice remote` uses it to invoke the same ordinary installer source and
-selector on a remote host. `remote` has no independent branch/version option.
+That metadata is returned by `openalice version --json` together with the
+16-character identity derived from the immutable installed release directory.
+Managed `openalice remote` compares both provenance and content identity before
+deciding that a remote CLI matches, then invokes the same ordinary installer
+source and selector when it does not. This catches changed payload bytes even
+when the CLI semantic version and branch name are unchanged. `remote` has no
+independent branch/version option.
 
 The resulting directory is:
 
@@ -302,13 +306,15 @@ With the default installer and Runtime roots:
 │   ├── dev-<content-id>/   # only after an explicit --branch dev install
 │   └── <older-ref-or-content>/
 ├── .cli-install.lock/       # present only while an installer owns it
+├── sources/                 # selector-specific managed remote checkouts
 ├── data/                    # application state, not installer debris
 ├── workspaces/              # user work, not installer debris
 ├── provider-keys.json       # sensitive user state
 └── sealing.key              # sensitive machine-bound key
 ```
 
-The installer root and Runtime `OPENALICE_HOME` independently default to
+`sources/` is created by approved managed-remote orchestration, not by the
+installer itself. The installer root and Runtime `OPENALICE_HOME` independently default to
 `~/.openalice`. The installer does not read an `OPENALICE_HOME` override, and
 `openalice start` does not infer Runtime home from the CLI's install location.
 Either override may therefore diverge intentionally. Their default co-location
@@ -383,12 +389,16 @@ Environment inputs:
 | `OPENALICE_PI_RELEASE_BASE_URL` | Override the pinned Pi release-asset base for installer tests |
 | `OPENALICE_PI_SOURCE_DIR` | Read the exact Pi manifest/lock assets from a local fixture |
 | `OPENALICE_NPM_BIN` | Use a single alternate npm executable in installer tests |
+| `OPENALICE_INSTALL_CONTEXT` | Internal managed-remote context; returns control without local checkout/start guidance |
 | `NO_COLOR` | Disable installer color output |
 | `HOME`, `SHELL`, `PATH`, `TERM` | Standard environment used for paths, profile detection, conflicts, and color |
 
-The three Pi overrides, `OPENALICE_INSTALL_URL`, and
-`OPENALICE_INSTALL_BASE_URL` are distributor/test seams, not user-facing
-branch selectors. The same pinned SHA-256 checks still apply to local Pi
+The Pi overrides, `OPENALICE_INSTALL_URL`, and `OPENALICE_INSTALL_BASE_URL`
+are distributor/test seams, not user-facing branch selectors. Managed remote
+sets `OPENALICE_INSTALL_CONTEXT=remote` only after the user approves its outer
+plan; the installer still owns its normal transaction and prints a
+remote-appropriate heading, then returns instead of suggesting a second manual
+clone or local start. The same pinned SHA-256 checks still apply to local Pi
 assets. A real mirror design must define equivalent authenticity and version
 semantics before becoming public API.
 
@@ -468,6 +478,8 @@ It verifies:
   the resulting commands;
 - installed `server status --json` execution and inclusion of every reachable
   Server/remote module;
+- installed content identity in `openalice version --json`, so same-version
+  remote payload drift is detectable;
 - runnable OpenAlice/Pi shell and CMD launchers plus managed-Pi env injection;
 - idempotent managed PATH configuration;
 - identical-release reuse;
@@ -555,6 +567,7 @@ Docker installer smoke remains a required manual gate under
 | Pi asset SHA-256 check fails | Stop. The pinned release metadata and downloaded asset disagree; do not bypass the check |
 | A `.damaged.<pid>` directory appears | A content-addressed release no longer matched its identity; preserve it for diagnosis while the validated replacement becomes active |
 | CLI installs but localhost startup fails | Installation succeeded; continue with [[docs/local-runtime.md]] and Guardian/runtime diagnostics |
+| Remote install succeeds and then prints no clone command | Managed remote set the installer context and is continuing with its already-approved source plan |
 | Native PowerShell/CMD bootstrap is unavailable | Use the complete Electron installer, WSL, or Git Bash until a reviewed native bootstrap exists |
 
 ## Design Decisions and Next Steps

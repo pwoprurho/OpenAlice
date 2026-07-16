@@ -181,6 +181,8 @@ export interface TerminalViewProps {
    * tear down the WebSocket — updates apply on the next keystroke.
    */
   readonly keyMap?: KeyMap;
+  /** OpenTUI currently corrupts to an all-black canvas in xterm's WebGL addon. */
+  readonly renderer?: 'auto' | 'dom';
   /**
    * Fires once per WS lifetime when the server's `attached` message lands.
    */
@@ -266,6 +268,16 @@ export function TerminalView(props: TerminalViewProps): ReactElement {
       scrollback: 10_000,
       macOptionIsMeta: true,
       convertEol: false,
+      // OpenCode/OpenTUI requests the text-area pixel geometry (CSI 14 t)
+      // before completing a redraw. xterm.js gates these reports off by
+      // default because some window queries may expose host information. These
+      // three answers contain only this terminal canvas/cell geometry and are
+      // required for browser-hosted TUIs to leave their blank handshake frame.
+      windowOptions: {
+        getWinSizePixels: true,
+        getCellSizePixels: true,
+        getWinSizeChars: true,
+      },
     });
     termRef.current = term;
 
@@ -557,7 +569,7 @@ export function TerminalView(props: TerminalViewProps): ReactElement {
       // context loss, or when the `openalice.terminal.renderer` escape hatch
       // forces 'dom' (GPU-pipeline corruption can't be auto-detected — see
       // renderer.ts).
-      webgl = attachWebglRenderer(term);
+      webgl = attachWebglRenderer(term, props.renderer === 'dom');
       handleResize();
       resizeObserver = new ResizeObserver(handleResize);
       resizeObserver.observe(container);
@@ -587,7 +599,7 @@ export function TerminalView(props: TerminalViewProps): ReactElement {
       term.dispose();
       termRef.current = null;
     };
-  }, [wsId, sessionId, wsUrl]);
+  }, [wsId, sessionId, wsUrl, props.renderer]);
 
   return (
     <div className="terminal-shell">

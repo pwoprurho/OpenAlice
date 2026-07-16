@@ -168,6 +168,31 @@ describe('PersistentSession backpressure / socket-drop deadlock', () => {
 
     session.dispose('test');
   });
+
+  it('accepts terminal capability replies triggered synchronously by replay', () => {
+    const session = new PersistentSession(makeOptions({ command: ['opencode'] }));
+    const terminalQuery = Buffer.from('\u001b[6n');
+    const terminalReply = Buffer.from('\u001b[24;80R');
+    term.emitData(terminalQuery);
+
+    const ws = new FakeWs();
+    ws.send.mockImplementation((data: unknown, optsOrCb?: unknown, cb?: unknown) => {
+      const callback = typeof optsOrCb === 'function' ? optsOrCb : cb;
+      if (Buffer.isBuffer(data) && data.equals(terminalQuery)) {
+        // xterm replies while processing the replay frame, before attach()
+        // has returned to the caller.
+        ws.emit('message', terminalReply, true);
+      }
+      if (typeof callback === 'function') callback(undefined);
+    });
+
+    session.attach(ws as never, 80, 24, undefined);
+
+    expect(term.write).toHaveBeenCalledOnce();
+    expect(term.write).toHaveBeenCalledWith(terminalReply);
+
+    session.dispose('test');
+  });
 });
 
 describe('PersistentSession controller lease', () => {

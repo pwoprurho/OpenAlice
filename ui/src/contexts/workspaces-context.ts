@@ -2,6 +2,8 @@ import { createContext, useContext } from 'react'
 import type {
   AgentId,
   AgentInfo,
+  ManagerQuickStartResult,
+  ManagerWorkspaceSnapshot,
   SpawnOptions,
   TemplateInfo,
   Workspace,
@@ -17,11 +19,21 @@ export interface WorkspacesContextValue {
   readonly defaultAgent: string | null
   readonly issueDefaultAgent: string | null
   readonly listError: string | null
+  /** Launcher-owned Manager state; deliberately separate from business Workspaces. */
+  readonly workspaceManager: ManagerWorkspaceSnapshot | null
+  readonly workspaceManagerLoaded: boolean
+  readonly workspaceManagerError: string | null
   /** True once the first workspaces-list fetch has resolved. */
   readonly hasLoaded: boolean
   /** True once the templates fetch has settled (success OR failure). */
   readonly templatesLoaded: boolean
   refresh(): void
+  refreshWorkspaceManager(): Promise<void>
+  quickStartWorkspaceManager(
+    prompt: string,
+    agent: string,
+    credentialSlug?: string,
+  ): Promise<ManagerQuickStartResult>
   spawn(wsId: string, opts?: SpawnOpts, source?: WorkspaceSource): Promise<void>
   openHeadlessRun(
     wsId: string,

@@ -64,8 +64,11 @@ const RESPAWN_WINDOW_LIMIT = 3;
  *
  * The session owns the child process, a `ReplayBuffer` of recent output, and
  * (at most one at a time, for v1) an attached WebSocket. On `attach`, any
- * prior client is kicked, the replay tail is shipped as a binary frame, then
- * an `attached` text frame tells the client where the seq starts.
+ * prior client is kicked, the replacement socket starts listening, the replay
+ * tail is shipped as a binary frame, then an `attached` text frame tells the
+ * client where the seq starts. Listening before replay is load-bearing: a
+ * terminal emulator can synchronously answer capability queries in replayed
+ * TUI startup bytes (OpenCode does this), and those replies are PTY stdin.
  *
  * Output flow:
  *   pty.onData → buffer.append(buf) → if ws is attached, ws.send(buf, binary)
@@ -354,6 +357,12 @@ export class PersistentSession {
     this.resumePty();
     this.resize(cols, rows);
 
+    // Wire stdin before replay. xterm may synchronously answer terminal
+    // capability/status queries while consuming the replay bytes. If the
+    // message handler is registered afterwards, those answers are dropped and
+    // query-driven TUIs such as OpenCode remain alive behind a blank screen.
+    this.wireWs(ws);
+
     // Compute replay window. Cold attach (since=undefined) replays the full
     // buffer — without that, a fresh browser tab on a workspace where the
     // agent is already idle would just see a black void instead of the prompt
@@ -379,7 +388,6 @@ export class PersistentSession {
     ws.send(JSON.stringify(attached));
     this.lastCursorSeq = slice.tailSeq;
 
-    this.wireWs(ws);
     this.startCursorTimer();
 
     this.log.event('session.attached', {

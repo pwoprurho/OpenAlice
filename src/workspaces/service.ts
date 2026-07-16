@@ -419,14 +419,10 @@ export function resumeFromRecord(
 export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions): Promise<WorkspaceService> {
   const config = loadConfig({ webPort: opts.webPort });
   const inboxStore = opts.inboxStore;
-  const managerWorkspace = createManagerWorkspaceMeta(config.launcherRoot);
-  await mkdir(managerWorkspace.dir, { recursive: true });
   const registry = await WorkspaceRegistry.load(
     `${config.launcherRoot}/workspaces.json`,
     launcherLogger.child({ scope: 'registry' }),
   );
-  const resolveRuntimeWorkspace = (workspaceId: string): WorkspaceMeta | undefined =>
-    workspaceId === managerWorkspace.id ? managerWorkspace : registry.get(workspaceId);
   const catalog = await WorkspaceCatalog.load(
     join(config.launcherRoot, 'state', 'workspace-catalog.json'),
     registry.list(),
@@ -617,6 +613,13 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
   adapters.register(opencodeAdapter);
   adapters.register(piAdapter);
   adapters.register(shellAdapter);
+  const managerWorkspace = createManagerWorkspaceMeta(
+    config.launcherRoot,
+    adapters.list().filter(isAgentRuntime).map((adapter) => adapter.id),
+  );
+  await mkdir(managerWorkspace.dir, { recursive: true });
+  const resolveRuntimeWorkspace = (workspaceId: string): WorkspaceMeta | undefined =>
+    workspaceId === managerWorkspace.id ? managerWorkspace : registry.get(workspaceId);
   const runtimeReadinessCache = new Map<string, AgentRuntimeReadinessRow>();
 
   const creator = new WorkspaceCreator({

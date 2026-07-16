@@ -737,7 +737,8 @@ export interface ManagerWorkspaceSnapshot {
 export interface ManagerQuickStartResult {
   readonly manager: ManagerWorkspaceSnapshot
   readonly session: SessionRecord
-  readonly snapshot: WebPiSnapshot
+  /** Pi opens in WebPi; native TUI runtimes return no structured snapshot. */
+  readonly snapshot: WebPiSnapshot | null
 }
 
 export async function getWorkspaceManager(): Promise<ManagerWorkspaceSnapshot> {
@@ -749,15 +750,16 @@ export async function getWorkspaceManager(): Promise<ManagerWorkspaceSnapshot> {
 
 export async function quickStartWorkspaceManager(
   prompt: string,
+  agent: string,
   credentialSlug?: string,
 ): Promise<ManagerQuickStartResult> {
   const res = await fetch('/api/workspaces/manager/quick-start', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ prompt, ...(credentialSlug ? { credentialSlug } : {}) }),
+    body: JSON.stringify({ prompt, agent, ...(credentialSlug ? { credentialSlug } : {}) }),
   })
   const body = (await res.json().catch(() => null)) as (ManagerQuickStartResult & { message?: string; error?: string }) | null
-  if (!res.ok || !body?.manager || !body.session || !body.snapshot) {
+  if (!res.ok || !body?.manager || !body.session || !('snapshot' in body)) {
     throw new Error(body?.message ?? body?.error ?? `manager start failed: ${res.status}`)
   }
   return body
