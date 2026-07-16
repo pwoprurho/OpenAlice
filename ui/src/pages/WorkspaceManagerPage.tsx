@@ -161,7 +161,7 @@ export function WorkspaceManagerPage({ spec }: { spec: ManagerSpec }) {
             <Bot size={11} /> {runtimeLabel(session.agent, agents)} · {session.surface === 'webpi' ? 'WebPi' : 'TUI'}
           </span>
         </header>
-        <div className="min-h-0 flex-1 p-2 md:p-3">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-2 md:p-3">
           {session.state === 'paused' ? (
             <ResumeCta
               record={session}
